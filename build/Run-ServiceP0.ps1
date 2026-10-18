@@ -103,7 +103,17 @@ finally {
         Invoke-Sc @('delete',$name)
     }
     if ($thumbprint) { & $certExe delete $thumbprint; if ($LASTEXITCODE -ne 0) { Write-Warning 'Spike certificate cleanup failed' } }
-    if ($userCreated) { Remove-LocalUser -Name $userName }
+    if ($userCreated) {
+        $profile = Get-CimInstance Win32_UserProfile -Filter "SID='$userSid'"
+        if ($profile) {
+            $expectedProfile = [IO.Path]::GetFullPath((Join-Path "$env:SystemDrive/Users" $userName))
+            if ([IO.Path]::GetFullPath($profile.LocalPath) -ne $expectedProfile -or $profile.Loaded) {
+                throw 'Refusing to remove an unexpected or still-loaded test user profile'
+            }
+            $profile | Remove-CimInstance
+        }
+        Remove-LocalUser -Name $userName
+    }
     $resolved = [IO.Path]::GetFullPath($workspace)
     $parent = [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\') + '\'
     if (-not $resolved.StartsWith($parent,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notmatch '^PeerSync-P0-[0-9a-f]{8}$') { throw 'Unexpected cleanup path' }
