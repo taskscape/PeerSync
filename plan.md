@@ -550,8 +550,9 @@ Goal: a building, testing repo, plus answers to every question that could change
 - [x] **P0.1.1 Create the repo and solution** (repo root) (#1)
   - Done when: all 11 projects and the test projects from 3.1 exist, `Directory.Build.props` and `Directory.Packages.props` are in place, and `dotnet build` passes with warnings as errors.
   - Ref: Solution structure and tech stack.
-- [x] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) (#1)
+- [ ] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) [WIP @Codex 2026-10-18]
   - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
+  - Reopened after post-merge x64 jobs exceeded the 15-minute budget during cleanup. The required 600-second fuzz smoke is moving to its own parallel job; no required test is being removed. Await green CI and merge of the repair before ticking.
 - [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [BLOCKED: code-signing certificate not provided, since 2026-10-18]
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
 - [x] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) (#1)
