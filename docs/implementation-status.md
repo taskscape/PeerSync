@@ -2,8 +2,9 @@
 
 Current phase: P0. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
-Eight tasks and the performance/certificate subchecks are verified. The CI
-budget task was reopened after post-merge timeouts; its repair is in PR #4. The
+Nine tasks and the performance/certificate subchecks are verified. The CI
+budget repair is merged through [PR #4](https://github.com/taskscape/PeerSync/pull/4),
+with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39144766855). The
 remaining LAN/NAT and signing items are explicitly blocked; Gate P0 has not
 passed. See [the verification report](verification/P0-2026-10-18.md).
 
@@ -32,8 +33,11 @@ Server 2025 CI job passed all native probes and service/security checks on
 build 26100. The Server 2022 service readiness/port repair also passed in its
 follow-up VM job. Final push and PR CI are now green: x64 verification took
 694.36 seconds and completed 68,810 seeds over 600 seconds with no crashes.
-The complete push workflow took 14m18s. See the verification report and spike
-reports for exact scope and historical source/run evidence.
+The complete push workflow took 14m18s. Later post-merge jobs exposed cleanup
+timeouts, now repaired by separating fuzz into its own required parallel job.
+The repaired PR workflow passed in 11m32s; its fuzz job completed 129,037 cases
+over 600 seconds with zero crashes. See the verification and spike reports for
+the exact scope of each historical run.
 
 Open prerequisites:
 
