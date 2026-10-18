@@ -11,7 +11,7 @@ using PeerSync.Spikes;
 
 if (args.Length < 3 || args[0] is not ("server" or "client"))
 {
-    Console.Error.WriteLine("server <pipeName> <allowedSID> [--service] | client <pipeName> <expectedOwnerSID>");
+    Console.Error.WriteLine("server <pipeName> <allowedSID> [readiness-file] | client <pipeName> <expectedOwnerSID>");
     return 2;
 }
 string pipeName = args[1];

@@ -553,8 +553,9 @@ Goal: a building, testing repo, plus answers to every question that could change
   - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
 - [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [WIP @Codex 2026-10-18] [BLOCKED: code-signing certificate not provided, since 2026-10-18]
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
-- [ ] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) [WIP @Codex 2026-10-18] [BLOCKED: second and third reference PCs not available, since 2026-10-18]
+- [ ] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) [WIP @Codex 2026-10-18]
   - Done when: the CPU, disk and network of the two to three test PCs are written down, so all benchmarks are comparable.
+  - Recorded: development PC plus version-stamped Server 2022/2025 hosted VM snapshots; VM adapter link rates are not measured LAN throughput. Await merge/green CI before ticking.
 
 New P0 foundation requirement from the user (2026-10-18):
 
@@ -1595,10 +1596,10 @@ public static async ValueTask ThrottleAsync(RateLimiter? limiter, int bytes, Can
 - [ ] **P2.5.5 Network change and resume** (`PeerSync.Service/Events/`)
   - Done when: after sleep and resume, or a Wi-Fi switch, peers reconnect and folders rescan within 30 s.
 
-### 8.6 Code: service host (P2.5.1)
-
 - [ ] **P2.5.6 Deployment diagnostics and bundle command** (`PeerSync.Service/Diagnostics/`, `PeerSync.Cli/Diagnostics/`)
   - Done when: debug events cover service startup/shutdown, configuration recovery, certificate loading, discovery/dial/fallback/retry, folder auth/approval, index/block verification, apply/defer/archive and filesystem failures, using P0.1.5's safe schema. Session IDs join both endpoints' logs. `psp diagnostics` produces a sanitized bundle; the runbook reproduces a two-PC failure and identifies its cause. Keys, FolderIds, file contents and raw records are absent.
+
+### 8.6 Code: service host (P2.5.1)
 
 **Tricky:**
 
@@ -1778,10 +1779,10 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
 - [ ] **P4.1.6 `installer/PeerSync.Rendezvous.iss`**
   - Done when: it installs the service under `NT SERVICE\PeerSyncRendezvous`, adds firewall rules for TCP and UDP 99, and upgrades in place.
 
-### 10.1 Code: Kestrel on port 99 (P4.1.1)
-
 - [ ] **P4.1.7 Central deployment diagnostics** (`PeerSync.Rendezvous/Diagnostics/`, `docs/diagnostics.md`)
   - Done when: server debug events correlate authentication, presence, introductions, relay joins/leaves, quota/timeout and transport errors with client sessions; health and environment checks distinguish TCP/UDP failures. Central and second-PC bundles diagnose a forced relay failure on LAN and WAN. No FolderIds, keys or plaintext are logged; IP retention stays at most 24 hours.
+
+### 10.1 Code: Kestrel on port 99 (P4.1.1)
 
 ```csharp
 // src/PeerSync.Rendezvous/Program.cs

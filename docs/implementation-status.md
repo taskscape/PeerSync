@@ -20,16 +20,23 @@ projects, eight unit cases, IPv4/IPv6 1 GiB QUIC, exact HTTP/2 and HTTP/3 mutual
 TLS on port 99, standard-user/virtual-account pipe and private-key checks,
 100,000 watcher operations with scan recovery, and collector filtering under
 Polish and English locales. Native hashing reached 1.051 decimal GB/s on the
-documented warm-cache 10 GiB corpus. The full fuzz/CI/publish runs have their
-own evidence and must not be inferred from this list.
+documented warm-cache 10 GiB corpus.
+
+The full local runner completed in 736.65 seconds, including 225,275 boundary
+fuzz seeds over 600 seconds with zero crashes and x64 publishing. Arm64 probes
+also self-contained published; Arm64 execution is unverified. A separate
+Server 2025 CI job passed all native probes and service/security checks on
+build 26100. The Server 2022 service readiness/port repair also passed in its
+follow-up VM job. Final branch CI is pending. See the spike reports for exact
+historical source/run evidence; these results do not claim all current CI is green.
 
 Open prerequisites:
 
 - [Physical hardware/LAN/NAT evidence](https://github.com/taskscape/PeerSync/issues/2)
-  for P0.1.4, P0.2.1 and P0.2.2. All three source-port reuse options failed
+  for P0.2.1 and P0.2.2. All three source-port reuse options failed
   locally; relay for hard NATs is provisional.
 - [Signing identity](https://github.com/taskscape/PeerSync/issues/3) for P0.1.3.
-- The version-stamped Server VM and final CI results are pending validation.
+- Final green CI and merge are pending.
 
 P1-P5 have not started because section 0.1 of plan.md forbids starting a phase
 before the previous gate passes. The production engine, client service,
