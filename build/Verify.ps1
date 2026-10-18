@@ -14,19 +14,10 @@ try {
     & dotnet build PeerSync.slnx -c Release -p:PlatformTarget=$architecture --no-restore -bl:"artifacts/build-$Runtime.binlog"
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     if (-not $SkipRuntimeChecks) {
-        & "$PSScriptRoot/Test-Diagnostics.ps1"
-        # P0 has tests only in these projects. Empty future-phase projects are not counted as validation.
-        foreach ($name in @('Core','Crypto')) {
-            & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
-            if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
-        }
-        # Build without RID for scripts whose process paths deliberately use the regular output directory.
-        & dotnet build PeerSync.slnx -c Release --no-restore
-        if ($LASTEXITCODE -ne 0) { throw 'Probe build failed' }
-        & "$PSScriptRoot/Run-P0.ps1"
-        # The fuzz executable depends on Crypto/Protocol; publishing the probes only
-        # builds Core/SpikeSupport. Run these independent operations concurrently
-        # so the ten-minute fuzz does not add to publish time.
+        # Start the required ten-minute fuzz as soon as its immutable build output
+        # exists. Tests (--no-build) and native probes only read their build output;
+        # publishing Core/SpikeSupport does not build the fuzz's Crypto/Protocol
+        # dependencies. No rebuild may run against the active fuzz output directory.
         $fuzzInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Fuzz.exe'))
         $fuzzInfo.UseShellExecute=$false; $fuzzInfo.CreateNoWindow=$true
         $fuzzInfo.RedirectStandardOutput=$true; $fuzzInfo.RedirectStandardError=$true
@@ -36,6 +27,13 @@ try {
         $fuzzClock = [Diagnostics.Stopwatch]::StartNew()
         $fuzzOutput = $fuzz.StandardOutput.ReadToEndAsync()
         $fuzzError = $fuzz.StandardError.ReadToEndAsync()
+        & "$PSScriptRoot/Test-Diagnostics.ps1"
+        # P0 has tests only in these projects. Empty future-phase projects are not counted as validation.
+        foreach ($name in @('Core','Crypto')) {
+            & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
+            if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
+        }
+        & "$PSScriptRoot/Run-P0.ps1"
     }
     & "$PSScriptRoot/Publish.ps1" -Runtime $Runtime
     if ($fuzz) {
