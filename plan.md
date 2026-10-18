@@ -55,7 +55,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
-| P0 Foundations and spikes | 1-3 | Local/VM work merged; LAN/NAT and signing blocked | - |
+| P0 Foundations and spikes | 1-3 | Local/VM work merged; two-PC overlay/public probes passed; physical LAN/NAT and CI signing pending | - |
 | P1 Local sync engine | 4-8 | Not started | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
@@ -73,6 +73,7 @@ Newest first. Every row is also reflected in the design doc.
 | --- | --- | --- |
 | 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
 | 2026-10-18 | User requested deployment diagnostics: opt-in structured events, shared session correlation, native errors, safe log bundles, and a server/second-PC runbook. Windows-version and NAT evidence must be recorded separately; current Docker runs Linux containers. | Logging, metrics and upgrades |
+| 2026-10-18 | Two-PC troubleshooting: separate HRESULT/native/QUIC error codes, record phase/bytes/progress, reject metadata-only diagnostic bundles, and give the P0 transfer its own timeout after authentication. Existing Tailscale evidence remains separate from physical LAN and native NAT validation. | Logging, metrics and upgrades |
 | 2026-10-18 | P0.2.4: use `Blake3.Native` 3.0.2; a 10 GiB pass reached 1.051 GB/s after buffer-copy fixes. Keep the 1 GB/s reference target; other hardware remains unverified. | Cryptography; Testing strategy |
 | 2026-10-18 | P0.2.2 provisional: same-port QUIC, native MsQuic shared binding and TCP reuse failed on the development PC. Keep reachable-endpoint QUIC/TCP and relay fallback for hard NATs; coordinated punching remains blocked on the physical NAT matrix. | NAT traversal |
 | 2026-10-18 | Folder proofs put the sender first. DeviceIds come from the TLS certificates, never from `Hello`. | Protocol specification: Connection and handshake |
@@ -553,8 +554,9 @@ Goal: a building, testing repo, plus answers to every question that could change
 - [x] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) (#1, #4)
   - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
   - Repaired and merged in (#4): the unchanged required 600-second fuzz smoke runs in its own parallel job, with no check removed. [Green CI](https://github.com/taskscape/PeerSync/actions/runs/39144766855) completed in 11m32s, including uploads/cleanup; both architectures and Server variants passed.
-- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [BLOCKED: code-signing certificate not provided, since 2026-10-18]
+- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [WIP @Codex 2026-10-19]
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
+  - Local update (2026-10-18): user-created development certificate signed the self-contained QuicBasics EXE with a SHA-256 RFC3161 timestamp. SignTool verification and PowerShell Authenticode status passed. SDK tool discovery is repaired locally; CI signing is still pending, so this task remains unchecked. Publicly trusted release signing remains separate.
 - [x] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) (#1)
   - Done when: the CPU, disk and network of the two to three test PCs are written down, so all benchmarks are comparable.
   - Recorded: development PC plus version-stamped Server 2022/2025 hosted VM snapshots; VM adapter link rates are not measured LAN throughput. Merged in (#1); green CI is recorded in docs/verification/P0-2026-10-18.md.
@@ -563,6 +565,7 @@ New P0 foundation requirement from the user (2026-10-18):
 
 - [x] **P0.1.5 Deployment diagnostic foundation** (`PeerSync.Core/Diagnostics/`, `build/Collect-Diagnostics.ps1`, `docs/diagnostics.md`) (#1)
   - Done when: structured opt-in debug events have shared session IDs, UTC/run/process metadata, transport/timings/errors; log size and address retention are bounded; collection excludes settings, databases, keys and dumps; rotation, filtering and correlation are verified; server and second-PC probe instructions exist.
+  - Follow-up repair, locally verified (not merged): detailed QUIC failure stages/codes/progress, independent transfer timeout, and collector rejection of empty debug bundles. See `docs/verification/P0-two-machine-troubleshooting-2026-10-18.md`; this does not close P0.2.1 or P0.2.2.
   - Production service hooks are tracked by P2.5.6 and central hooks by P4.1.7.
 
 ### P0.2 Spikes
@@ -571,6 +574,7 @@ Each spike ends with a write-up in `docs/spikes/` and a decision row in section 
 
 - [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`) [BLOCKED: physical second-PC LAN measurement not available, since 2026-10-18]
   - Done when: two processes exchange 1 GB over one QUIC connection, ALPN `psp/1`, with both certificates required and the DeviceId read from `RemoteCertificate` on both sides. Throughput on 1 Gbit LAN is recorded.
+  - 2026-10-19: two physical PCs on different LANs passed 1 GiB over Tailscale in 220.78 s at 4.64 MiB/s. Receiver journal confirms matching session and bytes. [Evidence](docs/verification/P0-cross-network-2026-10-19.md). This is overlay throughput; the physical LAN criterion remains open.
   - Code: see 6.1.
 - [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`) [BLOCKED: physical LAN and home-NAT or CGNAT matrix not available, since 2026-10-18]
   - Question: can a `QuicConnection` use `LocalEndPoint` = the `QuicListener`'s port, so both directions share one NAT mapping?
@@ -590,7 +594,7 @@ Each spike ends with a write-up in `docs/spikes/` and a decision row in section 
 - [x] **P0.2.6 Kestrel on port 99 with HTTP/2, HTTP/3 and client certificates** (`spikes/Rendezvous99`, on a Windows Server 2025 VM) (#1)
   - Done when: a gRPC bidirectional stream works over HTTP/2 (TCP 99) and HTTP/3 (UDP 99), with the client's self-signed certificate visible on the server for both.
   - If HTTP/3 can't carry client certificates, the fallback is logged: device proof inside the session stream (sign the server nonce with the device key).
-  - Local and GitHub-hosted `windows-2025`/`windows-2022` VM probes passed. Version-stamped green CI is recorded in docs/verification/P0-2026-10-18.md. Outside-network/provider UDP 99 remains a separate P4 deployment check.
+  - Local and GitHub-hosted `windows-2025`/`windows-2022` VM probes passed. Version-stamped green CI is recorded in docs/verification/P0-2026-10-18.md. On 2026-10-19, the user-deployed public Server probe also passed exact HTTP/2 and HTTP/3, mutual TLS, device identity and three bidirectional messages; see [external evidence](docs/verification/P0-cross-network-2026-10-19.md). Production P4 deployment remains separate.
 - [x] **P0.2.7 FileSystemWatcher under stress** (`spikes/WatcherStress`) (#1)
   - Done when: a burst of 100,000 creates and renames shows whether events are lost, the buffer-overflow behaviour is documented, and the rescan fallback is confirmed.
 
