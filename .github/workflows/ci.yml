@@ -1,0 +1,63 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [win-x64, win-arm64]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Build, test and publish
+        shell: pwsh
+        run: |
+          $skip = '${{ matrix.runtime }}' -eq 'win-arm64'
+          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: evidence-${{ matrix.runtime }}
+          path: |
+            artifacts/*.binlog
+            artifacts/verification-*.json
+            artifacts/tests/
+            artifacts/p0/
+            artifacts/fuzz/
+      - name: Upload P0 probe bundle (not the product)
+        uses: actions/upload-artifact@v7
+        with:
+          name: PeerSync-P0-probes-${{ matrix.runtime }}
+          path: artifacts/publish/${{ matrix.runtime }}/
+  service-security:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Virtual-account and standard-user security checks
+        shell: pwsh
+        run: ./build/Run-ServiceP0.ps1
+      - name: Upload service security evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: service-security-evidence
+          path: artifacts/p0-services/

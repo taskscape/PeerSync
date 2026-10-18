@@ -1,0 +1,41 @@
+<Solution>
+  <Folder Name="/spikes/">
+    <Project Path="spikes/ControlPipe/ControlPipe.csproj" />
+    <Project Path="spikes/DeviceCert/DeviceCert.csproj" />
+    <Project Path="spikes/PeerSync.SpikeSupport/PeerSync.SpikeSupport.csproj" />
+    <Project Path="spikes/QuicBasics/QuicBasics.csproj" />
+    <Project Path="spikes/QuicPunch/QuicPunch.csproj" />
+    <Project Path="spikes/Rendezvous99/Rendezvous99.csproj" />
+    <Project Path="spikes/WatcherStress/WatcherStress.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/PeerSync.App/PeerSync.App.csproj" />
+    <Project Path="src/PeerSync.Cli/PeerSync.Cli.csproj" />
+    <Project Path="src/PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
+    <Project Path="src/PeerSync.Core/PeerSync.Core.csproj" />
+    <Project Path="src/PeerSync.Crypto/PeerSync.Crypto.csproj" />
+    <Project Path="src/PeerSync.Engine/PeerSync.Engine.csproj" />
+    <Project Path="src/PeerSync.Net/PeerSync.Net.csproj" />
+    <Project Path="src/PeerSync.Protocol/PeerSync.Protocol.csproj" />
+    <Project Path="src/PeerSync.Rendezvous/PeerSync.Rendezvous.csproj" />
+    <Project Path="src/PeerSync.Service/PeerSync.Service.csproj" />
+    <Project Path="src/PeerSync.Storage/PeerSync.Storage.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PeerSync.App.Tests/PeerSync.App.Tests.csproj" />
+    <Project Path="tests/PeerSync.Benchmarks/PeerSync.Benchmarks.csproj" />
+    <Project Path="tests/PeerSync.Cli.Tests/PeerSync.Cli.Tests.csproj" />
+    <Project Path="tests/PeerSync.Control.Contracts.Tests/PeerSync.Control.Contracts.Tests.csproj" />
+    <Project Path="tests/PeerSync.Core.Tests/PeerSync.Core.Tests.csproj" />
+    <Project Path="tests/PeerSync.Crypto.Tests/PeerSync.Crypto.Tests.csproj" />
+    <Project Path="tests/PeerSync.Engine.Tests/PeerSync.Engine.Tests.csproj" />
+    <Project Path="tests/PeerSync.Fuzz/PeerSync.Fuzz.csproj" />
+    <Project Path="tests/PeerSync.IntegrationTests/PeerSync.IntegrationTests.csproj" />
+    <Project Path="tests/PeerSync.Net.Tests/PeerSync.Net.Tests.csproj" />
+    <Project Path="tests/PeerSync.Protocol.Tests/PeerSync.Protocol.Tests.csproj" />
+    <Project Path="tests/PeerSync.Rendezvous.Tests/PeerSync.Rendezvous.Tests.csproj" />
+    <Project Path="tests/PeerSync.Service.Tests/PeerSync.Service.Tests.csproj" />
+    <Project Path="tests/PeerSync.Simulation/PeerSync.Simulation.csproj" />
+    <Project Path="tests/PeerSync.Storage.Tests/PeerSync.Storage.Tests.csproj" />
+  </Folder>
+</Solution>

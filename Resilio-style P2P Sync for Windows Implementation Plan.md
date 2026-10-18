@@ -165,6 +165,8 @@ Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`.
 
 Open technical question: step 3 needs outgoing QUIC connections to leave from the same UDP port as the QUIC listener. Phase 0 must prove `System.Net.Quic` allows this. If it doesn't, call MsQuic directly or rely on TCP plus the relay for hard NATs.
 
+P0 local result (2026-10-18): outgoing QUIC on the listener port failed with WSAEADDRINUSE on Windows build 26300, .NET 10.0.13 / MsQuic 2.5.11. Direct MsQuic with shared binding and TCP simultaneous open also failed locally. Provisionally retain direct QUIC/TCP for reachable endpoints and relay fallback after 5 seconds for hard NATs. Do not advertise coordinated punching until the physical NAT matrix confirms a supported option. See `docs/spikes/P0.2.2-quic-punch.md`; that matrix remains open.
+
 ## Sync engine design
 
 Each folder runs an independent loop: detect local changes, publish them as signed records, pull what remote peers have that is newer, and apply it safely. The model follows Resilio's (a database per share, watcher plus 600 s rescans, archive on overwrite) with version vectors added so concurrent edits are detected and the losing version is always archived.
@@ -247,7 +249,7 @@ Security rests on three things: holding a folder key, TLS 1.3 between pinned dev
 | Key derivation | HKDF-SHA256 | `System.Security.Cryptography.HKDF` |
 | Folder proof | HMAC-SHA256 | `HMACSHA256` |
 | Change signatures | Ed25519 | `NSec.Cryptography` (libsodium) |
-| Content hashes | BLAKE3 | `Blake3` NuGet package |
+| Content hashes | BLAKE3 | `Blake3.Native` 3.0.2 (the `Blake3` namespace); selected in P0.2.4 after measuring both implementations |
 | Encrypted-peer data (phase 6) | AES-256-GCM with a synthetic, content-derived nonce | `AesGcm` |
 | Secrets at rest | Device key: non-exportable CNG key in LocalMachine\\My, usable only by the service. Folder keys: DPAPI (machine scope plus app entropy) inside peersync.db | `ProtectedData` |
 
@@ -334,6 +336,19 @@ Resilio's power-user list is the reference. Every setting is changed live throug
 - **Logs:** Serilog rolling files, 7 days and 100 MB total (Resilio's defaults). Warnings and errors also go to the Windows Event Log. Keys and file contents are never logged.
 - **Metrics:** `System.Diagnostics.Metrics` counters (bytes up and down, peers, queue depth, hashing rate), streamed to the UI.
 - **Upgrades:** running a newer Inno Setup installer stops the service, replaces the binaries and restarts it. On first start, migrations back up each database and then upgrade its schema. Signed auto-update comes in phase 5, by running the new installer silently.
+
+Deployment diagnostics requirement (2026-10-18): the Windows client and central
+server need opt-in structured debug events with UTC timestamps, run/process,
+session and operation correlation, transport selection, byte counts, timings,
+retry delays and native failure codes. Logs must never contain keys, FolderIds,
+file contents or raw protocol bodies. Network-address events expire within
+24 hours; other logs retain the existing bounded rotation policy. A diagnostic
+bundle contains filtered structured logs and environment metadata, excluding
+settings, databases, certificates and dumps. Server and second-PC deployment
+instructions must identify exact OS/runtime versions and distinguish native
+loopback, LAN, WAN, container and VM evidence. The P0 journal, collector and
+probe runbook establish the mechanism; production event hooks ship with their
+components in P2 and P4.
 
 ## WPF control app
 
@@ -442,7 +457,7 @@ Outside `src\`: `installer\` (Inno Setup script PeerSync.iss), and `tests\` with
 | `Google.Protobuf`, `Grpc.Tools` | Wire messages |
 | `Grpc.AspNetCore`, `Grpc.Net.Client` | Control API and rendezvous API |
 | `NSec.Cryptography` | Ed25519 |
-| `Blake3` | Chunk and file hashes |
+| `Blake3.Native` | Chunk and file hashes (3.x moved the original native implementation to this package); managed `Blake3` is used only for benchmark comparison |
 | `Mono.Nat` | UPnP and NAT-PMP port mapping |
 | `CommunityToolkit.Mvvm` | WPF view models |
 | `H.NotifyIcon.Wpf` | Tray icon |
@@ -485,6 +500,8 @@ The engine's correctness matters more than its speed: every phase gate includes 
 | Soak | 72 h of random operations on 3 physical PCs, with sleep, resume and network switches. A checker compares trees and hashes every hour. | Run before each phase gate |
 
 **Performance targets (to confirm in phase 0):** hashing at least 1 GB/s on NVMe, LAN transfer at 80% or more of 1 Gbit/s line rate, first index of 1M files within 20 min on an SSD, idle CPU under 1%, and memory under 300 MB with 1M files.
+
+P0.2.4 local measurement (2026-10-18): a sequential 10 GiB file pass performing FastCDC plus both chunk and whole-file BLAKE3 reached 1.051 decimal GB/s with `Blake3.Native` 3.0.2, versus 0.887 GB/s with managed `Blake3`, on the recorded Ryzen 7600X / Crucial NVMe workstation after reducing buffer copies. Hashes matched across both implementations. This is a warm-cache, repeated-4-MiB-block corpus; it does not establish cold-disk, other hardware or LAN throughput. The 1 GB/s target is retained; see `docs/spikes/P0.2.4-chunking-hashing.md`.
 
 **CI:** GitHub Actions on `windows-latest` builds, runs unit and loopback integration tests, a 10-minute fuzz smoke test, and builds the signed x64 and Arm64 installers with ISCC on every main-branch commit.
 

@@ -1,0 +1,120 @@
+using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace PeerSync.Core.Diagnostics;
+
+/// <summary>Structured, bounded diagnostic events. Only explicitly named metadata can be logged.</summary>
+public sealed class DiagnosticJournal : IDisposable
+{
+    private readonly object gate = new();
+    private readonly string directory;
+    private readonly string component;
+    private readonly string runId = Guid.NewGuid().ToString("N");
+    private readonly long maxFileBytes;
+    private readonly int retainedFiles;
+    private bool disposed;
+    private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+
+    public DiagnosticJournal(string directory, string component, bool debugEnabled = false,
+        long maxFileBytes = 14_000_000, int retainedFiles = 7)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(component);
+        ValidateCode(component);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxFileBytes, 4096);
+        ArgumentOutOfRangeException.ThrowIfLessThan(retainedFiles, 1);
+        this.directory = Path.GetFullPath(directory);
+        this.component = component;
+        this.maxFileBytes = maxFileBytes;
+        this.retainedFiles = retainedFiles;
+        DebugEnabled = debugEnabled;
+        Directory.CreateDirectory(this.directory);
+    }
+
+    public bool DebugEnabled { get; }
+
+    /// <summary>No arbitrary message, exception text, paths, keys, FolderIds, or payloads are accepted.</summary>
+    public void Write(DiagnosticEvent entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (entry.Level == DiagnosticLevel.Debug && !DebugEnabled) return;
+        ValidateCode(entry.Event);
+        ValidateCode(entry.Operation);
+        if (entry.ErrorCode is not null) ValidateCode(entry.ErrorCode);
+        byte[] line = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            timestampUtc = DateTimeOffset.UtcNow,
+            component,
+            runId,
+            processId = Environment.ProcessId,
+            level = entry.Level.ToString(),
+            eventName = entry.Event,
+            operation = entry.Operation,
+            sessionId = entry.SessionId,
+            traceId = Activity.Current?.TraceId.ToString(),
+            transport = entry.Transport?.ToString(),
+            bytes = entry.Bytes,
+            elapsedMs = entry.ElapsedMilliseconds,
+            errorCode = entry.ErrorCode,
+            nativeError = entry.NativeError,
+            retryInMs = entry.RetryInMilliseconds,
+            remoteAddress = entry.RemoteAddress?.ToString(),
+        }, Json);
+        if (line.Length > 4095) throw new ArgumentException("Diagnostic event exceeds the record limit.", nameof(entry));
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            string file = Path.Combine(directory, "debug.jsonl");
+            Rotate(file, line.Length + 1);
+            using var output = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.Read);
+            output.Write(line);
+            output.WriteByte((byte)'\n');
+        }
+    }
+
+    private static void ValidateCode(string code)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        if (code.Length > 96 || code.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '.' and not '_' and not '-'))
+            throw new ArgumentException("Diagnostic codes must be short identifiers.", nameof(code));
+    }
+
+    private void Rotate(string file, int incoming)
+    {
+        // IP-bearing debug events expire after 24h, including the active file.
+        foreach (string old in Directory.EnumerateFiles(directory, "debug*.jsonl"))
+            if (File.GetLastWriteTimeUtc(old) < DateTime.UtcNow.AddHours(-24)
+                || File.GetCreationTimeUtc(old) < DateTime.UtcNow.AddHours(-24)) File.Delete(old);
+        if (!File.Exists(file) || new FileInfo(file).Length + incoming <= maxFileBytes) return;
+        File.Delete(Path.Combine(directory, $"debug.{retainedFiles - 1}.jsonl"));
+        for (int i = retainedFiles - 2; i >= 1; i--)
+        {
+            string source = Path.Combine(directory, $"debug.{i}.jsonl");
+            if (File.Exists(source)) File.Move(source, Path.Combine(directory, $"debug.{i + 1}.jsonl"), overwrite: true);
+        }
+        if (retainedFiles > 1) File.Move(file, Path.Combine(directory, "debug.1.jsonl"), overwrite: true);
+        else File.Delete(file);
+    }
+
+    public void Dispose()
+    {
+        lock (gate) { disposed = true; }
+    }
+}
+
+public enum DiagnosticLevel { Debug, Information, Warning, Error }
+public enum DiagnosticTransport { Quic, Tcp, Http2, Http3, NamedPipe, Relay }
+
+public sealed record DiagnosticEvent(string Event, string Operation)
+{
+    public DiagnosticLevel Level { get; init; } = DiagnosticLevel.Information;
+    public Guid? SessionId { get; init; }
+    public DiagnosticTransport? Transport { get; init; }
+    public long? Bytes { get; init; }
+    public double? ElapsedMilliseconds { get; init; }
+    public string? ErrorCode { get; init; }
+    public int? NativeError { get; init; }
+    public int? RetryInMilliseconds { get; init; }
+    public System.Net.IPAddress? RemoteAddress { get; init; }
+}

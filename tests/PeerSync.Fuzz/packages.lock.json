@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0-windows10.0.20348": {
+      "SharpFuzz": {
+        "type": "Direct",
+        "requested": "[2.3.0, )",
+        "resolved": "2.3.0",
+        "contentHash": "5f11toR82RVCIBTr5XuuauJgesGVXIAO6vBCvLThNbrcer9NN6qB2HCA/Q122BvH2qRPsLx14O6QVtCbgRQhog==",
+        "dependencies": {
+          "SharpFuzz.Common": "2.2.0",
+          "dnlib": "4.4.0"
+        }
+      },
+      "dnlib": {
+        "type": "Transitive",
+        "resolved": "4.4.0",
+        "contentHash": "cKHI720q+zfEEvzklWVGt6B0TH3AibAyJbpUJl4U6KvTP13tycfnqJpkGHRZ/oQ45BTIoIxIwltHIJVDN+iCqQ=="
+      },
+      "SharpFuzz.Common": {
+        "type": "Transitive",
+        "resolved": "2.2.0",
+        "contentHash": "biITWpwnMR7HUp43lAGU97DWq/4LfyXqqhuOK0Z4IuRP97KjQMOe/GKq3wE1KY21gNrc7OPO9HbAtQUvMKTImA=="
+      },
+      "peersync.crypto": {
+        "type": "Project",
+        "dependencies": {
+          "Blake3.Native": "[3.0.2, )"
+        }
+      },
+      "peersync.protocol": {
+        "type": "Project"
+      },
+      "Blake3.Native": {
+        "type": "CentralTransitive",
+        "requested": "[3.0.2, )",
+        "resolved": "3.0.2",
+        "contentHash": "Yq4rCmvgPsjJhB4reD98RwxFWq51BvnSrnNlcFq8aA+6da6atTJTdgAhxN4UqcwpDsa8wBqbgGf/52thhbSEjA=="
+      }
+    },
+    "net10.0-windows10.0.20348/win-arm64": {
+      "Blake3.Native": {
+        "type": "CentralTransitive",
+        "requested": "[3.0.2, )",
+        "resolved": "3.0.2",
+        "contentHash": "Yq4rCmvgPsjJhB4reD98RwxFWq51BvnSrnNlcFq8aA+6da6atTJTdgAhxN4UqcwpDsa8wBqbgGf/52thhbSEjA=="
+      }
+    },
+    "net10.0-windows10.0.20348/win-x64": {
+      "Blake3.Native": {
+        "type": "CentralTransitive",
+        "requested": "[3.0.2, )",
+        "resolved": "3.0.2",
+        "contentHash": "Yq4rCmvgPsjJhB4reD98RwxFWq51BvnSrnNlcFq8aA+6da6atTJTdgAhxN4UqcwpDsa8wBqbgGf/52thhbSEjA=="
+      }
+    }
+  }
+}
