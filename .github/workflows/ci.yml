@@ -34,7 +34,6 @@ jobs:
         with:
           name: evidence-${{ matrix.runtime }}
           path: |
-            artifacts/*.binlog
             artifacts/verification-*.json
             artifacts/environment-*.json
             artifacts/tests/
@@ -45,6 +44,7 @@ jobs:
         with:
           name: PeerSync-P0-probes-${{ matrix.runtime }}
           path: artifacts/publish/${{ matrix.runtime }}/
+          retention-days: 7
   service-security:
     strategy:
       fail-fast: false

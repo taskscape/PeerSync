@@ -79,7 +79,7 @@ try
     clock.Stop();
     log.Write(new("transfer.completed", "transfer") { SessionId = session, Bytes = transferred,
         ElapsedMilliseconds = clock.Elapsed.TotalMilliseconds, Transport = DiagnosticTransport.Quic });
-    Console.WriteLine(JsonSerializer.Serialize(new { role = args[0], bytes = transferred, elapsedSeconds = clock.Elapsed.TotalSeconds,
+    Console.WriteLine(JsonSerializer.Serialize(new { role = args[0], sessionId = session, bytes = transferred, elapsedSeconds = clock.Elapsed.TotalSeconds,
         mebibytesPerSecond = transferred / 1048576.0 / clock.Elapsed.TotalSeconds, alpn = "psp/1",
         localDeviceId = Convert.ToHexString(DeviceIdentity.FromCertificate(certificate.Certificate)), remoteDeviceId = Convert.ToHexString(remoteId),
         localEndpoint = connection.LocalEndPoint.ToString(), remoteEndpoint = connection.RemoteEndPoint.ToString(), verified = true }));

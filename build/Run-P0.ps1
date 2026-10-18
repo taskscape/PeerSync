@@ -76,6 +76,11 @@ try {
         Finish-Probe (Start-Probe 'QuicBasics' @('dial',$address,$port,"$TransferBytes") "$label-client")
         Finish-Probe $server
         $server = $null
+        $sent = Get-Content (Join-Path $out "$label-client.stdout.log") | ConvertFrom-Json
+        $received = Get-Content (Join-Path $out "$label-server.stdout.log") | ConvertFrom-Json
+        if ($sent.sessionId -ne $received.sessionId -or $sent.localDeviceId -ne $received.remoteDeviceId -or $sent.remoteDeviceId -ne $received.localDeviceId -or $sent.bytes -ne $received.bytes) {
+            throw "$label correlation or certificate identity mismatch between processes"
+        }
     }
     Finish-Probe (Start-Probe 'QuicPunch' @() 'quic-source-port') 30 -ExpectedExits @(0,3)
     Finish-Probe (Start-Probe 'QuicPunch' @('--tcp') 'tcp-source-port') 30 -ExpectedExits @(0,3)

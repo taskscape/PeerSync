@@ -556,13 +556,13 @@ Goal: a building, testing repo, plus answers to every question that could change
 - [ ] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) [WIP @Codex 2026-10-18] [BLOCKED: second and third reference PCs not available, since 2026-10-18]
   - Done when: the CPU, disk and network of the two to three test PCs are written down, so all benchmarks are comparable.
 
-### P0.2 Spikes
-
 New P0 foundation requirement from the user (2026-10-18):
 
 - [ ] **P0.1.5 Deployment diagnostic foundation** (`PeerSync.Core/Diagnostics/`, `build/Collect-Diagnostics.ps1`, `docs/diagnostics.md`) [WIP @Codex 2026-10-18]
   - Done when: structured opt-in debug events have shared session IDs, UTC/run/process metadata, transport/timings/errors; log size and address retention are bounded; collection excludes settings, databases, keys and dumps; rotation, filtering and correlation are verified; server and second-PC probe instructions exist.
   - Production service hooks are tracked by P2.5.6 and central hooks by P4.1.7.
+
+### P0.2 Spikes
 
 Each spike ends with a write-up in `docs/spikes/` and a decision row in section 2 when it changes the design.
 
@@ -584,9 +584,10 @@ Each spike ends with a write-up in `docs/spikes/` and a decision row in section 
   - Done when: FastCDC plus BLAKE3 on a 10 GB file is at least 1 GB/s on the reference NVMe, or the target is revised and logged. Boundary stability is checked: identical cut points whatever the read sizes.
 - [ ] **P0.2.5 Control pipe across accounts** (`spikes/ControlPipe`) [WIP @Codex 2026-10-18]
   - Done when: the service (virtual account) and the app (standard user) talk gRPC over the pipe. A non-member is refused. The owner check in 5.4 passes. `RunAsClient` returns the caller's SID.
-- [ ] **P0.2.6 Kestrel on port 99 with HTTP/2, HTTP/3 and client certificates** (`spikes/Rendezvous99`, on a Windows Server 2025 VM) [WIP @Codex 2026-10-18] [BLOCKED: Windows Server 2025 VM not available, since 2026-10-18]
+- [ ] **P0.2.6 Kestrel on port 99 with HTTP/2, HTTP/3 and client certificates** (`spikes/Rendezvous99`, on a Windows Server 2025 VM) [WIP @Codex 2026-10-18]
   - Done when: a gRPC bidirectional stream works over HTTP/2 (TCP 99) and HTTP/3 (UDP 99), with the client's self-signed certificate visible on the server for both.
   - If HTTP/3 can't carry client certificates, the fallback is logged: device proof inside the session stream (sign the server nonce with the device key).
+  - Local mechanism passed. GitHub-hosted `windows-2025` and `windows-2022` VM probes are now configured; await their version-stamped CI evidence before ticking. Outside-network/provider UDP 99 remains a separate P4 deployment check.
 - [ ] **P0.2.7 FileSystemWatcher under stress** (`spikes/WatcherStress`) [WIP @Codex 2026-10-18]
   - Done when: a burst of 100,000 creates and renames shows whether events are lost, the buffer-overflow behaviour is documented, and the rescan fallback is confirmed.
 
