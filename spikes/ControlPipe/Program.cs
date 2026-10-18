@@ -34,6 +34,7 @@ if (args[0] == "server")
     await using var app = builder.Build();
     app.MapGrpcService<ProbeService>();
     await app.StartAsync();
+    if (args.Length > 3) await File.WriteAllTextAsync(args[3], "ready");
     Console.WriteLine("READY");
     Console.Out.Flush();
     await app.WaitForShutdownAsync();

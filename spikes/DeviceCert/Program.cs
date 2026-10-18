@@ -7,10 +7,11 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using PeerSync.Spikes;
+using PeerSync.Core.Diagnostics;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("create <serviceSID> | delete <thumbprint> | serve <thumbprint> <port> | verify <thumbprint> <IP> <port>");
+    Console.Error.WriteLine("create <serviceSID> | delete <thumbprint> | serve <thumbprint> <port> <report-directory> | verify <thumbprint> <IP> <port>");
     return 2;
 }
 if (args[0] == "create")
@@ -55,6 +56,7 @@ if (args[0] == "serve")
     builder.Services.AddWindowsService(o => o.ServiceName = "PeerSyncSpike");
     builder.Services.AddSingleton(certificate);
     builder.Services.AddSingleton(new ListenPort(int.Parse(args[2], CultureInfo.InvariantCulture)));
+    builder.Services.AddSingleton(new ReportDirectory(args[3]));
     builder.Services.AddHostedService<CertificateWorker>();
     using var host = builder.Build();
     await host.RunAsync();
@@ -90,17 +92,36 @@ Console.WriteLine(JsonSerializer.Serialize(new { quic = true, tcpTls13 = true, m
 return 0;
 
 internal sealed record ListenPort(int Value);
+internal sealed record ReportDirectory(string Path);
 
-internal sealed class CertificateWorker(X509Certificate2 certificate, ListenPort port) : BackgroundService
+internal sealed class CertificateWorker(X509Certificate2 certificate, ListenPort port, ReportDirectory report) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await using var listener = await QuicProbe.ListenAsync(port.Value, certificate, stoppingToken);
-        using var tcp = new TcpListener(IPAddress.IPv6Any, port.Value);
-        tcp.Server.DualMode = true;
-        tcp.Start();
-        await Task.WhenAll(ServeQuicAsync(listener, stoppingToken), ServeTcpAsync(tcp, stoppingToken));
-        await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+        using var log = new DiagnosticJournal(report.Path, "DeviceCert", true);
+        try
+        {
+            log.Write(new("service.starting", "startup"));
+            using (var signer = certificate.GetECDsaPrivateKey())
+                _ = signer!.SignData(new byte[] { 1 }, HashAlgorithmName.SHA256);
+            log.Write(new("certificate.signing.verified", "startup"));
+            await using var listener = await QuicProbe.ListenAsync(port.Value, certificate, stoppingToken);
+            using var tcp = new TcpListener(IPAddress.IPv6Any, port.Value);
+            tcp.Server.DualMode = true;
+            tcp.Start();
+            await File.WriteAllTextAsync(Path.Combine(report.Path, "ready.json"), JsonSerializer.Serialize(new { ready = true, port = port.Value }), stoppingToken);
+            log.Write(new("service.ready", "listen"));
+            await Task.WhenAll(ServeQuicAsync(listener, stoppingToken), ServeTcpAsync(tcp, stoppingToken));
+            log.Write(new("certificate.transports.verified", "tls"));
+            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { log.Write(new("service.stopped", "shutdown")); }
+        catch (Exception ex)
+        {
+            log.Write(new("service.failed", "startup") { Level = DiagnosticLevel.Error, ErrorCode = ex.GetType().Name,
+                NativeError = ex is SocketException socket ? socket.NativeErrorCode : ex.GetBaseException().HResult });
+            throw;
+        }
     }
 
     private static async Task ServeQuicAsync(QuicListener listener, CancellationToken ct)
