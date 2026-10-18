@@ -71,6 +71,10 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
+| 2026-10-18 | User requested deployment diagnostics: opt-in structured events, shared session correlation, native errors, safe log bundles, and a server/second-PC runbook. Windows-version and NAT evidence must be recorded separately; current Docker runs Linux containers. | Logging, metrics and upgrades |
+| 2026-10-18 | P0.2.4: use `Blake3.Native` 3.0.2; a 10 GiB pass reached 1.051 GB/s after buffer-copy fixes. Keep the 1 GB/s reference target; other hardware remains unverified. | Cryptography; Testing strategy |
+| 2026-10-18 | P0.2.2 provisional: same-port QUIC, native MsQuic shared binding and TCP reuse failed on the development PC. Keep reachable-endpoint QUIC/TCP and relay fallback for hard NATs; coordinated punching remains blocked on the physical NAT matrix. | NAT traversal |
 | 2026-10-18 | Folder proofs put the sender first. DeviceIds come from the TLS certificates, never from `Hello`. | Protocol specification: Connection and handshake |
 | 2026-10-18 | Downloads are assembled next to the target as `name.ext.!psp`, not in `.psp\tmp`. `File.Replace` keeps the target's ACL. | Sync engine design: Applying remote changes |
 | 2026-10-18 | Configuration and secrets layout as in section 4 of this plan | Windows service: Account, permissions and paths |
@@ -548,19 +552,26 @@ Goal: a building, testing repo, plus answers to every question that could change
   - Ref: Solution structure and tech stack.
 - [ ] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) [WIP @Codex 2026-10-18]
   - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
-- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [WIP @Codex 2026-10-18]
+- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [WIP @Codex 2026-10-18] [BLOCKED: code-signing certificate not provided, since 2026-10-18]
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
 - [ ] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) [WIP @Codex 2026-10-18]
   - Done when: the CPU, disk and network of the two to three test PCs are written down, so all benchmarks are comparable.
+  - Recorded: development PC plus version-stamped Server 2022/2025 hosted VM snapshots; VM adapter link rates are not measured LAN throughput. Await merge/green CI before ticking.
+
+New P0 foundation requirement from the user (2026-10-18):
+
+- [ ] **P0.1.5 Deployment diagnostic foundation** (`PeerSync.Core/Diagnostics/`, `build/Collect-Diagnostics.ps1`, `docs/diagnostics.md`) [WIP @Codex 2026-10-18]
+  - Done when: structured opt-in debug events have shared session IDs, UTC/run/process metadata, transport/timings/errors; log size and address retention are bounded; collection excludes settings, databases, keys and dumps; rotation, filtering and correlation are verified; server and second-PC probe instructions exist.
+  - Production service hooks are tracked by P2.5.6 and central hooks by P4.1.7.
 
 ### P0.2 Spikes
 
 Each spike ends with a write-up in `docs/spikes/` and a decision row in section 2 when it changes the design.
 
-- [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`) [WIP @Codex 2026-10-18]
+- [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`) [WIP @Codex 2026-10-18] [BLOCKED: physical second-PC LAN measurement not available, since 2026-10-18]
   - Done when: two processes exchange 1 GB over one QUIC connection, ALPN `psp/1`, with both certificates required and the DeviceId read from `RemoteCertificate` on both sides. Throughput on 1 Gbit LAN is recorded.
   - Code: see 6.1.
-- [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`) [WIP @Codex 2026-10-18]
+- [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`) [WIP @Codex 2026-10-18] [BLOCKED: physical LAN and home-NAT or CGNAT matrix not available, since 2026-10-18]
   - Question: can a `QuicConnection` use `LocalEndPoint` = the `QuicListener`'s port, so both directions share one NAT mapping?
   - Try, in order:
     - (a) `System.Net.Quic` with `LocalEndPoint` set
@@ -578,6 +589,7 @@ Each spike ends with a write-up in `docs/spikes/` and a decision row in section 
 - [ ] **P0.2.6 Kestrel on port 99 with HTTP/2, HTTP/3 and client certificates** (`spikes/Rendezvous99`, on a Windows Server 2025 VM) [WIP @Codex 2026-10-18]
   - Done when: a gRPC bidirectional stream works over HTTP/2 (TCP 99) and HTTP/3 (UDP 99), with the client's self-signed certificate visible on the server for both.
   - If HTTP/3 can't carry client certificates, the fallback is logged: device proof inside the session stream (sign the server nonce with the device key).
+  - Local mechanism passed. GitHub-hosted `windows-2025` and `windows-2022` VM probes are now configured; await their version-stamped CI evidence before ticking. Outside-network/provider UDP 99 remains a separate P4 deployment check.
 - [ ] **P0.2.7 FileSystemWatcher under stress** (`spikes/WatcherStress`) [WIP @Codex 2026-10-18]
   - Done when: a burst of 100,000 creates and renames shows whether events are lost, the buffer-overflow behaviour is documented, and the rescan fallback is confirmed.
 
@@ -1585,6 +1597,9 @@ public static async ValueTask ThrottleAsync(RateLimiter? limiter, int bytes, Can
 - [ ] **P2.5.5 Network change and resume** (`PeerSync.Service/Events/`)
   - Done when: after sleep and resume, or a Wi-Fi switch, peers reconnect and folders rescan within 30 s.
 
+- [ ] **P2.5.6 Deployment diagnostics and bundle command** (`PeerSync.Service/Diagnostics/`, `PeerSync.Cli/Diagnostics/`)
+  - Done when: debug events cover service startup/shutdown, configuration recovery, certificate loading, discovery/dial/fallback/retry, folder auth/approval, index/block verification, apply/defer/archive and filesystem failures, using P0.1.5's safe schema. Session IDs join both endpoints' logs. `psp diagnostics` produces a sanitized bundle; the runbook reproduces a two-PC failure and identifies its cause. Keys, FolderIds, file contents and raw records are absent.
+
 ### 8.6 Code: service host (P2.5.1)
 
 **Tricky:**
@@ -1765,6 +1780,9 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
 - [ ] **P4.1.6 `installer/PeerSync.Rendezvous.iss`**
   - Done when: it installs the service under `NT SERVICE\PeerSyncRendezvous`, adds firewall rules for TCP and UDP 99, and upgrades in place.
 
+- [ ] **P4.1.7 Central deployment diagnostics** (`PeerSync.Rendezvous/Diagnostics/`, `docs/diagnostics.md`)
+  - Done when: server debug events correlate authentication, presence, introductions, relay joins/leaves, quota/timeout and transport errors with client sessions; health and environment checks distinguish TCP/UDP failures. Central and second-PC bundles diagnose a forced relay failure on LAN and WAN. No FolderIds, keys or plaintext are logged; IP retention stays at most 24 hours.
+
 ### 10.1 Code: Kestrel on port 99 (P4.1.1)
 
 ```csharp
@@ -1889,6 +1907,7 @@ await tls.AuthenticateAsClientAsync(PeerTls.ClientOptions(deviceCert), ct);
   - Code: 10.3.
 - [ ] **P4.2.3 Hole punching** (`PeerSync.Net/Nat/Puncher.cs`)
   - Done when: it implements the option chosen in P0.2.2, and the NAT test matrix from P0.2.2 passes against the real server.
+  - P0 local outcome (2026-10-18): all three same-port options failed on the development PC. Provisionally use direct reachable endpoints followed by relay at 5 s, with no coordinated-punch claim. Final choice remains blocked on the required physical NAT matrix; see `docs/spikes/P0.2.2-quic-punch.md`.
 - [ ] **P4.2.4 Relay client** (`PeerSync.Net/Relay/RelayClient.cs`)
   - Done when: after 5 s without a direct path, `RelayRequest`, then `Relay.Pipe`, then TLS inside (10.2), then the normal handshake. The UI shows "via relay" for that peer.
 - [ ] **P4.2.5 `psp.exe probe`** (`PeerSync.Cli/Probe.cs`)

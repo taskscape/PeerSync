@@ -1,0 +1,14 @@
+syntax = "proto3";
+option csharp_namespace = "PeerSync.Spikes";
+package peersync.spike;
+
+service Probe {
+  rpc Identity (ProbeMessage) returns (ProbeMessage);
+  rpc Session (stream ProbeMessage) returns (stream ProbeMessage);
+}
+message ProbeMessage {
+  string caller_sid = 1;
+  bytes device_id = 2;
+  int64 sequence = 3;
+  string session_id = 4;
+}

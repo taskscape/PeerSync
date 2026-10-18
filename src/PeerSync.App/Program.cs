@@ -1,0 +1,1 @@
+using System.Windows; namespace PeerSync.App; internal static class Program { [STAThread] private static void Main() { var app = new Application(); app.Run(new Window { Title = "PeerSync - P0 foundations", Content = new System.Windows.Controls.TextBlock { Text = "Implementation is in progress. See plan.md.", Margin = new Thickness(24) }, Width = 480, Height = 160 }); } }
