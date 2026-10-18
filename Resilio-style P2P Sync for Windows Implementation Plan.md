@@ -434,7 +434,7 @@ One .NET 10 solution with eleven projects. References only point down the stack,
 
 | Project | Type | Contents |
 | --- | --- | --- |
-| `PeerSync.Core` | Class library | Folder keys and their text form, FileRecord, version vectors, the path-rules check, the ignore matcher. No I/O. |
+| `PeerSync.Core` | Class library | Folder keys and their text form, FileRecord, version vectors, path rules and ignore matching have no filesystem I/O. The shared, dependency-free diagnostic event/journal infrastructure is an explicit exception for log-file I/O (deployment diagnostics requirement, 2026-10-18). |
 | `PeerSync.Crypto` | Class library | Key chain (HKDF, HMAC), Ed25519 signing, BLAKE3, FastCDC (written in-house, about 200 lines), the encrypted-peer scheme |
 | `PeerSync.Protocol` | Class library | `.proto` files, frame codec, message validation and size limits |
 | `PeerSync.Storage` | Class library | SQLite schema, migrations, repositories, chunk index |

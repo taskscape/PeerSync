@@ -71,6 +71,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
 | 2026-10-18 | User requested deployment diagnostics: opt-in structured events, shared session correlation, native errors, safe log bundles, and a server/second-PC runbook. Windows-version and NAT evidence must be recorded separately; current Docker runs Linux containers. | Logging, metrics and upgrades |
 | 2026-10-18 | P0.2.4: use `Blake3.Native` 3.0.2; a 10 GiB pass reached 1.051 GB/s after buffer-copy fixes. Keep the 1 GB/s reference target; other hardware remains unverified. | Cryptography; Testing strategy |
 | 2026-10-18 | P0.2.2 provisional: same-port QUIC, native MsQuic shared binding and TCP reuse failed on the development PC. Keep reachable-endpoint QUIC/TCP and relay fallback for hard NATs; coordinated punching remains blocked on the physical NAT matrix. | NAT traversal |
