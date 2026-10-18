@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: |
           $skip = '${{ matrix.runtime }}' -eq 'win-arm64'
-          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip
+          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipFuzz
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -45,6 +45,23 @@ jobs:
           name: PeerSync-P0-probes-${{ matrix.runtime }}
           path: artifacts/publish/${{ matrix.runtime }}/
           retention-days: 7
+  fuzz-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Required ten-minute boundary fuzz
+        shell: pwsh
+        run: ./build/Run-Fuzz.ps1 -Seconds 600
+      - name: Upload fuzz evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-smoke-evidence
+          path: artifacts/fuzz/
   service-security:
     strategy:
       fail-fast: false

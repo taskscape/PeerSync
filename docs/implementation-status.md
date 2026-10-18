@@ -2,7 +2,8 @@
 
 Current phase: P0. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
-Nine tasks and the performance/certificate subchecks are verified. The
+Eight tasks and the performance/certificate subchecks are verified. The CI
+budget task was reopened after post-merge timeouts; its repair is in PR #4. The
 remaining LAN/NAT and signing items are explicitly blocked; Gate P0 has not
 passed. See [the verification report](verification/P0-2026-10-18.md).
 
