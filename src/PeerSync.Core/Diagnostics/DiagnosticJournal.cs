@@ -4,7 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace PeerSync.Core.Diagnostics;
 
-/// <summary>Structured, bounded diagnostic events. Only explicitly named metadata can be logged.</summary>
+/// <summary>A process-local single-writer journal. Give concurrent processes distinct directories.
+/// Only explicitly named metadata can be logged.</summary>
 public sealed class DiagnosticJournal : IDisposable
 {
     private readonly object gate = new();

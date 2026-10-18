@@ -9,6 +9,7 @@ try {
     $recent = @{timestampUtc=[DateTimeOffset]::UtcNow.ToString('O');eventName='test.recent';component='test'} | ConvertTo-Json -Compress
     $expired = @{timestampUtc=[DateTimeOffset]::UtcNow.AddDays(-2).ToString('O');eventName='test.expired';component='test'} | ConvertTo-Json -Compress
     Set-Content "$folder/source/debug.jsonl" @($recent,$expired,'partial-json')
+    $writer = [IO.FileStream]::new("$folder/source/debug.jsonl", [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::Read)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     foreach($locale in @('pl-PL','en-US')) {
         [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo($locale)
@@ -25,10 +26,11 @@ try {
                 if ($body -notmatch 'test.recent') { throw 'Recent event was lost' }
             } finally { $reader.Dispose() }
         } finally { $zip.Dispose() }
-        Write-Host "Collector filtering and exclusion passed ($locale)"
+        Write-Host "Collector live-reader sharing, filtering and exclusion passed ($locale)"
     }
 }
 finally {
+    if ($writer) { $writer.Dispose() }
     [Globalization.CultureInfo]::CurrentCulture = $culture
     $resolved = [IO.Path]::GetFullPath($folder)
     $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

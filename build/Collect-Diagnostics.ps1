@@ -16,19 +16,28 @@ try {
     $index = 0
     foreach ($file in Get-ChildItem -LiteralPath $source -Filter 'debug*.jsonl' -File -Recurse) {
         if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-        $lines = foreach ($line in [IO.File]::ReadLines($file.FullName)) {
-            try {
-                $entry = $line | ConvertFrom-Json
+        # Collection must coexist with the live writer and with file rotation.
+        try {
+            $stream = [IO.FileStream]::new($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        } catch [IO.FileNotFoundException] { continue } # Rotation may win the race after enumeration.
+        $reader = [IO.StreamReader]::new($stream)
+        try {
+            $lines = while (-not $reader.EndOfStream) {
+                $line = $reader.ReadLine()
+                try {
+                    $entry = $line | ConvertFrom-Json
                 # PowerShell 7.5+ converts ISO timestamps into DateTime automatically.
                 # Parsing that object via its culture-dependent string can silently discard every event.
-                $timestamp = if ($entry.timestampUtc -is [DateTime]) {
-                    [DateTimeOffset]::new($entry.timestampUtc)
-                } else {
-                    [DateTimeOffset]::Parse([string]$entry.timestampUtc, [Globalization.CultureInfo]::InvariantCulture)
-                }
-                if ($timestamp -ge $cutoff) { $line }
-            } catch { } # A torn final line must not prevent collection.
-        }
+                    $timestamp = if ($entry.timestampUtc -is [DateTime]) {
+                        [DateTimeOffset]::new($entry.timestampUtc)
+                    } else {
+                        [DateTimeOffset]::Parse([string]$entry.timestampUtc, [Globalization.CultureInfo]::InvariantCulture)
+                    }
+                    if ($timestamp -ge $cutoff) { $line }
+                } catch { } # A torn final line must not prevent collection.
+            }
+        } finally { $reader.Dispose() }
         if ($lines) { $lines | Set-Content (Join-Path $staging "debug-$index.jsonl"); $index++ }
     }
     $os = Get-CimInstance Win32_OperatingSystem

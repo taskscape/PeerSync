@@ -10,4 +10,5 @@ message ProbeMessage {
   string caller_sid = 1;
   bytes device_id = 2;
   int64 sequence = 3;
+  string session_id = 4;
 }

@@ -38,7 +38,11 @@ On the receiving machine: `QuicBasics.exe listen 47821 1073741824`.
 Allow inbound UDP 47821 for this executable in the test environment. On the
 sender: `QuicBasics.exe dial <receiver-IP> 47821 1073741824`. A zero exit means
 one GiB was exchanged, the receiver's SHA-256 matched, and both certificates
-were presented. Save each process's JSON result and `logs/debug*.jsonl`.
+were presented. Save each process's JSON result and `logs/<process-id>/debug*.jsonl`.
+The JSON result names the exact log directory. Concurrent processes use
+separate directories, and the collector reads live logs without blocking writes
+or rotation.
+The same session ID appears in both processes' JSON and transfer events.
 Self-signed certificates are created per probe run and deleted afterwards.
 
 This establishes reachability only. It does not implement folder authorization,
@@ -53,6 +57,12 @@ on the other PC. The client requires that exact HTTP version; it never silently
 falls back. The server must observe the device certificate in each direction
 of a three-message bidirectional stream. Use temporary firewall rules scoped
 to the probe executable and remove them after the test.
+
+The server prints its debug log directory. To choose it explicitly, use
+`Rendezvous99.exe server 99 C:\PeerSync-P0-logs`. TLS acceptance/rejection,
+stream message/completion/failure, native errors and timings are recorded.
+The client's JSON session ID matches the server's stream events; collect that
+directory with `build/Collect-Diagnostics.ps1` and retain the client JSON.
 
 The probe's self-signed server certificate is accepted by the probe client.
 The production server will use its configured machine-store certificate.

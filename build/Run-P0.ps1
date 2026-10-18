@@ -19,7 +19,7 @@ function Start-Probe([string]$Name, [string[]]$Arguments, [string]$Label) {
     $process = [Diagnostics.Process]::Start($info)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    [pscustomobject]@{Process=$process;Stdout=$stdout;Stderr=$stderr;Label=$Label}
+    [pscustomobject]@{Process=$process;Stdout=$stdout;Stderr=$stderr;Label=$Label;Name=$Name;Disposed=$false}
 }
 function Finish-Probe($Probe, [int]$Seconds = 180, [switch]$ExpectFailure, [int[]]$ExpectedExits = @(0)) {
     try {
@@ -36,14 +36,22 @@ function Finish-Probe($Probe, [int]$Seconds = 180, [switch]$ExpectFailure, [int[
         }
         Write-Host "$($Probe.Label): expected exit $code"
     }
-    finally { $Probe.Process.Dispose() }
+    finally {
+        if ($Probe.Name -eq 'QuicBasics') {
+            $logs = Join-Path (Split-Path (Get-Spike 'QuicBasics') -Parent) "logs/$($Probe.Process.Id)"
+            if (Test-Path -LiteralPath $logs) { Copy-Item -LiteralPath $logs -Destination (Join-Path $out "$($Probe.Label)-logs") -Recurse -Force }
+        }
+        $Probe.Process.Dispose()
+        $Probe.Disposed = $true
+    }
 }
 function Stop-Probe($Probe) {
-    if ($null -eq $Probe) { return }
+    if ($null -eq $Probe -or $Probe.Disposed) { return }
     if (-not $Probe.Process.HasExited) { $Probe.Process.Kill($true); $Probe.Process.WaitForExit() }
     $Probe.Stdout.GetAwaiter().GetResult() | Set-Content (Join-Path $out "$($Probe.Label).stdout.log")
     $Probe.Stderr.GetAwaiter().GetResult() | Set-Content (Join-Path $out "$($Probe.Label).stderr.log")
     $Probe.Process.Dispose()
+    $Probe.Disposed = $true
 }
 function Wait-Tcp([int]$Port, $Probe) {
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -72,14 +80,18 @@ try {
         $ready = $readyTask.Result
         if ($ready -notmatch '^READY (\d+)$') { throw "QUIC server did not start: $ready" }
         $port = $Matches[1]
-        $server = [pscustomobject]@{Process=$process;Stdout=$process.StandardOutput.ReadToEndAsync();Stderr=$process.StandardError.ReadToEndAsync();Label="$label-server"}
+        $server = [pscustomobject]@{Process=$process;Stdout=$process.StandardOutput.ReadToEndAsync();Stderr=$process.StandardError.ReadToEndAsync();Label="$label-server";Name='QuicBasics';Disposed=$false}
         Finish-Probe (Start-Probe 'QuicBasics' @('dial',$address,$port,"$TransferBytes") "$label-client")
         Finish-Probe $server
         $server = $null
         $sent = Get-Content (Join-Path $out "$label-client.stdout.log") | ConvertFrom-Json
         $received = Get-Content (Join-Path $out "$label-server.stdout.log") | ConvertFrom-Json
-        if ($sent.sessionId -ne $received.sessionId -or $sent.localDeviceId -ne $received.remoteDeviceId -or $sent.remoteDeviceId -ne $received.localDeviceId -or $sent.bytes -ne $received.bytes) {
+        if ($sent.sessionId -ne $received.sessionId -or $sent.logDirectory -eq $received.logDirectory -or $sent.localDeviceId -ne $received.remoteDeviceId -or $sent.remoteDeviceId -ne $received.localDeviceId -or $sent.bytes -ne $received.bytes) {
             throw "$label correlation or certificate identity mismatch between processes"
+        }
+        foreach($peer in @($sent,$received)) {
+            $events = Get-Content (Join-Path $peer.logDirectory 'debug.jsonl') | ConvertFrom-Json
+            if (-not @($events | Where-Object { $_.eventName -eq 'transfer.completed' -and $_.sessionId -eq $sent.sessionId }).Count) { throw "$label completion event missing from peer journal" }
         }
     }
     Finish-Probe (Start-Probe 'QuicPunch' @() 'quic-source-port') 30 -ExpectedExits @(0,3)
@@ -100,7 +112,7 @@ try {
     $existingTcp = Get-NetTCPConnection -LocalPort 99 -State Listen -ErrorAction SilentlyContinue
     $existingUdp = Get-NetUDPEndpoint -LocalPort 99 -ErrorAction SilentlyContinue
     if ($existingTcp -or $existingUdp) { throw 'Port 99 already in use; refusing to interfere' }
-    $server = Start-Probe 'Rendezvous99' @('server','99') 'rendezvous-server'
+    $server = Start-Probe 'Rendezvous99' @('server','99',(Join-Path $out 'rendezvous-logs')) 'rendezvous-server'
     Wait-Tcp 99 $server
     Finish-Probe (Start-Probe 'Rendezvous99' @('client','https://localhost:99','2') 'rendezvous-http2') 30
     Finish-Probe (Start-Probe 'Rendezvous99' @('client','https://localhost:99','3') 'rendezvous-http3') 30

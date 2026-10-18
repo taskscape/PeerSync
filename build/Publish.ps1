@@ -12,4 +12,4 @@ foreach($name in $projects) {
 # Keep executables isolated: merging project output folders would overwrite host runtime configuration.
 Copy-Item -LiteralPath (Join-Path $root 'docs/diagnostics.md') -Destination "$destination/README.md"
 Copy-Item -LiteralPath (Join-Path $root 'build/Collect-Diagnostics.ps1') -Destination $destination
-@{sourceRevision=(& git -C $root rev-parse HEAD);runtime=$Runtime;phase='P0';productionSyncAvailable=$false;publishedUtc=[DateTime]::UtcNow.ToString('O')} | ConvertTo-Json | Set-Content "$destination/manifest.json"
+@{sourceRevision=(& git -C $root rev-parse HEAD);workingTreeDirty=(@(& git -C $root status --porcelain).Count -gt 0);runtime=$Runtime;phase='P0';productionSyncAvailable=$false;publishedUtc=[DateTime]::UtcNow.ToString('O')} | ConvertTo-Json | Set-Content "$destination/manifest.json"
