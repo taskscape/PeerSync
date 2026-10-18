@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [switch]$SkipRuntimeChecks, [int]$FuzzSeconds = 600)
+param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [switch]$SkipRuntimeChecks, [switch]$SkipFuzz, [int]$FuzzSeconds = 600)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
@@ -14,19 +14,21 @@ try {
     & dotnet build PeerSync.slnx -c Release -p:PlatformTarget=$architecture --no-restore -bl:"artifacts/build-$Runtime.binlog"
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     if (-not $SkipRuntimeChecks) {
-        # Start the required ten-minute fuzz as soon as its immutable build output
-        # exists. Tests (--no-build) and native probes only read their build output;
-        # publishing Core/SpikeSupport does not build the fuzz's Crypto/Protocol
-        # dependencies. No rebuild may run against the active fuzz output directory.
-        $fuzzInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Fuzz.exe'))
-        $fuzzInfo.UseShellExecute=$false; $fuzzInfo.CreateNoWindow=$true
-        $fuzzInfo.RedirectStandardOutput=$true; $fuzzInfo.RedirectStandardError=$true
-        $fuzzInfo.WorkingDirectory=$root
-        $fuzzInfo.ArgumentList.Add('--seconds'); $fuzzInfo.ArgumentList.Add("$FuzzSeconds")
-        $fuzz = [Diagnostics.Process]::Start($fuzzInfo)
-        $fuzzClock = [Diagnostics.Stopwatch]::StartNew()
-        $fuzzOutput = $fuzz.StandardOutput.ReadToEndAsync()
-        $fuzzError = $fuzz.StandardError.ReadToEndAsync()
+        if (-not $SkipFuzz) {
+            # Start the required ten-minute fuzz as soon as its immutable build output
+            # exists. Tests (--no-build) and native probes only read their build output;
+            # publishing Core/SpikeSupport does not build the fuzz's Crypto/Protocol
+            # dependencies. No rebuild may run against the active fuzz output directory.
+            $fuzzInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $root 'tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Fuzz.exe'))
+            $fuzzInfo.UseShellExecute=$false; $fuzzInfo.CreateNoWindow=$true
+            $fuzzInfo.RedirectStandardOutput=$true; $fuzzInfo.RedirectStandardError=$true
+            $fuzzInfo.WorkingDirectory=$root
+            $fuzzInfo.ArgumentList.Add('--seconds'); $fuzzInfo.ArgumentList.Add("$FuzzSeconds")
+            $fuzz = [Diagnostics.Process]::Start($fuzzInfo)
+            $fuzzClock = [Diagnostics.Stopwatch]::StartNew()
+            $fuzzOutput = $fuzz.StandardOutput.ReadToEndAsync()
+            $fuzzError = $fuzz.StandardError.ReadToEndAsync()
+        }
         & "$PSScriptRoot/Test-Diagnostics.ps1"
         # P0 has tests only in these projects. Empty future-phase projects are not counted as validation.
         foreach ($name in @('Core','Crypto')) {
@@ -46,7 +48,9 @@ try {
         if ($fuzz.ExitCode -ne 0) { throw 'P0 boundary fuzz failed; see artifacts/fuzz' }
     }
     $clock.Stop()
-    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);seconds=$clock.Elapsed.TotalSeconds;phase='P0';gateP0Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
+    $fuzzDuration = 0
+    if ($fuzz) { $fuzzDuration = $FuzzSeconds }
+    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P0';gateP0Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
 }
 finally {
     if ($fuzz) {
