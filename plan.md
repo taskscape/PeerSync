@@ -55,7 +55,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
-| P0 Foundations and spikes | 1-3 | Not started | - |
+| P0 Foundations and spikes | 1-3 | In progress (2026-10-18) | - |
 | P1 Local sync engine | 4-8 | Not started | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
@@ -543,24 +543,24 @@ Goal: a building, testing repo, plus answers to every question that could change
 
 ### P0.1 Repository and build
 
-- [ ] **P0.1.1 Create the repo and solution** (repo root)
+- [ ] **P0.1.1 Create the repo and solution** (repo root) [WIP @Codex 2026-10-18]
   - Done when: all 11 projects and the test projects from 3.1 exist, `Directory.Build.props` and `Directory.Packages.props` are in place, and `dotnet build` passes with warnings as errors.
   - Ref: Solution structure and tech stack.
-- [ ] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`)
+- [ ] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) [WIP @Codex 2026-10-18]
   - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
-- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`)
+- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [WIP @Codex 2026-10-18]
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
-- [ ] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`)
+- [ ] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) [WIP @Codex 2026-10-18]
   - Done when: the CPU, disk and network of the two to three test PCs are written down, so all benchmarks are comparable.
 
 ### P0.2 Spikes
 
 Each spike ends with a write-up in `docs/spikes/` and a decision row in section 2 when it changes the design.
 
-- [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`)
+- [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`) [WIP @Codex 2026-10-18]
   - Done when: two processes exchange 1 GB over one QUIC connection, ALPN `psp/1`, with both certificates required and the DeviceId read from `RemoteCertificate` on both sides. Throughput on 1 Gbit LAN is recorded.
   - Code: see 6.1.
-- [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`)
+- [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`) [WIP @Codex 2026-10-18]
   - Question: can a `QuicConnection` use `LocalEndPoint` = the `QuicListener`'s port, so both directions share one NAT mapping?
   - Try, in order:
     - (a) `System.Net.Quic` with `LocalEndPoint` set
@@ -569,16 +569,16 @@ Each spike ends with a write-up in `docs/spikes/` and a decision row in section 
   - Test matrix: same LAN; two home NATs (full cone and port-restricted); one side behind a mobile hotspot (CGNAT).
   - Done when: the write-up states which option works in which NAT case, and the decision is logged. If none works, P4 relies on the relay for hard NATs and the design doc's risk row is updated.
   - Ref: Protocol specification, NAT traversal.
-- [ ] **P0.2.3 Device certificate usable by the virtual service account** (`spikes/DeviceCert`)
+- [ ] **P0.2.3 Device certificate usable by the virtual service account** (`spikes/DeviceCert`) [WIP @Codex 2026-10-18]
   - Done when: 5.2 runs elevated, then a test service running as `NT SERVICE\PeerSyncSpike` serves QUIC and `SslStream` with that certificate. A standard user can't read the key.
-- [ ] **P0.2.4 Chunking and hashing throughput** (`tests/PeerSync.Benchmarks`)
+- [ ] **P0.2.4 Chunking and hashing throughput** (`tests/PeerSync.Benchmarks`) [WIP @Codex 2026-10-18]
   - Done when: FastCDC plus BLAKE3 on a 10 GB file is at least 1 GB/s on the reference NVMe, or the target is revised and logged. Boundary stability is checked: identical cut points whatever the read sizes.
-- [ ] **P0.2.5 Control pipe across accounts** (`spikes/ControlPipe`)
+- [ ] **P0.2.5 Control pipe across accounts** (`spikes/ControlPipe`) [WIP @Codex 2026-10-18]
   - Done when: the service (virtual account) and the app (standard user) talk gRPC over the pipe. A non-member is refused. The owner check in 5.4 passes. `RunAsClient` returns the caller's SID.
-- [ ] **P0.2.6 Kestrel on port 99 with HTTP/2, HTTP/3 and client certificates** (`spikes/Rendezvous99`, on a Windows Server 2025 VM)
+- [ ] **P0.2.6 Kestrel on port 99 with HTTP/2, HTTP/3 and client certificates** (`spikes/Rendezvous99`, on a Windows Server 2025 VM) [WIP @Codex 2026-10-18]
   - Done when: a gRPC bidirectional stream works over HTTP/2 (TCP 99) and HTTP/3 (UDP 99), with the client's self-signed certificate visible on the server for both.
   - If HTTP/3 can't carry client certificates, the fallback is logged: device proof inside the session stream (sign the server nonce with the device key).
-- [ ] **P0.2.7 FileSystemWatcher under stress** (`spikes/WatcherStress`)
+- [ ] **P0.2.7 FileSystemWatcher under stress** (`spikes/WatcherStress`) [WIP @Codex 2026-10-18]
   - Done when: a burst of 100,000 creates and renames shows whether events are lost, the buffer-overflow behaviour is documented, and the rescan fallback is confirmed.
 
 ### 6.1 Code: QUIC listener and dialler (P0.2.1, reused in P2.2.1)

@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+artifacts/
+publish/
+TestResults/
+.vs/
+*.user
+*.pfx
+*.p12
+*.key
+BenchmarkDotNet.Artifacts/
