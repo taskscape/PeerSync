@@ -19,7 +19,14 @@ try {
         $lines = foreach ($line in [IO.File]::ReadLines($file.FullName)) {
             try {
                 $entry = $line | ConvertFrom-Json
-                if ([DateTimeOffset]::Parse($entry.timestampUtc) -ge $cutoff) { $line }
+                # PowerShell 7.5+ converts ISO timestamps into DateTime automatically.
+                # Parsing that object via its culture-dependent string can silently discard every event.
+                $timestamp = if ($entry.timestampUtc -is [DateTime]) {
+                    [DateTimeOffset]::new($entry.timestampUtc)
+                } else {
+                    [DateTimeOffset]::Parse([string]$entry.timestampUtc, [Globalization.CultureInfo]::InvariantCulture)
+                }
+                if ($timestamp -ge $cutoff) { $line }
             } catch { } # A torn final line must not prevent collection.
         }
         if ($lines) { $lines | Set-Content (Join-Path $staging "debug-$index.jsonl"); $index++ }

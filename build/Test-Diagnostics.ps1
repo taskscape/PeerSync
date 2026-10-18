@@ -1,0 +1,37 @@
+[CmdletBinding()]
+param()
+$ErrorActionPreference = 'Stop'
+$folder = Join-Path ([IO.Path]::GetTempPath()) ('PeerSync-collector-test-' + [Guid]::NewGuid().ToString('N'))
+$culture = [Globalization.CultureInfo]::CurrentCulture
+New-Item -ItemType Directory -Force "$folder/source" | Out-Null
+try {
+    foreach($name in @('settings.json','peersync.db','raw.log')) { Set-Content "$folder/source/$name" 'DO_NOT_COLLECT' }
+    $recent = @{timestampUtc=[DateTimeOffset]::UtcNow.ToString('O');eventName='test.recent';component='test'} | ConvertTo-Json -Compress
+    $expired = @{timestampUtc=[DateTimeOffset]::UtcNow.AddDays(-2).ToString('O');eventName='test.expired';component='test'} | ConvertTo-Json -Compress
+    Set-Content "$folder/source/debug.jsonl" @($recent,$expired,'partial-json')
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    foreach($locale in @('pl-PL','en-US')) {
+        [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo($locale)
+        & "$PSScriptRoot/Collect-Diagnostics.ps1" -Logs "$folder/source" -Destination "$folder/$locale.zip" | Out-Null
+        $zip = [IO.Compression.ZipFile]::OpenRead("$folder/$locale.zip")
+        try {
+            if (@($zip.Entries | Where-Object FullName -notmatch '^(debug-\d+\.jsonl|environment\.json)$').Count -ne 0) { throw 'Unexpected bundle file' }
+            $entry = @($zip.Entries | Where-Object FullName -like 'debug-*')
+            if ($entry.Count -ne 1) { throw 'Expected one debug file' }
+            $reader = [IO.StreamReader]::new($entry[0].Open())
+            try {
+                $body = $reader.ReadToEnd()
+                if ($body -match 'DO_NOT_COLLECT|test.expired|partial-json') { throw 'Excluded data was collected' }
+                if ($body -notmatch 'test.recent') { throw 'Recent event was lost' }
+            } finally { $reader.Dispose() }
+        } finally { $zip.Dispose() }
+        Write-Host "Collector filtering and exclusion passed ($locale)"
+    }
+}
+finally {
+    [Globalization.CultureInfo]::CurrentCulture = $culture
+    $resolved = [IO.Path]::GetFullPath($folder)
+    $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $resolved.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notmatch '^PeerSync-collector-test-[0-9a-f]{32}$') { throw 'Unexpected cleanup path' }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+}

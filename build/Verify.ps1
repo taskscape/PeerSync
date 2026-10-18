@@ -5,6 +5,7 @@ $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
     New-Item -ItemType Directory -Force artifacts | Out-Null
+    & "$PSScriptRoot/Write-Environment.ps1" -Path "artifacts/environment-$Runtime.json"
     $clock = [Diagnostics.Stopwatch]::StartNew()
     & dotnet restore PeerSync.slnx --locked-mode
     if ($LASTEXITCODE -ne 0) { throw 'Locked restore failed' }
@@ -12,6 +13,7 @@ try {
     & dotnet build PeerSync.slnx -c Release -p:PlatformTarget=$architecture --no-restore -bl:"artifacts/build-$Runtime.binlog"
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     if (-not $SkipRuntimeChecks) {
+        & "$PSScriptRoot/Test-Diagnostics.ps1"
         # P0 has tests only in these projects. Empty future-phase projects are not counted as validation.
         foreach ($name in @('Core','Crypto')) {
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests

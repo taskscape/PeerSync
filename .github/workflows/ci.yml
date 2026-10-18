@@ -36,6 +36,7 @@ jobs:
           path: |
             artifacts/*.binlog
             artifacts/verification-*.json
+            artifacts/environment-*.json
             artifacts/tests/
             artifacts/p0/
             artifacts/fuzz/
@@ -45,7 +46,11 @@ jobs:
           name: PeerSync-P0-probes-${{ matrix.runtime }}
           path: artifacts/publish/${{ matrix.runtime }}/
   service-security:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -54,10 +59,16 @@ jobs:
           global-json-file: global.json
       - name: Virtual-account and standard-user security checks
         shell: pwsh
-        run: ./build/Run-ServiceP0.ps1
+        run: |
+          dotnet build PeerSync.slnx -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          ./build/Run-P0.ps1
+          ./build/Run-ServiceP0.ps1
       - name: Upload service security evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: service-security-evidence
-          path: artifacts/p0-services/
+          name: service-security-evidence-${{ matrix.os }}
+          path: |
+            artifacts/p0-services/
+            artifacts/p0/

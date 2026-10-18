@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $root 'artifacts/p0-services'
 New-Item -ItemType Directory -Force $out | Out-Null
+& "$PSScriptRoot/Write-Environment.ps1" -Path (Join-Path $out 'environment.json')
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'This cross-account spike requires an elevated PowerShell'
