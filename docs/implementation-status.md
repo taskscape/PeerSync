@@ -1,8 +1,10 @@
 # Implementation status — 2026-10-18
 
-Current phase: P0. [PR #1](https://github.com/taskscape/PeerSync/pull/1).
-No phase gate has passed. Task boxes await the plan's merged-to-main and green
-CI rule in addition to their individual acceptance criteria.
+Current phase: P0. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
+with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
+Nine tasks and the performance/certificate subchecks are verified. The
+remaining LAN/NAT and signing items are explicitly blocked; Gate P0 has not
+passed. See [the verification report](verification/P0-2026-10-18.md).
 
 Implemented locally:
 
@@ -27,8 +29,10 @@ fuzz seeds over 600 seconds with zero crashes and x64 publishing. Arm64 probes
 also self-contained published; Arm64 execution is unverified. A separate
 Server 2025 CI job passed all native probes and service/security checks on
 build 26100. The Server 2022 service readiness/port repair also passed in its
-follow-up VM job. Final branch CI is pending. See the spike reports for exact
-historical source/run evidence; these results do not claim all current CI is green.
+follow-up VM job. Final push and PR CI are now green: x64 verification took
+694.36 seconds and completed 68,810 seeds over 600 seconds with no crashes.
+The complete push workflow took 14m18s. See the verification report and spike
+reports for exact scope and historical source/run evidence.
 
 Open prerequisites:
 
@@ -36,7 +40,6 @@ Open prerequisites:
   for P0.2.1 and P0.2.2. All three source-port reuse options failed
   locally; relay for hard NATs is provisional.
 - [Signing identity](https://github.com/taskscape/PeerSync/issues/3) for P0.1.3.
-- Final green CI and merge are pending.
 
 P1-P5 have not started because section 0.1 of plan.md forbids starting a phase
 before the previous gate passes. The production engine, client service,
