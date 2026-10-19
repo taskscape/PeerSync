@@ -647,6 +647,14 @@ Carry full pages into bounded 128-link Branch buffers at successive levels;
 finalize partial tails bottom-up. This fixes deterministic grouping without
 retaining or globally sorting an entire directory in RAM. Per-pass persistent
 capture/traversal continuation remains required before production activation.
+Graph validation uses a FULL SQLite continuation bound to the physical root
+and original signed directory source. Persist pending page/record work, seen
+context/hash pairs, unique canonical child keys and exact metadata/file-chunk
+references. Commit discovered children and completion of their parent work
+atomically only after independent metadata bytes are durably accounted. Work
+budgets return pending, resume after reopening and never activate partial
+reference coverage. Missing metadata, invalid kinds/signatures/parents,
+duplicate keys and excessive page nesting retain fail-closed protection.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

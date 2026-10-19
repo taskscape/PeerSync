@@ -70,6 +70,19 @@ validate live supported types, canonical parent path membership and unique
 child keys; and validate every nested directory graph. Bounded iterative
 traversal detects repeated/invalid structure without recursive stack growth.
 
+Graph validation persists a SQLite job bound to the physical root and original
+signed directory source ID. Its pending page/record queue, seen context/hash
+pairs, unique canonical child keys and exact metadata/file-chunk references
+survive reopening. Page depth is bounded to ten levels; canonical member paths
+strictly descend from their verified directory contexts. At most 1000 work
+items execute per advancement. Metadata ownership flush precedes the FULL
+transaction that records child work and completes its parent atomically.
+Large record chunk lists append references in batches of at most 1000 before
+that commit. Replays are idempotent for references; duplicate graph structure
+or child keys fail. Incomplete jobs never supply reference coverage. Completed
+immutable graph references can stream from SQLite without loading the whole
+tree. Job retirement must be bounded before the lifecycle task is completed.
+
 ## Materialization and acceptance
 
 Admit a directory root/source proof before normal original-path merging.
