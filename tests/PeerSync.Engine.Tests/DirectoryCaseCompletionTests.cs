@@ -38,6 +38,8 @@ public sealed partial class DirectorySnapshotCaptureTests
         if (readOnly)
         {
             copied.Record.ShouldBeNull();
+            (await reopened.RetireDirectoryCaseWitnessesAsync(reopened.Meta.Find("_root-identity")!.Value!, DateTime.UtcNow.AddDays(2).Ticks, cancellationToken: Token)).ShouldBeGreaterThan(0);
+            File.ReadAllText(Path.Combine(Root, destination, "a")).ShouldBe("retained original bytes");
             reopened.ReadRetainedDirectoryCases(reopened.Meta.Find("_root-identity")!.Value!, DateTime.UtcNow.Ticks).Single().SourceId.ShouldBe(source);
             // Isolate the original retained graph as the sole source of references.
             Sql("DELETE FROM local_files; DELETE FROM remote_files; DELETE FROM needed; DELETE FROM directory_publications;");

@@ -152,7 +152,12 @@ public sealed class Puller : IDisposable
                 if (index.Needed.Find(path)?.Work is { } descriptor) await index.ClearPullRetryAsync(path, descriptor.Fingerprint, token).ConfigureAwait(false);
         }
         using (await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false))
+        {
+            int retired = await index.RetireDirectoryCaseWitnessesAsync(rootId!, Now, limit: 64, cancellationToken: token).ConfigureAwait(false);
+            if (retired != 0) journal?.TryWrite(new("puller.case_witnesses_retired", "case-maintenance")
+                { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Debug, ItemsChanged = retired });
             await index.CompactCompletedCaseSourcesAsync(rootId!, Now, limit: 64, cancellationToken: token).ConfigureAwait(false);
+        }
         IReadOnlyList<NeededRow> work = neededRepairPending ? [] : index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
         foreach (var row in work)
         {

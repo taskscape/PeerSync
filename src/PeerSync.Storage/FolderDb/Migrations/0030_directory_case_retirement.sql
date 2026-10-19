@@ -1,0 +1,1 @@
+CREATE INDEX ix_directory_case_member_age ON directory_case_members(touched_ticks,source_id,root_file_id,member_key);
