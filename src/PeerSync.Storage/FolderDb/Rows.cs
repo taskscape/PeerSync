@@ -15,6 +15,9 @@ public sealed record LocalFileRow(string Path, uint Type, long Size, long MtimeT
 {
     /// <summary>Null preserves the index. A supplied list atomically replaces it; reads leave it unloaded.</summary>
     public IReadOnlyList<LocalChunk>? IndexedChunks { get; init; }
+    /// <summary>Caller has durably captured verified independent chunks. Required
+    /// for publication of live regular files; legacy rows default to withheld.</summary>
+    public bool ContentReady { get; init; }
 }
 
 // Remote original-case paths are in the signed body; these keys are uppercase invariant.

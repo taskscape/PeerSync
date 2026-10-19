@@ -34,7 +34,7 @@ public sealed partial class FolderIndex : IAsyncDisposable
     public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         var migrations = new List<DbMigration>();
-        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql" })
+        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql", "0005_content_ready.sql" })
         {
             using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations." + file)
                 ?? throw new InvalidOperationException("Missing folder schema resource.");
@@ -57,7 +57,7 @@ public sealed partial class FolderIndex : IAsyncDisposable
         long highWater = ReadSequence(connection, transaction);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE local_seq>$after AND local_seq<=$high AND flags=0 AND record_body IS NOT NULL ORDER BY local_seq LIMIT $limit;";
+        command.CommandText = "SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE local_seq>$after AND local_seq<=$high AND flags=0 AND record_body IS NOT NULL AND (type<>0 OR deleted=1 OR content_ready=1) ORDER BY local_seq LIMIT $limit;";
         command.Parameters.AddWithValue("$after", afterSequence);
         command.Parameters.AddWithValue("$high", highWater);
         command.Parameters.AddWithValue("$limit", limit);

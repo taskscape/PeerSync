@@ -11,7 +11,9 @@ namespace PeerSync.Engine.Native;
 internal sealed class SafeFileTree : IDisposable
 {
     private readonly NativeRoot root;
+    private readonly bool ownsRoot = true;
     public SafeFileTree(string rootPath) => root = new NativeRoot(rootPath, preventRename: true);
+    internal SafeFileTree(NativeRoot borrowedRoot) { root = borrowedRoot; ownsRoot = false; }
     public ReadOnlySpan<byte> Identity => root.Identity;
     public ulong CapacityBytes => NativeVolume.Capacity(root.Handle);
 
@@ -37,7 +39,7 @@ internal sealed class SafeFileTree : IDisposable
         catch { foreach (var handle in handles.AsEnumerable().Reverse()) handle.Dispose(); throw; }
     }
 
-    public void Dispose() => root.Dispose();
+    public void Dispose() { if (ownsRoot) root.Dispose(); }
 
     internal static bool ComponentValid(string name, bool allowTemp) => name.Length <= 255 && !name.Contains('/')
         && (PathRules.IsValid(name) || allowTemp && name.EndsWith(".!psp", StringComparison.OrdinalIgnoreCase)
@@ -95,6 +97,14 @@ internal sealed class DirectoryLease : IDisposable
         Check(name, temporary);
         // A mutation guard excludes other writers/deleters. Its own DELETE access supports rename by handle.
         return SafeFileTree.Open(parent, name, false, mutation ? 0x00130181u : 0x00100081u, mutation ? 1u : 7u, 1);
+    }
+
+    internal SafeFileHandle OpenReadGuard(string name)
+    {
+        Check(name, temporary: false);
+        // Multiple readers may coexist. Exclude writers/deleters, without
+        // requesting DELETE ourselves (which would exclude another reader).
+        return SafeFileTree.Open(parent, name, false, 0x00100081, 1, 1);
     }
 
     // Generic classification guard. Only mutate directories through it: file

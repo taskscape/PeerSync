@@ -47,7 +47,7 @@ public sealed class DirectoryApplierTests : IDisposable
         await using var index = await PrepareAsync(); var before = index.LocalFiles.Find("dir")!;
         await ReceiveAsync(index, "DIR", attributes: (uint)(FileAttributes.ReadOnly | FileAttributes.Hidden));
         (await Directories(index).ApplyAsync("dir", Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
-        Path.GetFileName(Directory.GetDirectories(Root).Single()).ShouldBe("DIR");
+        Path.GetFileName(Directory.GetDirectories(Root).Single(p => Path.GetFileName(p) != ".psp")).ShouldBe("DIR");
         File.ReadAllText(Disk("DIR/child")).ShouldBe("child data"); index.LocalFiles.Find("dir")!.FileId.ShouldBe(before.FileId);
         var attrs = File.GetAttributes(Disk("DIR")); (attrs & FileAttributes.Hidden).ShouldBe(FileAttributes.Hidden);
         (attrs & FileAttributes.ReadOnly).ShouldBe(FileAttributes.ReadOnly);

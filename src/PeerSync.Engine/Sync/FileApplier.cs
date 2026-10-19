@@ -272,22 +272,28 @@ public sealed partial class FileApplier
         }
         using var retained = Retain(tree, state, retainedOriginal);
         var archives = ReadArchives(state, retained?.File, token);
-        Signal("before-commit", intent.Id);
         if (state.IsRestore)
         {
             // Restoration is a local filesystem edit. Withhold stale metadata;
             // the normal scanner signs once (RW) or leaves it unpublished (RO).
+            Signal("before-commit", intent.Id);
             await CommitDeferredAsync(state, intent, archives, token).ConfigureAwait(false);
             Signal("committed", intent.Id); return;
         }
         var version = state.Version!; var body = version.ExportBody();
+        if (!version.Deleted && version.Type == 0)
+        {
+            using var blocks = new PublishedBlocks(tree);
+            blocks.CaptureFile(installed!, version, token);
+        }
         FileSnapshot? actual = installed is null ? null : FileSnapshot.Read(installed);
         var chunks = new List<LocalChunk>(); long offset = 0;
         foreach (var chunk in body.Chunks) { chunks.Add(new(offset, checked((int)chunk.Length), chunk.Hash.ToByteArray())); offset += chunk.Length; }
         var row = new LocalFileRow(version.Path, version.Type, version.Size, version.MtimeTicks,
             actual is null ? body.Attributes : (uint)actual.Value.Attributes, version.Deleted, version.ChangedTicks,
             version.Deleted || version.Type == 1 ? null : version.FileHash.ToArray(), state.Vector, version.Record,
-            actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks };
+            actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks, ContentReady = !version.Deleted && version.Type == 0 };
+        Signal("before-commit", intent.Id);
         if (state.OriginalIsDirectory && state.Retained.Length != 0)
             await index.CommitMovedDirectoryApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);
         else await index.CommitApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);

@@ -58,11 +58,12 @@ public sealed class FolderIndexTests : IDisposable
         Directory.GetFiles(root, "*.pre-v1-to-v2-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v2-to-v3-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v3-to-v4-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v4-to-v5-*.bak").Length.ShouldBe(1);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        ((long)command.ExecuteScalar()!).ShouldBe(4);
+        ((long)command.ExecuteScalar()!).ShouldBe(5);
         command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
         command.Parameters.AddWithValue("$path", "FILE");
         var details = new List<string>();
@@ -209,9 +210,56 @@ public sealed class FolderIndexTests : IDisposable
         seen.Count.ShouldBe(60); cursor.ShouldBe(60);
     }
 
+    [Fact]
+    public async Task UncapturedLiveRecordsAreWithheldUntilDurableReadinessButDirectoriesAndTombstonesNeedNoData()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var row = Row("file") with { ContentReady = false };
+        await index.LocalFiles.UpsertAsync([row, Row("dir") with { Type = 1, ContentReady = false },
+            Row("deleted") with { Deleted = true, ContentReady = false }], TestContext.Current.CancellationToken);
+        var batch = index.ReadIndexBatch(0); batch.Records.Select(r => r.Path).ShouldBe(["dir", "deleted"]); batch.LastSequence.ShouldBe(3);
+        await index.LocalFiles.UpsertAsync([row with { ContentReady = true }], TestContext.Current.CancellationToken);
+        var ready = index.ReadIndexBatch(batch.LastSequence).Records.Single(); ready.Path.ShouldBe("file"); ready.ContentReady.ShouldBeTrue();
+        ready.Record!.Body.ToArray().ShouldBe(row.Record!.Body.ToArray());
+    }
+
+    [Fact]
+    public async Task VersionFourRecordsMigrateWithExactBytesAndAreWithheldUntilContentIsCaptured()
+    {
+        var migrations = new List<DbMigration>();
+        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql" })
+        {
+            using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations." + file)!;
+            using var reader = new StreamReader(resource); migrations.Add(new(migrations.Count + 1, await reader.ReadToEndAsync(TestContext.Current.CancellationToken)));
+        }
+        var row = Row("legacy");
+        await using (var old = await Db.OpenAsync(DatabasePath, migrations, TestContext.Current.CancellationToken))
+        {
+            await old.WriteAsync((connection, transaction) =>
+            {
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = "INSERT INTO local_files(path_key,path,type,size,mtime_ticks,attributes,changed_ticks,file_hash,vv,record_body,signature,local_seq) VALUES('LEGACY','legacy',0,1,0,0,0,$hash,$vector,$body,$signature,1);";
+                command.Parameters.AddWithValue("$hash", Hash); command.Parameters.AddWithValue("$vector", VersionVector.Serialize(row.Vector));
+                command.Parameters.AddWithValue("$body", row.Record!.Body.ToArray()); command.Parameters.AddWithValue("$signature", row.Record.Signature.ToArray());
+                int written = command.ExecuteNonQuery();
+                command.Parameters.Clear(); command.CommandText = "INSERT INTO meta(key,value) VALUES('_local-sequence',$sequence);";
+                byte[] sequence = new byte[8]; BinaryPrimitives.WriteInt64LittleEndian(sequence, 1);
+                command.Parameters.AddWithValue("$sequence", sequence); command.ExecuteNonQuery(); return written;
+            }, TestContext.Current.CancellationToken);
+        }
+        await using var migrated = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var saved = migrated.LocalFiles.Find("legacy")!; saved.ContentReady.ShouldBeFalse(); saved.LocalSequence.ShouldBe(1);
+        saved.Record!.Body.ToArray().ShouldBe(row.Record!.Body.ToArray()); saved.Record.Signature.ToArray().ShouldBe(row.Record.Signature.ToArray());
+        VersionVector.Compare(saved.Vector, row.Vector).ShouldBe(VvOrder.Equal); migrated.ReadIndexBatch(0).Records.ShouldBeEmpty();
+        migrated.ReadIndexBatch(0).LastSequence.ShouldBe(1);
+        await migrated.LocalFiles.UpsertAsync([saved with { ContentReady = true }], TestContext.Current.CancellationToken);
+        migrated.ReadIndexBatch(1).Records.Single().Record!.Body.ToArray().ShouldBe(row.Record.Body.ToArray());
+        Directory.GetFiles(root, "*.pre-v4-to-v5-*.bak").Length.ShouldBe(1);
+    }
+
     private static LocalFileRow Row(string path) => new(path, 0, 1, 638000000000000000, 0, false, 638000000000000000,
         Hash, new Dictionary<ulong, ulong> { [ulong.MaxValue] = 7, [1] = 5 },
-        new SignedRecord("opaque storage fixture"u8, new byte[64], 999), null);
+        new SignedRecord("opaque storage fixture"u8, new byte[64], 999), null) { ContentReady = true };
 
     public void Dispose() => Directory.Delete(root, recursive: true);
 }
