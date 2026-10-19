@@ -68,7 +68,7 @@ public sealed partial class FolderIndex
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT COUNT(*) " + EligibleSweepFrom + " AND b.hash=$hash AND b.length=$length AND b.file_id=$file "
                 + "AND b.captured_ticks=$captured AND b.last_used_ticks=$used AND o.first_unreferenced_ticks=$first "
-                + "AND (SELECT COUNT(*) FROM block_deletions)<1000 AND NOT EXISTS(SELECT 1 FROM block_deletions WHERE hash=b.hash);";
+                + "AND ((SELECT COUNT(*) FROM block_deletions)+(SELECT COUNT(*) FROM capture_retirements))<1000 AND NOT EXISTS(SELECT 1 FROM block_deletions WHERE hash=b.hash);";
             BindSweep(command, frozen.SnapshotId, row.RootId, frozen.PreparedTicks, archiveDays, capacityBytes); BindOwned(command, frozen.Candidate);
             if ((long)command.ExecuteScalar()! != 1) return false;
             var reason = DeletionReason(frozen.Candidate.FirstUnreferencedTicks, frozen.PreparedTicks, archiveDays);

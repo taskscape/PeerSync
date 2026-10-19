@@ -64,8 +64,27 @@ public sealed class BlockRetention
             var policy = await new HistoryPolicy(rootPath, index, keys, device, settings, clock, journal).RetireUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
             if (policy.WaitingForRecovery) return Result(waiting: true);
             var fresh = await new BlockReferences(rootPath, index, keys, device, journal).RefreshUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
+            if (fresh.SnapshotId is null || fresh.WaitingForRecovery || fresh.ArchivesWithoutManifest != 0)
+            { deferred += checked((int)Math.Min(int.MaxValue, fresh.ArchivesWithoutManifest + fresh.CaptureDeferrals)); Log("block.sweep_wait", code: "reference-coverage"); return Result(waiting: true); }
+            Guid snapshot = fresh.SnapshotId.Value; long now = clock.GetUtcNow().UtcTicks;
+            // Reconcile/cancel old journals even while partial captures defer.
+            // Present data may be deleted only with complete capture coverage.
+            foreach (var intent in index.ReadBlockDeletionIntents().ToArray())
+            {
+                if (visited >= 1000) break; cancellationToken.ThrowIfCancellationRequested(); visited++;
+                try { await DeleteAsync(intent, recovering: true, allowNativeDeletion: fresh.AllKnownSourcesCovered).ConfigureAwait(false); }
+                catch (Exception error) when (FileError(error)) { deferred++; Log("block.sweep_deferred", intent.Id, error); }
+                Progress();
+            }
+            if (visited < 1000)
+            {
+                var captures = await PublishedBlocks.RetireCapturesAsync(tree, index, snapshot, now, 1000 - visited, journal, Checkpoint, cancellationToken).ConfigureAwait(false);
+                deleted += captures.Deleted; missing += captures.Missing; cancelled += captures.Cancelled; removed += captures.BytesRemoved; visited += captures.Visited;
+                if (captures.Visited != 0) fresh = await new BlockReferences(rootPath, index, keys, device, journal).RefreshUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
+                if (captures.Deferred != 0 && fresh.CaptureDeferrals == 0) { deferred += captures.Deferred; Log("block.sweep_wait", code: "capture-retirement"); return Result(waiting: true); }
+            }
             if (!fresh.AllKnownSourcesCovered) { deferred += checked((int)Math.Min(int.MaxValue, fresh.ArchivesWithoutManifest + fresh.CaptureDeferrals)); Log("block.sweep_wait", code: "reference-coverage"); return Result(waiting: true); }
-            Guid snapshot = fresh.SnapshotId!.Value; Checkpoint?.Invoke("refreshed"); long now = clock.GetUtcNow().UtcTicks;
+            snapshot = fresh.SnapshotId!.Value; Checkpoint?.Invoke("refreshed");
             byte[]? cursor = null;
             do
             {
@@ -73,15 +92,6 @@ public sealed class BlockRetention
                 cursor = batch.NextHash; Progress(); if (batch.Visited < 1000) break;
             } while (cursor is not null);
             Checkpoint?.Invoke("observed");
-            // Complete/cancel old intents first. At most 1,000 pending intents
-            // exist; the shared pass budget also bounds new native deletions.
-            foreach (var intent in index.ReadBlockDeletionIntents().ToArray())
-            {
-                cancellationToken.ThrowIfCancellationRequested(); visited++;
-                try { await DeleteAsync(intent, recovering: true).ConfigureAwait(false); }
-                catch (Exception error) when (FileError(error)) { deferred++; Log("block.sweep_deferred", intent.Id, error); }
-                Progress();
-            }
             foreach (var candidate in index.ReadBlockSweepCandidates(snapshot, root, now, settings.ArchiveDays, cap, limit: Math.Max(1, 1000 - visited)).ToArray())
             {
                 if (visited >= 1000) break; visited++; cancellationToken.ThrowIfCancellationRequested();
@@ -93,11 +103,11 @@ public sealed class BlockRetention
             }
             Log("block.sweep_complete"); return Result();
 
-            async Task DeleteAsync(BlockDeletionIntent intent, bool recovering)
+            async Task DeleteAsync(BlockDeletionIntent intent, bool recovering, bool allowNativeDeletion = true)
             {
                 var row = intent.Candidate.OwnedBlock;
                 if (!row.RootId.AsSpan().SequenceEqual(root)) throw new IOException("Block deletion belongs to another root.");
-                bool mayDelete = !recovering || await index.CanContinueBlockDeletionAsync(intent, snapshot, now, settings.ArchiveDays, cap, cancellationToken).ConfigureAwait(false);
+                bool mayDelete = allowNativeDeletion && (!recovering || await index.CanContinueBlockDeletionAsync(intent, snapshot, now, settings.ArchiveDays, cap, cancellationToken).ConfigureAwait(false));
                 string name = Convert.ToHexString(row.Hash); DirectoryLease? parent = null; SafeFileHandle? file = null;
                 try
                 {
