@@ -15,6 +15,7 @@ public sealed class DiagnosticJournal : IDisposable
     private readonly long maxFileBytes;
     private readonly int retainedFiles;
     private bool disposed;
+    private long droppedEvents;
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     public DiagnosticJournal(string directory, string component, bool debugEnabled = false,
@@ -34,6 +35,15 @@ public sealed class DiagnosticJournal : IDisposable
     }
 
     public bool DebugEnabled { get; }
+    public long DroppedEvents => Interlocked.Read(ref droppedEvents);
+
+    /// <summary>Best effort engine diagnostics. Strict Write remains available for validation tools.</summary>
+    public bool TryWrite(DiagnosticEvent entry)
+    {
+        try { Write(entry); return true; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ObjectDisposedException or ArgumentException)
+        { Interlocked.Increment(ref droppedEvents); return false; }
+    }
 
     /// <summary>No arbitrary message, exception text, paths, keys, FolderIds, or payloads are accepted.</summary>
     public void Write(DiagnosticEvent entry)

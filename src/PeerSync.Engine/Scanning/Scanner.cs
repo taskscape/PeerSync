@@ -68,7 +68,7 @@ public sealed class Scanner : IDisposable
         try
         {
             using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-            journal?.Write(new("scan.start", "scan") { SessionId = session });
+            journal?.TryWrite(new("scan.start", "scan") { SessionId = session });
             if (index.ReadApplyIntents().Any())
                 throw new IOException("Pending file application must be recovered before scanning.");
             using var root = new NativeRoot(rootPath);
@@ -121,7 +121,7 @@ public sealed class Scanner : IDisposable
                 {
                     protectedPrefixes.Add(directory.ToUpperInvariant());
                     problems.Add(new(directory, "enumeration-failed", NativeCode(error)));
-                    journal?.Write(new("scan.enumeration_failed", "scan") { SessionId = session,
+                    journal?.TryWrite(new("scan.enumeration_failed", "scan") { SessionId = session,
                         Level = DiagnosticLevel.Warning, HResult = error.HResult, NativeError = NativeCode(error) });
                 }
             }
@@ -155,7 +155,8 @@ public sealed class Scanner : IDisposable
                     catch (EncoderFallbackException) { /* Cannot represent this local name in SQLite UTF-8. */ }
                     return;
                 }
-                if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry))
+                if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry)
+                    && (!keys.CanWrite || old.Record is not null))
                 { Interlocked.Increment(ref unchanged); return; }
                 try
                 {
@@ -215,21 +216,34 @@ public sealed class Scanner : IDisposable
                     if ((old.Flags & LocalFileState.Ignored) == 0) updates.Add(old with { Flags = old.Flags | LocalFileState.Ignored });
                     continue;
                 }
-                if (entries.ContainsKey(key) || Under(key, protectedPrefixes) || IsInternal(old.Path) || old.Deleted) continue;
+                if (entries.ContainsKey(key) || Under(key, protectedPrefixes) || IsInternal(old.Path)) continue;
                 // Ignore rules can also match paths that disappeared before this walk.
                 if (PathRules.IsValid(old.Path) && ignore.IsIgnored(old.Path, old.Type == 1))
                 {
                     if ((old.Flags & LocalFileState.Ignored) == 0) updates.Add(old with { Flags = old.Flags | LocalFileState.Ignored });
                     continue;
                 }
+                if (old.Deleted)
+                {
+                    LocalFileState flags = old.Flags & LocalFileState.Unsyncable;
+                    if (keys.CanWrite && old.Record is null && old.Vector.Count != 0 && flags == LocalFileState.None && PathRules.IsValid(old.Path))
+                    {
+                        var pending = old with { Flags = flags, Vector = VersionVector.Increment(old.Vector, deviceShort), IndexedChunks = [] };
+                        updates.Add(pending with { Record = Sign(pending, 0, []) });
+                    }
+                    else if (flags != old.Flags) updates.Add(old with { Flags = flags });
+                    continue;
+                }
                 long now = clock.GetUtcNow().UtcTicks;
-                var vector = keys.CanWrite && old.Record is not null ? VersionVector.Increment(old.Vector, deviceShort) : old.Vector;
+                bool publish = keys.CanWrite && (old.Flags & LocalFileState.Unsyncable) == 0
+                    && (old.Record is not null || old.Vector.Count != 0);
+                var vector = publish ? VersionVector.Increment(old.Vector, deviceShort) : old.Vector;
                 var tombstone = old with
                 {
                     Deleted = true, Size = 0, ChangedTicks = now, FileHash = null, FileId = null, Vector = vector,
                     Flags = old.Flags & LocalFileState.Unsyncable, Record = null, IndexedChunks = [],
                 };
-                if (keys.CanWrite && old.Record is not null) tombstone = tombstone with { Record = Sign(tombstone, 0, []) };
+                if (publish) tombstone = tombstone with { Record = Sign(tombstone, 0, []) };
                 updates.Add(tombstone); deleted++;
             }
             // The root's pathname may have been replaced while its pinned handle stayed valid.
@@ -238,7 +252,7 @@ public sealed class Scanner : IDisposable
                     throw new IOException("Sync root was replaced during the scan.");
             int written = await index.LocalFiles.UpsertAsync(updates.OrderBy(r => r.Path, StringComparer.Ordinal), cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
-            journal?.Write(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
+            journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
@@ -249,13 +263,13 @@ public sealed class Scanner : IDisposable
                 problems.Add(new(path, code, native));
                 if (old is not null && (old.Flags & LocalFileState.NeedsRescan) == 0)
                     updates.Add(old with { Flags = old.Flags | LocalFileState.NeedsRescan });
-                journal?.Write(new("scan.defer", "scan")
+                journal?.TryWrite(new("scan.defer", "scan")
                 { SessionId = session, Level = DiagnosticLevel.Debug, ErrorCode = code, NativeError = native, RetryInMilliseconds = 10000 });
             }
         }
         catch (Exception error)
         {
-            journal?.Write(new("scan.failed", "scan") { SessionId = session, Level = DiagnosticLevel.Error,
+            journal?.TryWrite(new("scan.failed", "scan") { SessionId = session, Level = DiagnosticLevel.Error,
                 ErrorCode = error is OperationCanceledException ? "cancelled" : "scan-error", HResult = error.HResult,
                 NativeError = NativeCode(error), ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;

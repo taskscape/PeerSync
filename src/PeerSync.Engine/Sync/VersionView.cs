@@ -16,10 +16,10 @@ public sealed class VersionView
 {
     private readonly FileRecordBody value;
     private readonly byte[] source;
-    private VersionView(Envelope record, FileRecordBody value, byte[] source, IReadOnlyDictionary<ulong, ulong>? cachedVector = null)
+    private VersionView(Envelope record, FileRecordBody value, byte[] source)
     {
         Record = record; this.value = value; this.source = source.ToArray();
-        Vector = new ReadOnlyDictionary<ulong, ulong>(cachedVector?.ToDictionary() ?? value.Vv.ToDictionary(v => v.Device, v => v.Counter));
+        Vector = new ReadOnlyDictionary<ulong, ulong>(value.Vv.ToDictionary(v => v.Device, v => v.Counter));
     }
     [JsonIgnore] public Envelope Record { get; }
     [JsonIgnore] public IReadOnlyDictionary<ulong, ulong> Vector { get; }
@@ -34,19 +34,14 @@ public sealed class VersionView
     public long ChangedTicks => value.ChangedTicks;
     public long EffectiveChangeTicks => Deleted ? ChangedTicks : MtimeTicks;
     public FileRecordBody ExportBody() => value.Clone();
-    internal VersionView WithCachedVector(IReadOnlyDictionary<ulong, ulong> vector)
-    {
-        if (VersionVector.Compare(vector, Vector) is VvOrder.Concurrent or VvOrder.DominatedBy)
-            throw new InvalidDataException("Cached vector does not include its signed version.");
-        return new(Record, value, source, vector);
-    }
 
     public static VersionView Open(Envelope record, FolderKeys keys, byte[] sourceDevice)
     {
         ArgumentNullException.ThrowIfNull(sourceDevice);
         if (sourceDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(sourceDevice));
         if (!SignedRecordFactory.TryOpen(record, keys, out var body)) throw new CryptographicException("Invalid signed file record.");
-        if (body.Type > 2 || body.Size > long.MaxValue || body.MtimeTicks < 0 || body.MtimeTicks > DateTime.MaxValue.Ticks
+        if (body.Type > 2 || (body.Attributes & ~(uint)(FileAttributes.ReadOnly | FileAttributes.Hidden)) != 0
+            || body.Size > long.MaxValue || body.MtimeTicks < 0 || body.MtimeTicks > DateTime.MaxValue.Ticks
             || body.ChangedTicks < 0 || body.ChangedTicks > DateTime.MaxValue.Ticks || body.ModifiedBy.Length != 32
             || body.Vv.Count == 0 || !body.Vv.Any(v => v.Device == BinaryPrimitives.ReadUInt64LittleEndian(body.ModifiedBy.Span)))
             throw new InvalidDataException("Invalid signed version metadata.");

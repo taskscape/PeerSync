@@ -9,6 +9,17 @@ namespace PeerSync.Core.Tests;
 public sealed class FolderSettingsTests
 {
     [Fact]
+    public void SerializedSettingsCannotExceedTheReadersLimitEvenWhenEachHostIsValid()
+    {
+        string host = string.Join('.', new string('a', 63), new string('b', 63), new string('c', 63), new string('d', 61)) + ":47821";
+        var settings = new FolderSettings { PredefinedHosts = Enumerable.Repeat(host, 256).ToArray() };
+        settings.Validate();
+        Should.Throw<ValidationException>(() => settings.ToJson());
+        var fitting = settings with { PredefinedHosts = Enumerable.Repeat(host, 200).ToArray() };
+        FolderSettings.FromJson(fitting.ToJson()).ToJson().ShouldBe(fitting.ToJson());
+    }
+
+    [Fact]
     public void MissingPropertiesUseThePlansDefaults()
     {
         var settings = FolderSettings.FromJson("{}");

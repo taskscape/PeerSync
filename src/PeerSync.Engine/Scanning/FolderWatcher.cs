@@ -102,7 +102,7 @@ public sealed class FolderWatcher : IDisposable
                 {
                     pending.Clear();
                     string reason = (overflow & 1) != 0 ? "watcher-overflow" : (overflow & 2) != 0 ? "queue-overflow" : "pending-overflow";
-                    journal?.Write(new("watcher.full_scan", "watch") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = reason });
+                    journal?.TryWrite(new("watcher.full_scan", "watch") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = reason });
                     yield return new([], true, reason);
                 }
                 if (!ticking.IsCompleted) continue;
@@ -110,7 +110,7 @@ public sealed class FolderWatcher : IDisposable
                 ticking = tick.WaitForNextTickAsync(linked.Token).AsTask();
                 string[] ready = pending.Ready(clock.GetElapsedTime(started));
                 if (ready.Length == 0) continue;
-                journal?.Write(new("watcher.batch", "watch") { SessionId = session, Level = DiagnosticLevel.Debug, ItemsChanged = ready.Length });
+                journal?.TryWrite(new("watcher.batch", "watch") { SessionId = session, Level = DiagnosticLevel.Debug, ItemsChanged = ready.Length });
                 yield return new(ready, false);
             }
         }

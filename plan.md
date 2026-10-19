@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1 review repairs: select RO winners using signed vectors, merge cached knowledge afterward, preserve nested vector unknown fields, reject unsupported attributes and use safe conflict-name fallback stems. Engine diagnostics use best-effort writes so logging cannot change sync outcomes. | Sync engine design: Version vectors and conflicts; deployment diagnostics |
 | 2026-10-19 | P1.5.3b: share a per-index asynchronous gate across scans and filesystem apply/recovery, and reject scans with pending apply intent before walking. Cancellation releases component gates; unrelated folder owners remain independent. | Sync engine design: Metadata database |
 | 2026-10-19 | P1.5.3: preserve atomic existing-target installation and the held verified target guard; validate native replacement/POSIX semantics and no-overwrite old-object retention before coordinator integration. Unsupported behavior fails without substituting a two-rename gap. | Sync engine design: Applying remote changes |
 | 2026-10-19 | P1.5.3a: persist bounded apply intents before destructive filesystem work; use serialized FULL-synchronous transactions for intent lifecycle and atomic local/chunk/sequence/archive/needed completion. Keep ordinary scan writes NORMAL and retain intents on failed commits or local-sequence mismatch. Add migration 4 through the existing backup path. | Sync engine design: Metadata database |
@@ -1085,6 +1086,11 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
 ```
 
 ### P1.3 Storage
+
+Review repairs for storage/settings, scanner role transitions, scheduling and
+conflict handling are tracked in [verification](docs/verification/P1-review-repairs-2026-10-19.md).
+Affected tasks remain unchecked until those repairs merge with green CI, even
+if their earlier foundation PR has already passed its checks.
 
 - [x] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) (#9)
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.

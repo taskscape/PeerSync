@@ -10,6 +10,26 @@ public sealed class DiagnosticJournalTests : IDisposable
     private readonly string directory = Path.Combine(Path.GetTempPath(), "PeerSync-test-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void BestEffortWritesCountUnavailableOrDisposedOutputWithoutChangingStrictWrite()
+    {
+        using var log = new DiagnosticJournal(directory, "test");
+        Directory.CreateDirectory(Path.Combine(directory, "debug.jsonl"));
+        log.TryWrite(new("operation.complete", "test")).ShouldBeFalse(); log.DroppedEvents.ShouldBe(1);
+        Should.Throw<UnauthorizedAccessException>(() => log.Write(new("operation.complete", "test")));
+        log.Dispose(); log.TryWrite(new("operation.failed", "test")).ShouldBeFalse(); log.DroppedEvents.ShouldBe(2);
+    }
+
+    [Fact]
+    public void BestEffortFormattingFailureDoesNotExposeInvalidDataAndLaterWritesStillWork()
+    {
+        using var log = new DiagnosticJournal(directory, "test");
+        log.TryWrite(new("private path/invalid", "test")).ShouldBeFalse(); log.DroppedEvents.ShouldBe(1);
+        log.TryWrite(new("operation.complete", "test")).ShouldBeTrue();
+        string text = File.ReadAllText(Path.Combine(directory, "debug.jsonl")); text.ShouldNotContain("private path");
+        File.ReadAllLines(Path.Combine(directory, "debug.jsonl")).Length.ShouldBe(1);
+    }
+
+    [Fact]
     public void StructuredEventsKeepSessionCorrelationAndGateDebug()
     {
         Guid session = Guid.NewGuid();

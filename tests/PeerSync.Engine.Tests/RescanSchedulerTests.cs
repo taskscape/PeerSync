@@ -1,4 +1,5 @@
 using PeerSync.Crypto;
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Engine.Scanning;
@@ -177,6 +178,65 @@ public sealed class RescanSchedulerTests : IDisposable
             stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token);
             if (other is not null) await other.WaitAsync(TimeSpan.FromSeconds(5), Token);
         }
+    }
+
+    [Theory]
+    [InlineData(5, 5)]
+    [InlineData(5, 517)]
+    [InlineData(6, 6)]
+    [InlineData(10, 10)]
+    [InlineData(13, 13)]
+    [InlineData(14, 14)]
+    public async Task RecoverableSqliteFailuresBackOffWithoutStoppingOtherFolders(int code, int extendedCode)
+    {
+        string failedRoot = Tree("failed"), healthyRoot = Tree("healthy");
+        File.WriteAllText(Path.Combine(failedRoot, "file"), "first"); File.WriteAllText(Path.Combine(healthyRoot, "file"), "second");
+        using var keys = FolderKeys.CreateNew();
+        await using var failedIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "failed.db"), Token);
+        await using var healthyIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "healthy.db"), Token);
+        // Inject the database exception through the existing clock seam; exercise the real scheduler loop.
+        using var failed = new Scanner(failedRoot, failedIndex, keys, new byte[32], timeProvider: new CallbackClock(() => throw new SqliteException("injected", code, extendedCode)));
+        using var healthy = new Scanner(healthyRoot, healthyIndex, keys, new byte[32]);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "sqlite-logs"), "scheduler");
+        var scheduler = new RescanScheduler([new(failed, WatchChanges: false), new(healthy, WatchChanges: false)], journal: journal);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token); Task running = scheduler.RunAsync(stopping.Token);
+        try
+        {
+            var outcomes = new[] { await Next(scheduler), await Next(scheduler) };
+            outcomes.Single(o => o.Scanner == failed).RetryInSeconds.ShouldBe(10);
+            outcomes.Single(o => o.Scanner == healthy).Result!.Updated.ShouldBe(1); running.IsCompleted.ShouldBeFalse();
+            bool found = false;
+            foreach (string line in File.ReadAllLines(Path.Combine(fixture, "sqlite-logs", "debug.jsonl")))
+            {
+                using var json = JsonDocument.Parse(line);
+                if (json.RootElement.GetProperty("eventName").GetString() != "scheduler.scan_failed") continue;
+                found = true;
+                json.RootElement.GetProperty("errorCode").GetString()!.ShouldStartWith("sqlite-");
+                json.RootElement.GetProperty("nativeError").GetInt32().ShouldBe(extendedCode);
+            }
+            found.ShouldBeTrue();
+        }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
+    }
+
+    [Theory]
+    [InlineData(11)]
+    [InlineData(26)]
+    public async Task NonretryableDatabaseCorruptionRemainsFatalAndReleasesTheScanBudget(int code)
+    {
+        string failedRoot = Tree("failed"), healthyRoot = Tree("healthy");
+        File.WriteAllText(Path.Combine(failedRoot, "file"), "first"); File.WriteAllText(Path.Combine(healthyRoot, "file"), "second");
+        using var keys = FolderKeys.CreateNew();
+        await using var failedIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "failed.db"), Token);
+        await using var healthyIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "healthy.db"), Token);
+        using var failed = new Scanner(failedRoot, failedIndex, keys, new byte[32], timeProvider: new CallbackClock(() => throw new SqliteException("injected corruption", code)));
+        using var healthy = new Scanner(healthyRoot, healthyIndex, keys, new byte[32]);
+        var scheduler = new RescanScheduler([new(failed, WatchChanges: false)]);
+        (await Should.ThrowAsync<SqliteException>(() => scheduler.RunAsync(Token))).SqliteErrorCode.ShouldBe(code);
+        var other = new RescanScheduler([new(healthy, WatchChanges: false)]);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token); Task running = other.RunAsync(stopping.Token);
+        try { (await Next(other)).Result!.Updated.ShouldBe(1); }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
     }
 
     private static async Task<ScanOutcome> Next(RescanScheduler scheduler)

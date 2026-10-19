@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.ComponentModel.DataAnnotations;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -19,6 +20,21 @@ public sealed class StateStoreTests : IDisposable
     private const string Actor = "S-1-5-18";
     private static readonly string[] RemovalAudit = ["folder-register", "folder-settings-update", "folder-remove"];
     public StateStoreTests() => Directory.CreateDirectory(root);
+
+    [Fact]
+    public async Task OversizedSettingsCannotReplaceReadablePersistedStateOrCommitAnAudit()
+    {
+        using var keys = FolderKeys.CreateNew();
+        await using var state = await StateStore.OpenAsync(DatabasePath, cancellationToken: TestContext.Current.CancellationToken);
+        var initial = new FolderSettings { KeepBothCopies = true };
+        var folder = await state.RegisterFolderAsync(keys, Path.Combine(root, "share"), initial, Actor, cancellationToken: TestContext.Current.CancellationToken);
+        int auditCount = state.ReadAudit().Count();
+        string host = string.Join('.', new string('a', 63), new string('b', 63), new string('c', 63), new string('d', 61)) + ":47821";
+        var oversized = new FolderSettings { PredefinedHosts = Enumerable.Repeat(host, 256).ToArray() }; oversized.Validate();
+        await Should.ThrowAsync<ValidationException>(() => state.UpdateFolderAsync(folder.Id, oversized, true, Actor, TestContext.Current.CancellationToken));
+        var saved = state.ListFolders().Single(); saved.Settings.ToJson().ShouldBe(initial.ToJson()); saved.Paused.ShouldBeFalse();
+        state.ReadAudit().Count().ShouldBe(auditCount);
+    }
 
     [Fact]
     public async Task EveryRoleIsProtectedRoundTrippedAndAuditedWithoutKeyMaterialInListings()

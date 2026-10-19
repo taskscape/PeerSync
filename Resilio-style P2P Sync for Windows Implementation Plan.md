@@ -288,6 +288,13 @@ entries and unrepresentable names are local unsyncable metadata, not followed.
 Directories publish presence/attribute changes; child-caused directory mtime
 changes alone do not create versions. Read-only scans track actual local data
 without signing changes; the puller applies their local-change policy.
+Upgrading to RW publishes unchanged valid entries that have no signed record.
+Pending RO deletions become signed causal tombstones only when prior published
+knowledge exists, preserving their observed deletion time. Never-published or
+unsyncable removals do not invent tombstones. Missing signed tombstones regain
+publication after temporary ignore/rescan suppression, with a fresh sequence
+and unchanged edit vector/body. Recoverable SQLite busy/locked/I/O/full/open
+errors enter the same scheduler backoff; corruption and invalid databases remain fatal.
 Scan diagnostics correlate start/completion/retry/failure events by session,
 with numeric visited/changed/hashed/skipped/deferred totals and native errors.
 File paths, key material and record bodies are excluded from the journal;
@@ -321,6 +328,13 @@ without incrementing a device counter for a merge alone. Equal timestamps and
 DeviceIds use the exact signed body as a final stable tie-break. Matching file
 contents still choose deterministic metadata (path case, attributes, mtime).
 Only RW peers sign a new merged envelope; RO peers retain original signatures.
+Candidate causality always uses the vector in the signed record. Validate an
+RO cache's dominating logical knowledge, but merge that knowledge only after
+winner selection; it must never make old contents concurrent with their signed
+causal descendant. Re-signing a merged vector preserves unknown fields inside
+existing vector entries as well as on the enclosing body. Reject unsupported
+attribute bits before storing a verified version. Conflict-name truncation
+uses a safe fallback stem if the truncated basename becomes a Windows device.
 Remote index records, the sender cursor and affected needed rows commit in one
 writer transaction. Verify envelopes before submission; then compute affected
 path winners from the transaction's current local/all-remote snapshot. Replays
@@ -506,6 +520,10 @@ instructions must identify exact OS/runtime versions and distinguish native
 loopback, LAN, WAN, container and VM evidence. The P0 journal, collector and
 probe runbook establish the mechanism; production event hooks ship with their
 components in P2 and P4.
+Engine diagnostics are best effort: unavailable/disposed logs or rejected
+event formatting cannot turn a committed sync operation into a failure or
+replace its original exception/cancellation. Keep strict Write for diagnostic
+validation tools; engine paths use TryWrite and expose a dropped-event count.
 
 Cross-machine diagnostic refinement (2026-10-18): retain managed HRESULT,
 native socket error and QUIC transport/application error numbers as separate
