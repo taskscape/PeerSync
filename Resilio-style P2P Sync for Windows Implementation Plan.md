@@ -410,6 +410,18 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
 ### Archive, ignore rules and special files
 
 - **Archive:** `.psp\archive\` keeps replaced and deleted files for 30 days, up to 1,000 MB per file, plus a total cap (default 10% of the volume). A daily task prunes it. Restore is in the UI from phase 5.
+  Pruning shares the folder operation gate and waits for pending recovery.
+  Expire old entries first, then remove the oldest remaining versions until the
+  cap holds. Use the actual hosting volume capacity, independent of user disk
+  quotas. Delete only indexed archive files whose guarded bytes still match
+  the recorded size/hash; pin every ancestor, reject reparse traversal and keep
+  changed or locked entries for retry. Remove filesystem data before its index
+  row so an interrupted cleanup leaves a reconcilable missing-file row, never
+  unaccounted retained data. Missing indexed files are reconciled on retry.
+  Do not recursively sweep unknown archive files or directories. A persisted
+  successful-run timestamp schedules daily cleanup across host restarts;
+  deferred cleanup retries with bounded 10–600 second backoff. Restoring content
+  remains a normal local edit, distinct from forwarding an archived signature.
 - **Ignore rules:** `.psp\ignore` uses gitignore-style patterns (`*`, `?`, `**`, `#`, a leading `/` anchors to the root), case-insensitive on Windows. A slash inside a pattern also anchors it; a trailing slash matches directories and their descendants. `**` as a whole component spans zero or more directories; trailing `/**` matches descendants, not the parent itself. Rules may use Windows backslashes as separators. `!` negates an earlier match, but children cannot be re-included while their parent remains excluded. Escape an initial `#` or `!` with a backslash for a literal name. Wildcards match Unicode scalar values. This is the stated glob subset, without bracket character classes. The defaults ignore `Thumbs.db`, `desktop.ini`, `~$*`, `*.tmp`, `$RECYCLE.BIN` and `System Volume Information`. Built-in path rules always exclude root `.psp`, temp suffixes and invalid paths. Like Resilio's IgnoreList, rules are local to each device.
 - **Read-only folders:** local edits are never sent. An "Overwrite local changes" option restores the swarm's version, as Resilio's `overwrite_changes` does.
 - **`.psp` folder:** hidden and system attributes, holding `id`, `ignore` and `archive\`. It is never synced. Temp files (`*.!psp`) are hidden and skipped by the scanner.
