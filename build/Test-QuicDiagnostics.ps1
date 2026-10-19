@@ -2,6 +2,8 @@
 param([string]$ExecutablePath)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+. "$PSScriptRoot/QuicDiagnosticEvidence.ps1"
+& "$PSScriptRoot/Test-QuicDiagnosticEvidence.ps1"
 $executable = if ($ExecutablePath) { (Resolve-Path -LiteralPath $ExecutablePath).ProviderPath }
     else { Join-Path $root 'spikes/QuicBasics/bin/Release/net10.0-windows10.0.20348.0/QuicBasics.exe' }
 $evidence = Join-Path $root 'artifacts/p0/quic-timeout'
@@ -58,9 +60,10 @@ try {
     $clientLogs = Join-Path (Split-Path $executable -Parent) "logs/$($client.Process.Id)"
     Copy-Item -LiteralPath (Join-Path $serverLogs 'debug.jsonl') -Destination (Join-Path $evidence 'server.jsonl')
     Copy-Item -LiteralPath (Join-Path $clientLogs 'debug.jsonl') -Destination (Join-Path $evidence 'client.jsonl')
-    $events = Get-Content (Join-Path $serverLogs 'debug.jsonl') | ConvertFrom-Json
-    $failure = $events | Where-Object eventName -eq 'transfer.failed'
-    if ($failure.errorCode -ne 'ProbeTimeout' -or $failure.operation -ne 'receive' -or $failure.bytes -le 0 -or $null -eq $failure.hResult) {
+    $events = @(Select-QuicInvocationEvents -Events @(Get-Content (Join-Path $serverLogs 'debug.jsonl') | ConvertFrom-Json) -ExpectedProcessId $server.Process.Id `
+        -StartedUtc $server.Process.StartTime.ToUniversalTime() -ExitedUtc $server.Process.ExitTime.ToUniversalTime() -Role listen)
+    $failure = @($events | Where-Object eventName -eq 'transfer.failed')
+    if ($failure.Count -ne 1 -or $failure[0].errorCode -ne 'ProbeTimeout' -or $failure[0].operation -ne 'receive' -or $failure[0].bytes -le 0 -or $null -eq $failure[0].hResult) {
         throw 'Timeout did not preserve its stage, progress and HRESULT'
     }
     $progress = @($events | Where-Object eventName -eq 'transfer.progress')

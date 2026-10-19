@@ -134,11 +134,12 @@ public sealed class FileApplierTests : IDisposable
         var applier = new FileApplier(Root, index, keys, own);
         await Should.ThrowAsync<OperationCanceledException>(() => applier.ApplyAsync("file.txt", (_, _, _) =>
         { cancel.Cancel(); return ValueTask.FromResult<ReadOnlyMemory<byte>>(New); }, cancel.Token));
-        (await applier.RecoverAsync(Token)).ShouldBe(1);
         // The chunk may have been written before cancellation was observed. Seed
-        // the owned temporary to test restart reuse independently of that timing.
+        // the owned temporary before recovery records its content fingerprint,
+        // testing restart reuse independently of that timing.
         using (var seed = new FileStream(Directory.GetFiles(Root, "*.!psp").Single(), FileMode.Open, FileAccess.Write))
         { seed.Write(New); seed.SetLength(New.Length); }
+        (await applier.RecoverAsync(Token)).ShouldBe(1);
         (await applier.ApplyAsync("file.txt", (_, _, _) => throw new InvalidOperationException("No fetch expected"), Token)).ShouldBe(FileApplyOutcome.Applied);
         File.ReadAllBytes(Path.Combine(Root, "file.txt")).ShouldBe(New);
     }

@@ -43,5 +43,6 @@ production transport and rendered service-status UI remain open, as do general
 case coordination, stale-temp cleanup, expanded simulations, 1,000 CI cases,
 five consecutive CI days and the 100,000-file zero-loss gate. P1.5.3f has separate
 local evidence and is not included in this merged head. Production sync remains
-unavailable. The automatic main-push workflow is separate follow-up evidence;
-its result is not assumed here.
+unavailable. The automatic main-push [run 39269668129](https://github.com/taskscape/PeerSync/actions/runs/39269668129)
+also passed all five jobs on the exact squash head, verified 2026-10-19. This
+follow-up does not include later local hierarchy/staging changes.

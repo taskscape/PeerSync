@@ -40,7 +40,7 @@ public sealed partial class FileApplier
             if (occupied is not null) { Signal("restore-copy-blocked", session); return FileApplyOutcome.Blocked; }
         }
         var known = index.LocalFiles.Find(key);
-        using var temporary = OpenTemporary(tree, parent, path, out string temporaryPath, out byte[] temporaryId);
+        using var temporary = OpenTemporary(tree, parent, path, out string temporaryPath, out byte[] temporaryId, cancellationToken: token, session: session);
         var state = new ApplyState { Root = tree.Identity.ToArray(), Restore = restore, Vector = new Dictionary<ulong, ulong>(),
             Temporary = temporaryPath, TemporaryId = temporaryId };
         var intent = new ApplyIntent(session, path, known?.LocalSequence, state.Encode());
@@ -51,7 +51,7 @@ public sealed partial class FileApplier
         using var original = TryOpen(parent, ApplyState.Name(path));
         if (copyOnly && original is not null)
         {
-            await ParkAsync(state, token).ConfigureAwait(false);
+            await ParkAsync(tree, state, intent, token, temporary).ConfigureAwait(false);
             await index.DeferApplyAsync(intent, [], token).ConfigureAwait(false);
             Signal("restore-copy-blocked", session); return FileApplyOutcome.Blocked;
         }
