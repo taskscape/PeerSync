@@ -444,6 +444,11 @@ data with local readiness withheld. Retain durable authority if a proof vanished
 while its owned prefix is still needed. Rebuild references after capture cleanup
 and keep normal block sweeping disabled while any unresolved capture remains.
 Share the 1,000-owned-data-operation budget across captures and completed blocks.
+Recover old completed-block deletion intents before starting new partial work.
+When capture proofs still defer, recovery may cancel a present deletion or
+reconcile already absent data, but must not delete present block data. This
+keeps readiness truthful and frees journal capacity without bypassing the
+capture barrier. Share the 1,000 pending-journal bound across both intent tables.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
