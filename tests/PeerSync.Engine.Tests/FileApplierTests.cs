@@ -587,6 +587,40 @@ public sealed class FileApplierTests : IDisposable
         File.ReadAllBytes(Disk("file.txt")).ShouldBe(Old); index.ReadApplyIntents().Count().ShouldBe(1);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AbsentParentTombstoneRecoveryRetainsRangeBarrierAndConcurrentChild(bool concurrentChild)
+    {
+        await using var index=await PrepareAsync("parent/child"); await ReceiveAsync(index,"parent/child",[],deleted:true);
+        var needed=new NeededSet(index,keys,own); await needed.AnnounceIndexRangeAsync(remote,1,Token);
+        var applier=new FileApplier(Root,index,keys,own) { Checkpoint=stage=>{ if(stage=="prepared") throw new IOException("injected"); } };
+        await Should.ThrowAsync<IOException>(()=>applier.ApplyScheduledAsync("parent/child",(_,_,_,_)=>throw new InvalidOperationException(),Token));
+        if(concurrentChild) { Directory.CreateDirectory(Disk("parent")); File.WriteAllBytes(Disk("parent/child"),New); }
+        await needed.AnnounceIndexRangeAsync(remote,2,Token);
+        await Should.ThrowAsync<IndexRangeRecoveryPendingException>(()=>new FileApplier(Root,index,keys,own).RecoverAsync(Token));
+        index.ReadApplyIntents().Count().ShouldBe(1);
+        await needed.ApplyIndexUpdateAsync(remote,1,2,[],Token); (await new FileApplier(Root,index,keys,own).RecoverAsync(Token)).ShouldBe(1);
+        index.ReadApplyIntents().ShouldBeEmpty();
+        if(concurrentChild) File.ReadAllBytes(Disk("parent/child")).ShouldBe(New);
+        else { Directory.Exists(Disk("parent")).ShouldBeFalse(); index.LocalFiles.Find("parent/child")!.Deleted.ShouldBeTrue(); }
+    }
+
+    [Fact]
+    public async Task MissingAncestorDefersKnownLiveMetadataUntilScannerArchivesPublishedBytes()
+    {
+        Directory.CreateDirectory(Disk("parent")); File.WriteAllBytes(Disk("parent/child"),Old);
+        await using var index=await PrepareAsync("parent/child"); await ReceiveAsync(index,"parent/child",[],deleted:true);
+        var needed=new NeededSet(index,keys,own); await needed.AnnounceIndexRangeAsync(remote,1,Token);
+        Directory.Delete(Disk("parent"),true); File.WriteAllText(Disk("parent"),"keep ancestor");
+        var result=await new FileApplier(Root,index,keys,own).ApplyScheduledAsync("parent/child",(_,_,_,_)=>throw new InvalidOperationException(),Token);
+        result.Outcome.ShouldBe(FileApplyOutcome.Deferred); result.RequiresScan.ShouldBeTrue(); index.LocalFiles.Find("parent/child")!.Deleted.ShouldBeFalse();
+        using(var scanner=new Scanner(Root,index,keys,own)) await scanner.ScanAsync(Token);
+        index.Archive.ReadAll().Any(row=>File.ReadAllBytes(Disk(row.ArchivePath)).AsSpan().SequenceEqual(Old)).ShouldBeTrue();
+        await needed.RebuildAsync(Token); await new FileApplier(Root,index,keys,own).ApplyScheduledAsync("parent/child",(_,_,_,_)=>throw new InvalidOperationException(),Token);
+        index.Needed.Find("parent/child").ShouldBeNull(); File.ReadAllText(Disk("parent")).ShouldBe("keep ancestor");
+    }
+
     private async Task<FolderIndex> PrepareAsync(string path)
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

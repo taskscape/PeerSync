@@ -60,7 +60,19 @@ public sealed class DirectoryApplier
                 try { FileMetadata.ValidateMtime(version.MtimeTicks); }
                 catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return new(FileApplyOutcome.Blocked); }
             }
-            using var parent = tree.Directory(ApplyState.Parent(version.Path));
+            using var parentProbe = version.Deleted ? tree.ProbeDirectory(ApplyState.Parent(version.Path)) : null;
+            if (parentProbe?.Absent == true)
+            {
+                if (known is { Deleted: false }) return new(FileApplyOutcome.Deferred, RequiresScan: true);
+                var absentState = new DirectoryState { Root = tree.Identity.ToArray(), Version = version, Vector = decision.Vector,
+                    Prepared = true, ScheduledDeletion = scheduled };
+                var absentIntent = new ApplyIntent(session, version.Path, known?.LocalSequence, absentState.Encode());
+                await index.ReserveApplyAsync(absentIntent, cancellationToken).ConfigureAwait(false);
+                Signal("absent-parent", session); Signal("prepared", session);
+                await CommitAsync(absentState, absentIntent, version.Attributes, null, cancellationToken).ConfigureAwait(false);
+                return new(FileApplyOutcome.Applied, RequiresScan: true);
+            }
+            using var parent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(version.Path));
             using var existing = TryNode(parent, ApplyState.Name(version.Path));
             if (existing is not null)
             {
@@ -102,7 +114,14 @@ public sealed class DirectoryApplier
             return new(FileApplyOutcome.Deferred, RequiresScan: true);
         }
         using var deletionBarrier = await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version, ownDevice, state.ScheduledDeletion, token).ConfigureAwait(false);
-        using var parent = tree.Directory(ApplyState.Parent(state.Version.Path));
+        using var parentProbe = state.Version.Deleted ? tree.ProbeDirectory(ApplyState.Parent(state.Version.Path)) : null;
+        if (parentProbe?.Absent == true)
+        {
+            if (index.LocalFiles.Find(state.Version.Path) is { Deleted: false }) return await ChangedAsync(intent, token).ConfigureAwait(false);
+            await CommitAsync(state, intent, state.Version.Attributes, null, token).ConfigureAwait(false);
+            return new(FileApplyOutcome.Applied, RequiresScan: true);
+        }
+        using var parent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(state.Version.Path));
         using var node = TryNode(parent, ApplyState.Name(state.Version.Path));
         if (node is not null && ((FileSnapshot.Read(node).Attributes & FileAttributes.Directory) == 0
             || !Identity(FileSnapshot.Read(node)).AsSpan().SequenceEqual(state.DirectoryId)))

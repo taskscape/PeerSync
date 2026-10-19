@@ -88,7 +88,21 @@ public sealed partial class FileApplier
             try { FileMetadata.ValidateMtime(desired.MtimeTicks); }
             catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return FileApplyOutcome.Blocked; }
         }
-        using var parent = tree.Directory(ApplyState.Parent(desired.Path));
+        using var parentProbe = desired.Deleted ? tree.ProbeDirectory(ApplyState.Parent(desired.Path)) : null;
+        if (parentProbe?.Absent == true)
+        {
+            // Keep a known live version available for the scanner's immutable
+            // supersession archive before replacing its metadata.
+            if (known is { Deleted: false }) { requireScan?.Invoke(); return FileApplyOutcome.Deferred; }
+            var absentState = new ApplyState { Root = tree.Identity.ToArray(), Version = desired, Vector = decision.Vector,
+                Prepared = true, ScheduledDeletion = scheduled };
+            var absentIntent = new ApplyIntent(session, path, known?.LocalSequence, absentState.Encode());
+            await index.ReserveApplyAsync(absentIntent, cancellationToken).ConfigureAwait(false);
+            Signal("absent-parent", session); Signal("prepared", session);
+            await CompleteAsync(tree, absentState, absentIntent, null, null, cancellationToken).ConfigureAwait(false);
+            requireScan?.Invoke(); return FileApplyOutcome.Applied;
+        }
+        using var parent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(desired.Path));
         string temporary = ""; byte[] temporaryId = [];
         bool replaceKind = known is { Deleted: false } && known.Type != desired.Type;
         using var tempHandle = !desired.Deleted && (decision.RequiresContent || replaceKind)
@@ -174,7 +188,17 @@ public sealed partial class FileApplier
             }
             using var deletionBarrier = state.ScheduledDeletion
                 ? await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version!, ownDevice, true, cancellationToken).ConfigureAwait(false) : null;
-            using var targetParent = tree.Directory(ApplyState.Parent(state.Path));
+            using var parentProbe = state.Deleted ? tree.ProbeDirectory(ApplyState.Parent(state.Path)) : null;
+            if (parentProbe?.Absent == true)
+            {
+                if (state.Retained.Length == 0 && index.LocalFiles.Find(state.Path) is { Deleted: false })
+                    await DeferAsync(tree, state, intent, null, cancellationToken).ConfigureAwait(false);
+                else if (state.OriginalId.Length == 0 || state.Retained.Length != 0)
+                    await CompleteAsync(tree, state, intent, null, null, cancellationToken).ConfigureAwait(false);
+                else await DeferAsync(tree, state, intent, null, cancellationToken).ConfigureAwait(false);
+                recovered++; Signal("recover-complete", intent.Id); continue;
+            }
+            using var targetParent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(state.Path));
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);

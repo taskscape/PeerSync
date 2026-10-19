@@ -164,12 +164,17 @@ public sealed class TransportFolderTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task FreshNodeConvergesNestedTombstoneWhenAncestorIsMissingOrAFile(bool fileAncestor)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task FreshNodeConvergesNestedTombstoneWhenAncestorIsMissingOrAFile(bool fileAncestor, bool directoryChild)
     {
         var time = new NodeClock(); await using var a = await NodeAsync(1, time); await using var b = await NodeAsync(2, new NodeClock());
-        Directory.CreateDirectory(Path.Combine(b.Root, "parent")); File.WriteAllText(Path.Combine(b.Root, "parent", "child"), "old child bytes"); await Scan(b);
+        Directory.CreateDirectory(Path.Combine(b.Root, "parent"));
+        string child=Path.Combine(b.Root,"parent","child");
+        if(directoryChild) { Directory.CreateDirectory(child); child=Path.Combine(child,"keep"); }
+        File.WriteAllText(child, "old child bytes"); await Scan(b);
         Directory.Delete(Path.Combine(b.Root, "parent"), true);
         if (fileAncestor) File.WriteAllText(Path.Combine(b.Root, "parent"), "new ancestor file");
         await Scan(b);
