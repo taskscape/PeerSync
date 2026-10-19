@@ -10,6 +10,7 @@ internal sealed partial class DirectorySnapshotBuilder(Func<DirectorySnapshotNod
     private readonly List<List<DirectorySnapshotLink>> levels = [];
     private bool completed;
     private long accepted;
+    internal long AcceptedMembers => accepted;
     internal async Task AddAsync(DirectorySnapshotLink record, CancellationToken token)
     {
         ObjectDisposedException.ThrowIf(completed, this); ArgumentNullException.ThrowIfNull(record); token.ThrowIfCancellationRequested();
