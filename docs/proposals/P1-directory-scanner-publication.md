@@ -30,11 +30,17 @@ FULL-commits the signed root/local row plus queue/draft release atomically.
 
 Advancing a large draft must not repeat a full native tree scan or authenticate
 its entire unchanged input for each 1000-member batch. A trusted local-index
-capture mode uses an immutable folder-operation snapshot and the local index
-high-water as an input-change witness. When unchanged, query strictly after the
+capture mode uses an immutable folder-operation snapshot and a dedicated local
+mutation epoch as an input-change witness. SQL triggers advance it for every
+local-row insert/update/delete, including readiness changes that do not advance
+the advertised local sequence. Overflow rejects the mutation instead of wrapping.
+When unchanged, query strictly after the
 saved indexed child key. When changed, revalidate the full ordered manifest;
 retain progress if its identity is unchanged, otherwise restart the draft.
-Storage compares the expected witness before committing progress. Arbitrary
+Storage compares the expected witness before committing progress or publication.
+Binding a revalidated manifest to a fresh epoch is itself FULL and conditional.
+Generic enumerable capture clears this trusted witness and retains full input
+verification. Arbitrary
 enumerables retain the existing two-pass manifest verification path. The
 coordinator advances drafts between complete scans and schedules bounded
 continuation/retry work without busy loops or starving other folders.

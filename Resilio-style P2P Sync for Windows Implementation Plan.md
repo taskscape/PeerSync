@@ -681,8 +681,11 @@ For scanner integration retain the previous signed directory row and stage
 metadata privately until exact child publications and a replacement root are
 ready. Use indexed parent keys, UTF-16BE ordinal sort keys and row/byte-bounded
 child batches. Advance trusted local-index drafts between full scans with a
-local-index change witness; revalidate changed inputs without discarding an
+trigger-maintained local mutation epoch (including non-sequence readiness
+changes); revalidate changed inputs without discarding an
 identical manifest. Keep arbitrary enumerable capture on its two-pass path.
+FULL-bind a revalidated manifest to its exact epoch and compare that witness
+before progress/publication; reject counter overflow rather than wrapping.
 Pending-publication dependencies/barriers and bounded coordinator continuation
 are detailed in docs/proposals/P1-directory-scanner-publication.md; they must
 prevent mtime/vector feedback and pass convergence before activation.
