@@ -46,6 +46,7 @@ jobs:
             artifacts/p0/
             artifacts/fuzz/
             artifacts/signing/
+            artifacts/clock-ui/
       - name: Upload P0 probe bundle (not the product)
         uses: actions/upload-artifact@v7
         with:

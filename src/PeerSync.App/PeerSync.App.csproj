@@ -1,1 +1,1 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" /><InternalsVisibleTo Include="PeerSync.App.Tests" /></ItemGroup></Project>

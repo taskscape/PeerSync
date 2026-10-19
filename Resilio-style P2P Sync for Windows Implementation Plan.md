@@ -1158,12 +1158,19 @@ all model updates onto its dispatcher. Each attempt clears prior successful
 rows and assigns a new client generation; its first valid snapshot binds the
 service epoch, subsequent snapshots must keep that epoch and increase sequence.
 Late results or errors from old attempts cannot change the active view. Stream
-completion is a disconnect, including an empty clean completion. Retry failures
+completion is a disconnect, including an empty clean completion. Treat 15 seconds
+without a stream update as failure, cancel and drain the pending read before
+disposing its enumerator. Retry failures
 with a bounded delay and release the channel/stream on cancellation or close.
 Present clock reasons, signed numeric minutes (peer UTC minus local UTC),
 connected/disconnected peer state, truncation and explicit production availability.
 Render and inspect actual WPF controls for skew, recovery and service failure;
 internal test factories must not expose a production arbitrary endpoint switch.
+App diagnostics correlate each connection attempt and record bounded counts,
+RPC status, HRESULT and true native error codes. Inspect at most eight nested
+causes, including gRPC's debug exception, without serializing raw error messages,
+paths, peer IDs, account SIDs or keys. Wrapped pipe-identity failures must retain
+an actionable identity reason in the UI and sanitized diagnostic cause metadata.
 
 The named-pipe configuration follows the installed .NET 10/Grpc 2.84 packages
 and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0),

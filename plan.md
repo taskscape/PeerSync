@@ -1563,6 +1563,7 @@ Our own writes need no special suppression: the puller records the new state in 
         - Local [server checkpoint](docs/verification/P1.5.5c2b-control-server-2026-10-19.md): eight native service tests, all 39 contract tests and 1,149 canonical cases/native/probe/publishing pass in 139.00 seconds, exit 0 (boundary fuzz skipped). Live runtime skew/recovery, ACL/caller verification, truncation, subscription capacity and shutdown are verified. Installed production supervision, rendered UI and CI/main remain pending.
       - [ ] **P1.5.5c2c Rendered clock status and reconnect protection** [WIP @codex 2026-10-19]
         - Done when: the app uses the verified installed-service client, displays numeric signed minutes/reasons and connection/truncation/unavailable states, clears stale success on failure/recovery and rejects stale generations/epochs/sequences. Retain inspected real WPF render evidence and test reconnect/cancellation before parent closure.
+        - Local [rendered UI checkpoint](docs/verification/P1.5.5c2c-clock-ui-2026-10-19.md): all 13 App cases and 1,166 canonical cases/native/probe/publishing pass in 139.56 seconds, exit 0 (local boundary fuzz skipped). Actual engine/pipe/client/WPF skew/recovery/failure, replay guards, bounded reconnect, read cancellation/drain and sanitized identity diagnostics pass; eight actual WPF PNGs were inspected. Installed production transport/supervision and CI/main acceptance remain pending.
 
 ### 7.10 Code: resolving concurrent versions (P1.5.1, P1.5.2)
 

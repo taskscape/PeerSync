@@ -5,5 +5,6 @@
     <ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
     <ProjectReference Include="../PeerSync.Engine/PeerSync.Engine.csproj" />
     <InternalsVisibleTo Include="PeerSync.Service.Tests" />
+    <InternalsVisibleTo Include="PeerSync.App.Tests" />
   </ItemGroup>
 </Project>

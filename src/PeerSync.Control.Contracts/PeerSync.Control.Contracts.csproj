@@ -3,6 +3,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="PeerSync.Control.Contracts.Tests" />
     <InternalsVisibleTo Include="PeerSync.Service.Tests" />
+    <InternalsVisibleTo Include="PeerSync.App.Tests" />
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
     <PackageReference Include="Grpc.Net.Client" />
