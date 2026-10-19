@@ -124,6 +124,7 @@ public sealed partial class FileApplier
     {
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); int recovered = 0;
+        await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -289,7 +290,8 @@ public sealed partial class FileApplier
         if (!version.Deleted && version.Type == 0)
         {
             using var blocks = new PublishedBlocks(tree);
-            blocks.CaptureFile(installed!, version, token);
+            try { blocks.CaptureFile(installed!, version, token); }
+            finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
         }
         FileSnapshot? actual = installed is null ? null : FileSnapshot.Read(installed);
         var chunks = new List<LocalChunk>(); long offset = 0;

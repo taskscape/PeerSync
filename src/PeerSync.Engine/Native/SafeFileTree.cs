@@ -85,6 +85,8 @@ internal sealed class DirectoryLease : IDisposable
     private bool disposed;
     internal DirectoryLease(SafeFileHandle parent, List<SafeFileHandle> owned) { this.parent = parent; this.owned = owned; }
 
+    internal IEnumerable<NativeEntry> Entries(CancellationToken token) => NativeRoot.EnumerateHandle(parent, token);
+
     public SafeFileHandle CreateFile(string name, bool temporary = false)
     {
         Check(name, temporary);

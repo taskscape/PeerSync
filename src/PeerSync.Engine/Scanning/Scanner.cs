@@ -82,13 +82,14 @@ public sealed class Scanner : IDisposable
             if (pendingIntents.Any(intent => !HistoryState.IsHistory(intent)))
                 throw new IOException("Pending file application must be recovered before scanning.");
             using var root = new NativeRoot(rootPath);
-            using var blocks = keys.CanWrite ? new PublishedBlocks(root) : null;
+            using var blocks = new PublishedBlocks(root);
             byte[]? identity = index.Meta.Find(RootIdentityKey)?.Value;
             if (identity is not null && !identity.AsSpan().SequenceEqual(root.Identity))
                 throw new IOException("Sync root identity changed; the existing index cannot be reused.");
             if (identity is null)
                 await index.Meta.UpsertAsync([new(RootIdentityKey, root.Identity)], cancellationToken).ConfigureAwait(false);
             using var historyTree = new SafeFileTree(root);
+            await PublishedBlocks.RecoverCapturesAsync(historyTree, index, journal, cancellationToken).ConfigureAwait(false);
             var history = new SnapshotHistory(index, keys, device, settings, journal, clock) { Checkpoint = Checkpoint };
             foreach (var intent in pendingIntents) await history.RecoverIntentAsync(historyTree, intent, cancellationToken).ConfigureAwait(false);
 
@@ -148,6 +149,8 @@ public sealed class Scanner : IDisposable
                 && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes))
                 .GroupBy(r => Convert.ToHexString(r.FileId!), StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+            try
+            {
             await Parallel.ForEachAsync(entries.Values, new ParallelOptions
             {
                 MaxDegreeOfParallelism = hashConcurrency, CancellationToken = cancellationToken,
@@ -170,7 +173,7 @@ public sealed class Scanner : IDisposable
                     return;
                 }
                 if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry)
-                    && (!keys.CanWrite || old.Record is not null && (old.Type != 0 || old.ContentReady)))
+                    && (!keys.CanWrite && old.Record is null || old.Record is not null && (old.Type != 0 || old.ContentReady)))
                 { Interlocked.Increment(ref unchanged); return; }
                 try
                 {
@@ -210,7 +213,7 @@ public sealed class Scanner : IDisposable
                         }
                     }
                     var result = await FileHasher.HashRelativeAsync(root, entry.Path, cancellationToken: token,
-                        capture: blocks is null ? null : (bytes, hash) => blocks.Put(bytes, hash, token)).ConfigureAwait(false);
+                        capture: keys.CanWrite ? (bytes, hash) => blocks.Put(bytes, hash, token) : null).ConfigureAwait(false);
                     Interlocked.Increment(ref hashed);
                     if (result is null || result.Length != entry.Native.Length || result.MtimeUtc.Ticks != entry.Native.MtimeTicks
                         || result.Attributes != entry.Native.Attributes || result.Volume != root.Volume
@@ -218,14 +221,31 @@ public sealed class Scanner : IDisposable
                     { Defer(entry.Path, old, "changed-during-read", null); return; }
                     // Legacy readiness backfill is not a new user edit. Preserve
                     // exact signed bytes/vector while allocating a fresh publication sequence.
-                    if (keys.CanWrite && old is { Flags: LocalFileState.None, Record: not null, ContentReady: false, FileHash: not null }
+                    if (old is { Flags: LocalFileState.None, Record: not null, ContentReady: false, FileHash: not null }
                         && MetadataEqual(old, entry) && old.FileHash.AsSpan().SequenceEqual(result.WholeHash))
-                        updates.Add(old with { ContentReady = true, IndexedChunks = result.Chunks.Select(c => new LocalChunk(c.Offset, c.Length, c.Hash)).ToArray() });
+                    {
+                        // Preserve the authenticated original partition as well
+                        // as its body/vector, including on a RO upgrade. Never
+                        // cache an unsigned RO edit merely to establish ownership.
+                        var version = VersionView.Open(old.Record, keys, device);
+                        using var parent = historyTree.Directory(ApplyState.Parent(entry.Path));
+                        using var file = parent.OpenReadGuard(ApplyState.Name(entry.Path));
+                        var snapshot = FileSnapshot.Read(file);
+                        if (snapshot.Length != result.Length || !BlockCaptureProof.Identity(file).AsSpan().SequenceEqual(result.FileId)
+                            || !GuardedFile.Hash(file, token).AsSpan().SequenceEqual(version.FileHash))
+                        { Defer(entry.Path, old, "changed-during-read", null); return; }
+                        blocks.CaptureFile(file, version, token);
+                        var chunks = new List<LocalChunk>(); long offset = 0;
+                        foreach (var chunk in version.ExportBody().Chunks) { chunks.Add(new(offset, checked((int)chunk.Length), chunk.Hash.ToByteArray())); offset += chunk.Length; }
+                        updates.Add(old with { ContentReady = true, IndexedChunks = chunks });
+                    }
                     else updates.Add(CreateVersion(entry, old, result));
                 }
                 catch (Exception error) when (IsFileError(error))
                 { Defer(entry.Path, old, error is CryptographicException ? "published-content-verification-failed" : "read-failed", NativeCode(error)); }
             }).ConfigureAwait(false);
+            }
+            finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
 
             foreach (var old in previous.Values)
             {

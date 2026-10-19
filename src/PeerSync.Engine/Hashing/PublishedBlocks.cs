@@ -2,23 +2,28 @@ using System.Buffers;
 using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
 using Microsoft.Win32.SafeHandles;
 using PeerSync.Engine.Native;
 using PeerSync.Engine.Sync;
 using PeerSync.Storage.FolderDb;
+using PeerSync.Core.Diagnostics;
+using Microsoft.Data.Sqlite;
 
 namespace PeerSync.Engine.Hashing;
 
 /// <summary>Independent verified bytes for published versions, never hardlinks
 /// to user files. The owner must finish all operations before disposal.
 /// Retention/garbage collection is separate; this component never evicts blocks.</summary>
-public sealed class PublishedBlocks : IDisposable
+public sealed partial class PublishedBlocks : IDisposable
 {
     public const int MaximumBlockBytes = 8 * 1024 * 1024;
     private readonly SafeFileTree tree;
     private readonly bool ownsTree;
     private readonly SemaphoreSlim[] stripes = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1)).ToArray();
     private bool disposed;
+    private readonly ConcurrentDictionary<string, BlockObjectRow> captured = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<Guid, BlockCaptureProof> proofs = new();
     internal Action<string>? Checkpoint { get; set; }
 
     public PublishedBlocks(string rootPath, FolderIndex index)
@@ -66,11 +71,22 @@ public sealed class PublishedBlocks : IDisposable
         {
             string name = Convert.ToHexString(hash);
             using var parent = tree.Directory(".psp/blocks/" + name[..2], create: true, privatePath: true);
-            if (VerifyExisting(parent, name, hash, bytes.Length, token)) return;
-            string staging = Guid.NewGuid().ToString("N") + ".!psp";
+            if (VerifyExisting(parent, name, hash, bytes.Length, token, out byte[] existingId))
+            {
+                Track(hash, bytes.Length, existingId, DateTime.UtcNow.Ticks); return;
+            }
+            Guid id = Guid.NewGuid(); string staging = id.ToString("N") + ".!psp";
             using var file = parent.CreateFile(staging, temporary: true); bool installed = false;
+            BlockCaptureProof? proof = null;
             try
             {
+                using (var proofDirectory = tree.Directory(BlockCaptureProof.Directory, create: true, privatePath: true))
+                using (var marker = proofDirectory.CreateFile(id.ToString("N") + ".capture"))
+                {
+                    proof = new(id, tree.Identity.ToArray(), BlockCaptureProof.Identity(marker), BlockCaptureProof.Identity(file), hash.ToArray(), bytes.Length, DateTime.UtcNow.Ticks);
+                    RandomAccess.Write(marker, proof.Encode(), 0); RandomAccess.FlushToDisk(marker);
+                }
+                Checkpoint?.Invoke("proof");
                 Checkpoint?.Invoke("staged");
                 for (int offset = 0; offset < bytes.Length; offset += 65536)
                 {
@@ -78,10 +94,15 @@ public sealed class PublishedBlocks : IDisposable
                     RandomAccess.Write(file, bytes.Slice(offset, Math.Min(65536, bytes.Length - offset)), offset);
                 }
                 RandomAccess.FlushToDisk(file); Checkpoint?.Invoke("flushed"); token.ThrowIfCancellationRequested();
-                try { parent.MoveHere(file, name); installed = true; RandomAccess.FlushToDisk(file); Checkpoint?.Invoke("installed"); }
+                try
+                {
+                    parent.MoveHere(file, name); installed = true; RandomAccess.FlushToDisk(file);
+                    proofs[proof.Id] = proof; Track(proof.Hash, proof.Length, proof.DataId, proof.CapturedTicks); Checkpoint?.Invoke("installed");
+                }
                 catch (Win32Exception error) when (error.NativeErrorCode is 80 or 183)
                 {
-                    if (!VerifyExisting(parent, name, hash, bytes.Length, token)) throw new IOException("Concurrent block installation disappeared.");
+                    if (!VerifyExisting(parent, name, hash, bytes.Length, token, out existingId)) throw new IOException("Concurrent block installation disappeared.");
+                    Track(hash, bytes.Length, existingId, DateTime.UtcNow.Ticks);
                 }
             }
             finally
@@ -92,6 +113,63 @@ public sealed class PublishedBlocks : IDisposable
             }
         }
         finally { stripe.Release(); }
+    }
+
+    private void Track(ReadOnlySpan<byte> hash, int length, byte[] id, long ticks)
+    {
+        string key = Convert.ToHexString(hash); var row = new BlockObjectRow(hash.ToArray(), length, tree.Identity.ToArray(), id, ticks, Math.Max(ticks, DateTime.UtcNow.Ticks));
+        captured.AddOrUpdate(key, row, (_, old) => old.FileId.AsSpan().SequenceEqual(id)
+            ? row with { CapturedTicks = Math.Min(old.CapturedTicks, ticks), LastUsedTicks = Math.Max(old.LastUsedTicks, row.LastUsedTicks) } : row);
+    }
+
+    /// <summary>Finish capture workers first. Publication must wait for this FULL
+    /// registration; cleanup failures retain recoverable proof files.</summary>
+    internal async Task<int> FlushAsync(FolderIndex index, CancellationToken token, DiagnosticJournal? journal = null)
+    {
+        int registered = 0;
+        try
+        {
+            foreach (var batch in captured.Values.Chunk(1000))
+            {
+                registered += await index.RegisterBlockObjectsAsync(batch, token).ConfigureAwait(false);
+                foreach (var row in batch) captured.TryRemove(Convert.ToHexString(row.Hash), out _);
+            }
+        }
+        catch (Exception error)
+        {
+            journal?.TryWrite(new("block.catalog_failed", "block-capture") { Level = DiagnosticLevel.Error,
+                ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, HResult = error.HResult,
+                NativeError = error is SqliteException sqlite ? sqlite.SqliteExtendedErrorCode : null,
+                ItemsChanged = registered, ItemsDeferred = captured.Count, RetryInMilliseconds = 10000 });
+            throw;
+        }
+        if (registered != 0) journal?.TryWrite(new("block.catalog_committed", "block-capture") { Level = DiagnosticLevel.Debug, ItemsChanged = registered });
+        foreach (var entry in proofs.ToArray())
+        {
+            try
+            {
+                using var parent = tree.Directory(BlockCaptureProof.Directory, privatePath: true);
+                using var marker = parent.OpenFile(entry.Value.Name, mutation: true);
+                var actual = ReadProof(marker, entry.Value.Name, tree.Identity);
+                if (!actual.Encode().AsSpan().SequenceEqual(entry.Value.Encode())) throw new IOException("Capture proof changed.");
+                GuardedFile.DeleteOnClose(marker); proofs.TryRemove(entry.Key, out _);
+            }
+            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception)
+            {
+                journal?.TryWrite(new("block.proof_cleanup_deferred", "block-capture") { SessionId = entry.Key, Level = DiagnosticLevel.Warning,
+                    ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
+                    RetryInMilliseconds = 10000 });
+            }
+        }
+        return registered;
+    }
+
+    private static BlockCaptureProof ReadProof(SafeFileHandle marker, string name, ReadOnlySpan<byte> rootId)
+    {
+        RequireIndependent(marker);
+        if (RandomAccess.GetLength(marker) != BlockCaptureProof.Size) throw new InvalidDataException("Invalid capture proof size.");
+        byte[] bytes = new byte[BlockCaptureProof.Size]; Read(marker, bytes, 0, CancellationToken.None);
+        return BlockCaptureProof.Decode(bytes, name, rootId, BlockCaptureProof.Identity(marker));
     }
 
     internal void CaptureFile(SafeFileHandle file, VersionView version, CancellationToken token)
@@ -112,15 +190,16 @@ public sealed class PublishedBlocks : IDisposable
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
     }
 
-    private static bool VerifyExisting(DirectoryLease parent, string name, ReadOnlySpan<byte> hash, int length, CancellationToken token)
+    private static bool VerifyExisting(DirectoryLease parent, string name, ReadOnlySpan<byte> hash, int length, CancellationToken token, out byte[] identity)
     {
+        identity = [];
         try
         {
             using var file = parent.OpenReadGuard(name);
             RequireIndependent(file);
             if (RandomAccess.GetLength(file) != length || !GuardedFile.Hash(file, token).AsSpan().SequenceEqual(hash))
                 throw new CryptographicException("Existing published block is not verified.");
-            return true;
+            identity = BlockCaptureProof.Identity(file); return true;
         }
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return false; }
     }
