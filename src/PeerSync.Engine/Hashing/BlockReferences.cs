@@ -85,6 +85,17 @@ public sealed class BlockReferences
                     if (PathRules.Key(version.Path) != needed.PathKey) throw new InvalidDataException("Needed reference manifest does not match its path.");
                     await AddVersionAsync(version, BlockReferenceKind.Needed).ConfigureAwait(false);
                 }
+            foreach (var pending in index.ReadPendingCasePreservations())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!pending.RootId.AsSpan().SequenceEqual(root)) throw new IOException("Case reference belongs to another root.");
+                var source = pending.Source;
+                var version = VersionView.Open(source.Record, keys, source.SourceDevice);
+                if (PathRules.Key(version.Path) != source.PathKey || version.Deleted || version.Type > 1
+                    || !CaseConflictPolicy.SourceId(version).AsSpan().SequenceEqual(source.SourceId))
+                    throw new InvalidDataException("Case reference manifest does not match its source.");
+                await AddVersionAsync(version, BlockReferenceKind.Needed).ConfigureAwait(false);
+            }
             var archiveCoverage = new List<ArchiveReferenceSource>(1000);
             foreach (var marker in index.Meta.ReadAll())
             {

@@ -47,7 +47,7 @@ public sealed partial class FolderIndex
             sequence = row.Record.LocalSequence;
             frozen.Add(new(device.ToArray(), path, new ReadOnlyDictionary<ulong, ulong>(row.Vector.ToDictionary()), row.Record));
         }
-        return database.WriteAsync((connection, transaction) =>
+        return database.WriteDurableAsync((connection, transaction) =>
         {
             admission?.Invoke();
             using var cursor = connection.CreateCommand(); cursor.Transaction = transaction;
@@ -86,7 +86,7 @@ public sealed partial class FolderIndex
         int count = 0;
         foreach (var batch in unique.Chunk(1000))
         {
-            count += await database.WriteAsync((connection, transaction) =>
+            count += await database.WriteDurableAsync((connection, transaction) =>
             {
                 using var needed = new NeededRewrite(connection, transaction, resolver);
                 foreach (string path in batch) { cancellationToken.ThrowIfCancellationRequested(); needed.Update(path); }
@@ -98,10 +98,13 @@ public sealed partial class FolderIndex
 
     private sealed class NeededRewrite : IDisposable
     {
+        private readonly SqliteConnection connection;
+        private readonly SqliteTransaction transaction;
         private readonly SqliteCommand local, remote, store, remove;
         private readonly Func<FolderPathSnapshot, NeededRow?> resolver;
         public NeededRewrite(SqliteConnection connection, SqliteTransaction transaction, Func<FolderPathSnapshot, NeededRow?> resolver)
         {
+            this.connection = connection; this.transaction = transaction;
             this.resolver = resolver;
             local = Make("SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE path_key=$path;");
             remote = Make("SELECT device_id,path_key,vv,record_body,signature FROM remote_files WHERE path_key=$path ORDER BY device_id;");
@@ -130,6 +133,7 @@ public sealed partial class FolderIndex
             if (row is null) { remove.Parameters[0].Value = path; remove.ExecuteNonQuery(); return; }
             FolderMaps.Needed.Validate(row);
             if (PathRules.Key(row.PathKey) != path) throw new InvalidOperationException("Needed resolver returned another path.");
+            AdmitCaseSources(connection, transaction, path, row.CasePreservations);
             store.Parameters[0].Value = path; store.Parameters[1].Value = row.SourceDevice; store.Parameters[2].Value = row.Priority;
             store.Parameters[3].Value = (object?)row.Work?.Stage ?? DBNull.Value; store.Parameters[4].Value = (object?)row.Work?.Size ?? DBNull.Value;
             store.Parameters[5].Value = (object?)row.Work?.MtimeTicks ?? DBNull.Value; store.Parameters[6].Value = (object?)row.Work?.Fingerprint ?? DBNull.Value;

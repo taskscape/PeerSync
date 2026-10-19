@@ -16,6 +16,12 @@ public static class ConflictNames
 
     public static string CasePath(string originalPath, int collision = 1) => WithSuffix(originalPath, ".case-conflict", collision);
 
+    public static string CaseSourcePath(string originalPath, ReadOnlySpan<byte> sourceId, int collision = 1)
+    {
+        if (sourceId.Length != 32) throw new ArgumentException("Source identifier must contain 32 bytes.", nameof(sourceId));
+        return WithSuffix(originalPath, ".case-conflict-" + Convert.ToHexString(sourceId), collision);
+    }
+
     private static string WithSuffix(string path, string suffix, int collision)
     {
         if (!PathRules.IsValid(path)) throw new ArgumentException("Invalid conflict path.", nameof(path));
