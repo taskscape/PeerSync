@@ -67,13 +67,21 @@ public sealed class Db : IAsyncDisposable
     }
 
     /// <summary>Materialize results within the callback; Db owns the connection/transaction and commits it.</summary>
-    public async Task<T> WriteAsync<T>(Func<SqliteConnection, SqliteTransaction, T> operation,
-        CancellationToken cancellationToken = default)
+    public Task<T> WriteAsync<T>(Func<SqliteConnection, SqliteTransaction, T> operation,
+        CancellationToken cancellationToken = default) => EnqueueAsync(operation, durable: false, cancellationToken);
+
+    /// <summary>Synchronize the WAL commit before returning, for intent-before-filesystem ordering.
+    /// Uses the same writer queue and restores ordinary NORMAL mode outside the transaction.</summary>
+    public Task<T> WriteDurableAsync<T>(Func<SqliteConnection, SqliteTransaction, T> operation,
+        CancellationToken cancellationToken = default) => EnqueueAsync(operation, durable: true, cancellationToken);
+
+    private async Task<T> EnqueueAsync<T>(Func<SqliteConnection, SqliteTransaction, T> operation,
+        bool durable, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
-        var request = new Write<T>(operation, cancellationToken);
+        var request = new Write<T>(operation, durable, cancellationToken);
         await writes.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
         return await request.Completion.Task.ConfigureAwait(false);
     }
@@ -194,7 +202,7 @@ public sealed class Db : IAsyncDisposable
         void Fail(Exception error);
     }
 
-    private sealed class Write<T>(Func<SqliteConnection, SqliteTransaction, T> operation, CancellationToken cancellation) : IWrite
+    private sealed class Write<T>(Func<SqliteConnection, SqliteTransaction, T> operation, bool durable, CancellationToken cancellation) : IWrite
     {
         public TaskCompletionSource<T> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -203,10 +211,16 @@ public sealed class Db : IAsyncDisposable
             try
             {
                 cancellation.ThrowIfCancellationRequested();
-                using var transaction = connection.BeginTransaction();
-                T result = operation(connection, transaction);
-                cancellation.ThrowIfCancellationRequested();
-                transaction.Commit();
+                T result;
+                try
+                {
+                    if (durable) SetSynchronous(connection, full: true);
+                    using var transaction = connection.BeginTransaction();
+                    result = operation(connection, transaction);
+                    cancellation.ThrowIfCancellationRequested();
+                    transaction.Commit();
+                }
+                finally { if (durable) SetSynchronous(connection, full: false); }
                 Completion.TrySetResult(result);
             }
             catch (OperationCanceledException error) when (error.CancellationToken == cancellation)
@@ -215,5 +229,12 @@ public sealed class Db : IAsyncDisposable
         }
 
         public void Fail(Exception error) => Completion.TrySetException(error);
+
+        private static void SetSynchronous(SqliteConnection connection, bool full)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = full ? "PRAGMA synchronous=FULL;" : "PRAGMA synchronous=NORMAL;";
+            command.ExecuteNonQuery();
+        }
     }
 }

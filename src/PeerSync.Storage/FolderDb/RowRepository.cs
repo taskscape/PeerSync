@@ -33,26 +33,32 @@ public sealed class RowRepository<T> where T : class
             cancellationToken.ThrowIfCancellationRequested();
             foreach (var row in batch) map.Validate(row);
             int count = await database.WriteAsync((connection, transaction) =>
-            {
-                using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText = upsert;
-                for (int i = 0; i < map.Fields.Length; i++) command.Parameters.Add("$p" + i, map.Fields[i].Type);
-                command.Prepare();
-                using var session = map.BeginBatch?.Invoke(connection, transaction);
-                foreach (var supplied in batch)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var row = session is null ? supplied : session.Prepare(supplied);
-                    for (int i = 0; i < map.Fields.Length; i++) command.Parameters[i].Value = map.Fields[i].Value(row) ?? DBNull.Value;
-                    command.ExecuteNonQuery();
-                }
-                session?.Finish();
-                return batch.Length;
-            }, cancellationToken).ConfigureAwait(false);
+                WriteBatch(connection, transaction, batch, cancellationToken), cancellationToken).ConfigureAwait(false);
             total = checked(total + count);
         }
         return total;
+    }
+
+    internal int WriteBatch(SqliteConnection connection, SqliteTransaction transaction,
+        IReadOnlyList<T> rows, CancellationToken cancellationToken)
+    {
+        if (rows.Count > BatchSize) throw new ArgumentOutOfRangeException(nameof(rows));
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = upsert;
+        for (int i = 0; i < map.Fields.Length; i++) command.Parameters.Add("$p" + i, map.Fields[i].Type);
+        command.Prepare();
+        using var session = map.BeginBatch?.Invoke(connection, transaction);
+        foreach (var supplied in rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            map.Validate(supplied);
+            var row = session is null ? supplied : session.Prepare(supplied);
+            for (int i = 0; i < map.Fields.Length; i++) command.Parameters[i].Value = map.Fields[i].Value(row) ?? DBNull.Value;
+            command.ExecuteNonQuery();
+        }
+        session?.Finish();
+        return rows.Count;
     }
 
     public IEnumerable<T> ReadAll() => ReadWhere("");

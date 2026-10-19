@@ -190,6 +190,54 @@ public sealed class DbTests : IDisposable
         await Should.ThrowAsync<InvalidOperationException>(() => Db.OpenAsync(alias, V1, TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task DurableWritesSynchronizeCommitAndRestoreNormalModeAfterSuccessFailureAndCancellation()
+    {
+        await using var database = await Db.OpenAsync(DatabasePath, V1, TestContext.Current.CancellationToken);
+        await database.WriteDurableAsync((c, t) =>
+        {
+            Number(Scalar(c, "PRAGMA synchronous;", t)).ShouldBe(2);
+            return Execute(c, "UPDATE counter SET value=7;", t);
+        }, TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<InvalidOperationException>(() => database.WriteDurableAsync<int>((c, t) =>
+        {
+            Number(Scalar(c, "PRAGMA synchronous;", t)).ShouldBe(2);
+            Execute(c, "UPDATE counter SET value=99;", t); throw new InvalidOperationException("injected failure");
+        }, TestContext.Current.CancellationToken));
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<OperationCanceledException>(() => database.WriteDurableAsync((c, t) =>
+        {
+            Number(Scalar(c, "PRAGMA synchronous;", t)).ShouldBe(2);
+            Execute(c, "UPDATE counter SET value=88;", t); cancellation.Cancel(); return 0;
+        }, cancellation.Token));
+        await database.WriteAsync((c, t) =>
+        {
+            Number(Scalar(c, "PRAGMA synchronous;", t)).ShouldBe(1);
+            Number(Scalar(c, "SELECT value FROM counter;", t)).ShouldBe(7); return 0;
+        }, TestContext.Current.CancellationToken);
+        using var reader = database.OpenReader(); Number(Scalar(reader, "SELECT value FROM counter;")).ShouldBe(7);
+    }
+
+    [Fact]
+    public async Task MixedDurableAndOrdinaryRequestsShareTheSameSerializedWriterAndDrainOnDisposal()
+    {
+        var database = await Db.OpenAsync(DatabasePath, V1, TestContext.Current.CancellationToken);
+        var tasks = Enumerable.Range(0, 40).Select(i =>
+        {
+            int expected = (i & 1) == 0 ? 2 : 1;
+            int Update(SqliteConnection c, SqliteTransaction t)
+            {
+                Number(Scalar(c, "PRAGMA synchronous;", t)).ShouldBe(expected);
+                return Execute(c, "UPDATE counter SET value=value+1;", t);
+            }
+            return expected == 2 ? database.WriteDurableAsync(Update, TestContext.Current.CancellationToken)
+                : database.WriteAsync(Update, TestContext.Current.CancellationToken);
+        }).ToArray();
+        await database.DisposeAsync(); await Task.WhenAll(tasks);
+        await using var reopened = await Db.OpenAsync(DatabasePath, V1, TestContext.Current.CancellationToken);
+        using var reader = reopened.OpenReader(); Number(Scalar(reader, "SELECT value FROM counter;")).ShouldBe(40);
+    }
+
     private static object? Scalar(SqliteConnection connection, string sql, SqliteTransaction? transaction = null)
     {
         using var command = connection.CreateCommand();
