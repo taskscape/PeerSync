@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.5.3/P1.5.4: introduce root-relative mutation primitives with pinned no-reparse directory leases, exclusive creates and handle-based no-overwrite archive/conflict moves. Validate private metadata/temp names separately from remote sync paths. | Sync engine design: Applying remote changes |
 | 2026-10-19 | P1.5.1: add migration 3 indexing remote_files(path_key), so affected-path winner queries do not scan every device's complete index. | Sync engine design: Version vectors and conflicts |
 | 2026-10-19 | P1.5.1: commit remote records, sender cursor and affected needed rows atomically; verify before submission and select from the writer transaction's current local/all-remote snapshot. Replays are idempotent. RO local changes remain blocked unless overwrite is enabled; local merged causal metadata never rewrites forwarded signatures. | Sync engine design: Version vectors and conflicts |
 | 2026-10-19 | P1.5: follow the source design's live mtime winner rule; use signed deletion time for tombstones, then full DeviceId and exact-body tie-breaks. Remove causally dominated versions before deterministic selection and max-merge vectors without a new edit counter. This corrects the draft example's blanket changed_ticks comparison. | Sync engine design: Version vectors and conflicts |
@@ -1326,9 +1327,10 @@ Our own writes need no special suppression: the puller records the new state in 
     - Only RW peers publish the merged record. RO peers apply the same rule locally and never publish.
   - Ref: Sync engine design, Version vectors and conflicts.
   - Local foundation: deterministic causal/concurrent selection, signed vector merges, loser fate and bounded conflict names are tested. Directory/unknown-child and case-clash filesystem preservation still require P1.5.3 integration; this task remains incomplete.
-- [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`)
+- [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`) [WIP @Codex 2026-10-19]
   - Done when: directories are created first, then files in priority order, then deletions, deepest directory last. Files are assembled from local chunks before network chunks, verified, and swapped in with 7.11. A locked target retries with backoff (10 s up to 10 min).
-- [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`)
+  - Safe mutation foundation: [root-relative handle and no-overwrite move checks](docs/verification/P1.5.3-4-safe-mutations-2026-10-19.md). Puller, durable apply/recovery, archive accounting and pruning remain unimplemented.
+- [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) [WIP @Codex 2026-10-19]
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
 - [ ] **P1.5.5 Clock-skew guard** (`PeerSync.Engine/Sync/ClockGuard.cs`)
   - Done when: `Hello` carries UTC time. A peer more than 10 minutes off exchanges no index updates and shows "clock differs by N minutes" in the UI.
