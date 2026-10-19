@@ -405,6 +405,28 @@ not authorize release. New history reuse atomically cancels an earlier source
 release. Reference builders exclude explicitly released archive sources and
 their staged content, while independently preserving current/needed/history
 references. Policy retirement itself never deletes filesystem data.
+Owned block cleanup records first-unreferenced observation durably in bounded
+batches. A fresh activated reference resets that observation; re-registration
+or identity/length changes also reset it. New catalog rows are distinguished
+from pre-cleanup rows by migration, so a once-initialized root-bound legacy
+window protects every older owned row for ArchiveDays without guessing from
+old capture timestamps. Keep unreferenced blocks for ArchiveDays normally;
+capacity pressure may retire them after a minimum 24 hours of observed grace.
+Capacity uses the configured archive percentage of the root volume and never
+evicts referenced or legacy-protected bytes. Report pressure that required
+references prevent satisfying. Process at most 1,000 objects per deletion pass.
+Hold the filesystem gate then the reference gate through fresh authenticated
+coverage, orphan selection and native deletion/recovery. Pending applications,
+uncovered archive sources and deferred capture proofs prevent sweeping.
+Under a held independent-file identity/hash/length guard, reserve a FULL
+deletion intent bound to the exact owned object and orphan observation before
+deleting that held object. FULL completion removes only matching ownership,
+orphan state and the exact intent after native absence is proven. Recovery
+refreshes references: cancel a still-present deletion when references, ownership
+or grace have changed; preserve unknown/changed/linked/locked/reparse data.
+If deletion already occurred before a new reference arrived, complete recovery
+and withhold stale local readiness for rescan/backfill. Never treat missing
+bytes as ready. Keep intent metadata bounded and recover before new sweeps.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
