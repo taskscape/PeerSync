@@ -800,6 +800,14 @@ and source run ordinals. Later authenticated forwarders must remain reachable.
 Each route has a one-second linked deadline inside the ten-second source
 attempt, so a stalled preferred hint leaves time for fallback. Source/caller
 cancellation still stops work; transport fetches must honor their token.
+Received directory roots whose child envelopes were causally superseded may
+rebase only on RW peers after bounded, durable proof of every original direct
+child against exact or dominating signed local versions. Bind schema-33 proof
+to queue/root/native/capture/graph and the local mutation epoch; missing or
+concurrent members remain pending. Final guarded FULL publication consumes the
+complete proof, increments the own directory vector once and preserves parent
+mtime/history. RO exact reconstruction remains unchanged. Follow
+`docs/proposals/P1-directory-reconstruction-rebase.md` before activation.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
