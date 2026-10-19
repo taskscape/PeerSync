@@ -20,13 +20,14 @@ public enum FileApplyOutcome { Applied, Unchanged, Deferred, Blocked }
 /// <summary>Serializes regular-file application/recovery with scanning. The host
 /// must recover before its first scan; errors retain durable recovery state.
 /// No path, content, hash or envelope is written to diagnostic output.</summary>
-public sealed class FileApplier
+public sealed partial class FileApplier
 {
     private readonly string rootPath;
     private readonly FolderIndex index;
     private readonly FolderKeys keys;
     private readonly byte[] ownDevice;
     private readonly NeededSet needed;
+    private readonly FolderSettings settings;
     private readonly DiagnosticJournal? journal;
     private readonly TimeProvider clock;
     internal Action<string>? Checkpoint { get; set; }
@@ -37,7 +38,8 @@ public sealed class FileApplier
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath); ArgumentNullException.ThrowIfNull(index);
         ArgumentNullException.ThrowIfNull(keys);
         this.rootPath = Path.GetFullPath(rootPath); this.index = index; this.keys = keys;
-        needed = new(index, keys, ownDevice, settings, journal: journal);
+        this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
+        needed = new(index, keys, ownDevice, this.settings, journal: journal);
         this.ownDevice = ownDevice.ToArray();
         this.journal = journal; this.clock = clock ?? TimeProvider.System;
     }
@@ -90,11 +92,7 @@ public sealed class FileApplier
         }
         if (original is not null)
         {
-            var snapshot = FileSnapshot.Read(original);
-            state.Original = known!.Path; state.OriginalId = Identity(snapshot); state.OriginalHash = Hash(original, cancellationToken);
-            state.OriginalDevice = known.Record is { } record ? VersionView.Open(record, keys, ownDevice).ModifiedBy.ToArray() : ownDevice.ToArray();
-            state.OriginalSize = snapshot.Length; state.OriginalMtime = DateTime.FromFileTimeUtc(snapshot.LastWrite).Ticks;
-            state.OriginalAttributes = (uint)snapshot.Attributes;
+            CaptureOriginal(state, original, known!.Path, known, cancellationToken);
             if (tempHandle is not null || desired.Deleted)
             {
                 state.ArchivedTicks = clock.GetUtcNow().UtcTicks;
@@ -104,6 +102,7 @@ public sealed class FileApplier
         }
         if (tempHandle is not null)
         {
+            if (original is null) FileMetadata.PrepareNewFile(parent, tempHandle);
             FileMetadata.SetMtime(tempHandle, desired.MtimeTicks); RandomAccess.FlushToDisk(tempHandle);
             state.TemporaryAttributes = (uint)FileSnapshot.Read(tempHandle).Attributes;
         }
@@ -133,8 +132,8 @@ public sealed class FileApplier
                 await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
                 recovered++; Signal("recover-staging", intent.Id); continue;
             }
-            using var targetParent = tree.Directory(ApplyState.Parent(state.Version.Path));
-            using var target = TryOpen(targetParent, ApplyState.Name(state.Version.Path));
+            using var targetParent = tree.Directory(ApplyState.Parent(state.Path));
+            using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);
             if (temporary is not null && !HasIdentity(temporary, state.TemporaryId))
@@ -159,7 +158,7 @@ public sealed class FileApplier
             }
             else if (target is null)
             {
-                if (temporary is not null && MatchesNew(temporary, state, cancellationToken) || state.Version.Deleted)
+                if (temporary is not null && MatchesNew(temporary, state, cancellationToken) || state.Deleted)
                     await FinishAsync(tree, state, intent, null, temporary, cancellationToken).ConfigureAwait(false);
                 else
                 {
@@ -222,20 +221,20 @@ public sealed class FileApplier
             if (temporary is not null)
             {
                 token.ThrowIfCancellationRequested();
-                using var parent = tree.Directory(ApplyState.Parent(state.Version.Path));
+                using var parent = tree.Directory(ApplyState.Parent(state.Path));
                 Signal("install-ready", intent.Id);
-                try { parent.MoveHere(temporary, ApplyState.Name(state.Version.Path)); }
+                try { parent.MoveHere(temporary, ApplyState.Name(state.Path)); }
                 catch (Win32Exception error) when (error.NativeErrorCode is 80 or 183)
                 { await DeferAsync(tree, state, intent, original ?? retained?.File, token).ConfigureAwait(false); return FileApplyOutcome.Deferred; }
                 Signal("installed", intent.Id);
             }
-            if (temporary is null && original is not null && !state.Version.Deleted && state.Original != state.Version.Path)
+            if (temporary is null && original is not null && !state.Deleted && state.Original != state.Path)
             {
-                using var parent = tree.Directory(ApplyState.Parent(state.Version.Path));
-                parent.MoveHere(original, ApplyState.Name(state.Version.Path));
+                using var parent = tree.Directory(ApplyState.Parent(state.Path));
+                parent.MoveHere(original, ApplyState.Name(state.Path));
                 Signal("case-renamed", intent.Id);
             }
-            await CompleteAsync(tree, state, intent, temporary ?? (state.Version.Deleted ? null : original), original ?? retained?.File, token).ConfigureAwait(false);
+            await CompleteAsync(tree, state, intent, temporary ?? (state.Deleted ? null : original), original ?? retained?.File, token).ConfigureAwait(false);
             return FileApplyOutcome.Applied;
         }
         finally { destination?.Dispose(); }
@@ -244,17 +243,25 @@ public sealed class FileApplier
     private async Task CompleteAsync(SafeFileTree tree, ApplyState state, ApplyIntent intent,
         SafeFileHandle? installed, SafeFileHandle? retainedOriginal, CancellationToken token)
     {
-        var version = state.Version; var body = version.ExportBody();
-        if (!version.Deleted)
+        if (!state.Deleted)
         {
             if (installed is null) throw new IOException("Verified installed file is missing.");
             // Metadata-only application is allowed only to this verified old object.
             if (state.Temporary.Length == 0) VerifyOld(installed, state, token);
             else VerifyNew(installed, state, token);
-            FileMetadata.SetMtime(installed, version.MtimeTicks); FileMetadata.SetSyncedAttributes(installed, body.Attributes);
+            FileMetadata.SetMtime(installed, state.MtimeTicks); FileMetadata.SetSyncedAttributes(installed, state.Attributes);
         }
         using var retained = Retain(tree, state, retainedOriginal);
         var archives = ReadArchives(state, retained?.File, token);
+        Signal("before-commit", intent.Id);
+        if (state.IsRestore)
+        {
+            // Restoration is a local filesystem edit. Withhold stale metadata;
+            // the normal scanner signs once (RW) or leaves it unpublished (RO).
+            await index.DeferApplyAsync(intent, archives, token).ConfigureAwait(false);
+            Signal("committed", intent.Id); return;
+        }
+        var version = state.Version!; var body = version.ExportBody();
         FileSnapshot? actual = installed is null ? null : FileSnapshot.Read(installed);
         var chunks = new List<LocalChunk>(); long offset = 0;
         foreach (var chunk in body.Chunks) { chunks.Add(new(offset, checked((int)chunk.Length), chunk.Hash.ToByteArray())); offset += chunk.Length; }
@@ -262,7 +269,6 @@ public sealed class FileApplier
             actual is null ? body.Attributes : (uint)actual.Value.Attributes, version.Deleted, version.ChangedTicks,
             version.Deleted ? null : version.FileHash.ToArray(), state.Vector, version.Record,
             actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks };
-        Signal("before-commit", intent.Id);
         await index.CommitApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);
         Signal("committed", intent.Id);
     }
@@ -333,7 +339,7 @@ public sealed class FileApplier
     }
 
     private Task<int> ParkAsync(ApplyState state, CancellationToken token) => state.Temporary.Length == 0 ? Task.FromResult(0)
-        : index.Meta.UpsertAsync([new(StagingKey(state.Version.Path), [.. state.Root, .. state.TemporaryId, .. Encoding.UTF8.GetBytes(state.Temporary)])], token);
+        : index.Meta.UpsertAsync([new(StagingKey(state.Path), [.. state.Root, .. state.TemporaryId, .. Encoding.UTF8.GetBytes(state.Temporary)])], token);
     private static string StagingKey(string path) => "_apply-staging-" + Convert.ToHexString(Blake3.Hasher.Hash(Encoding.UTF8.GetBytes(PathRules.Key(path))).AsSpan());
     private static bool NameIsTemporary(string path) => ApplyState.Name(path).EndsWith(".!psp", StringComparison.Ordinal)
         && Guid.TryParseExact(ApplyState.Name(path)[..^5], "N", out _);
@@ -362,10 +368,10 @@ public sealed class FileApplier
         uint cleared = original & ~(uint)FileAttributes.ReadOnly;
         if (!HasIdentity(file, state.OriginalId) || actual.Length != state.OriginalSize
             || DateTime.FromFileTimeUtc(actual.LastWrite).Ticks != state.OriginalMtime
-                && !(state.Temporary.Length == 0 && !state.Version.Deleted && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.Version.MtimeTicks)
+                && !(state.Temporary.Length == 0 && !state.Deleted && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.MtimeTicks)
             || attributes != original && attributes != cleared
-                && !(state.Temporary.Length == 0 && !state.Version.Deleted && attributes ==
-                    state.Version.ExportBody().Attributes)
+                && !(state.Temporary.Length == 0 && !state.Deleted && attributes ==
+                    state.Attributes)
             || !Hash(file, token).AsSpan().SequenceEqual(state.OriginalHash))
             throw new IOException("Retained original changed; recovery requires attention.");
     }
@@ -377,11 +383,11 @@ public sealed class FileApplier
     private static bool MatchesNew(SafeFileHandle file, ApplyState state, CancellationToken token)
     {
         var actual = FileSnapshot.Read(file);
-        return HasIdentity(file, state.TemporaryId) && actual.Length == state.Version.Size
-            && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.Version.MtimeTicks
+        return HasIdentity(file, state.TemporaryId) && actual.Length == state.Size
+            && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.MtimeTicks
             && ((uint)actual.Attributes == state.TemporaryAttributes || (uint)actual.Attributes ==
-                (state.Version.ExportBody().Attributes is 0 ? (uint)FileAttributes.Normal : state.Version.ExportBody().Attributes))
-            && Hash(file, token).AsSpan().SequenceEqual(state.Version.FileHash);
+                (state.Attributes is 0 ? (uint)FileAttributes.Normal : state.Attributes))
+            && Hash(file, token).AsSpan().SequenceEqual(state.FileHash);
     }
     private static bool HasIdentity(SafeFileHandle file, ReadOnlySpan<byte> identity) => identity.Length == 16
         && Identity(FileSnapshot.Read(file)).AsSpan().SequenceEqual(identity);

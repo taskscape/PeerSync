@@ -423,6 +423,21 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
   successful-run timestamp schedules daily cleanup across host restarts;
   deferred cleanup retries with bounded 10–600 second backoff. Restoring content
   remains a normal local edit, distinct from forwarding an archived signature.
+  Restore verifies the indexed source under a held guard, copies it into owned
+  sibling staging, and uses the same recoverable installation protocol as a
+  download. Preserve the current target, including unscanned local edits;
+  restore-as-copy never overwrites an occupied destination. Local restore
+  intents have an explicit unsigned local-operation format, separate from
+  signed remote records, and recovery dispatches both before scanning. On
+  completion, durably account for retained files and mark prior local metadata
+  for rescan while removing the intent. The normal scanner then generates a
+  fresh local version/counter for RW access, or an unpublished local edit for
+  RO access. Use the current local mtime and archived read-only/hidden flags;
+  preserve the replacement target's DACL/creation time. Keep the source archive.
+  Reused staging must not carry replacement metadata into a new destination.
+  When no target remains, refresh its DACL/inheritance and creation time from
+  an exclusively created sibling metadata reference with native delete-on-close;
+  then apply the desired mtime/attributes. The reference contains no user data.
 - **Ignore rules:** `.psp\ignore` uses gitignore-style patterns (`*`, `?`, `**`, `#`, a leading `/` anchors to the root), case-insensitive on Windows. A slash inside a pattern also anchors it; a trailing slash matches directories and their descendants. `**` as a whole component spans zero or more directories; trailing `/**` matches descendants, not the parent itself. Rules may use Windows backslashes as separators. `!` negates an earlier match, but children cannot be re-included while their parent remains excluded. Escape an initial `#` or `!` with a backslash for a literal name. Wildcards match Unicode scalar values. This is the stated glob subset, without bracket character classes. The defaults ignore `Thumbs.db`, `desktop.ini`, `~$*`, `*.tmp`, `$RECYCLE.BIN` and `System Volume Information`. Built-in path rules always exclude root `.psp`, temp suffixes and invalid paths. Like Resilio's IgnoreList, rules are local to each device.
 - **Read-only folders:** local edits are never sent. An "Overwrite local changes" option restores the swarm's version, as Resilio's `overwrite_changes` does.
 - **`.psp` folder:** hidden and system attributes, holding `id`, `ignore` and `archive\`. It is never synced. Temp files (`*.!psp`) are hidden and skipped by the scanner.

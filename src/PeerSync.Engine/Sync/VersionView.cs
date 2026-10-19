@@ -31,6 +31,7 @@ public sealed class VersionView
     public bool Deleted => value.Deleted;
     public long Size => checked((long)value.Size);
     public long MtimeTicks => value.MtimeTicks;
+    internal uint Attributes => value.Attributes;
     public long ChangedTicks => value.ChangedTicks;
     public long EffectiveChangeTicks => Deleted ? ChangedTicks : MtimeTicks;
     public FileRecordBody ExportBody() => value.Clone();

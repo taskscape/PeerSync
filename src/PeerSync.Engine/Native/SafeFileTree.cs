@@ -44,7 +44,7 @@ internal sealed class SafeFileTree : IDisposable
             && PathRules.IsValid(name[..^5]));
 
     internal static unsafe SafeFileHandle Open(SafeFileHandle parent, string name, bool directory,
-        uint access, uint share, uint disposition, uint attributes = 0)
+        uint access, uint share, uint disposition, uint attributes = 0, bool deleteOnClose = false)
     {
         fixed (char* pointer = name)
         {
@@ -59,7 +59,7 @@ internal sealed class SafeFileTree : IDisposable
                     ObjectName = &unicode, Attributes = 0x1040,
                 };
                 int status = NativeFiles.NtCreateFile(out var handle, access, in objectAttributes, out _, 0, attributes,
-                    share, disposition, 0x00200020u | (directory ? 1u : 0x44u), 0, 0);
+                    share, disposition, 0x00200020u | (directory ? 1u : 0x44u) | (deleteOnClose ? 0x1000u : 0), 0, 0);
                 if (status < 0) { handle.Dispose(); throw new Win32Exception((int)NativeFiles.RtlNtStatusToDosError(status)); }
                 try
                 {
@@ -103,6 +103,12 @@ internal sealed class DirectoryLease : IDisposable
     {
         Check(name, temporary: true);
         return SafeFileTree.Open(parent, name, false, 0x00170187, 0, 1);
+    }
+
+    internal SafeFileHandle CreateInheritedMetadataReference()
+    {
+        string name = Guid.NewGuid().ToString("N") + ".!psp"; Check(name, temporary: true);
+        return SafeFileTree.Open(parent, name, false, 0x00170187, 0, 2, 2, deleteOnClose: true);
     }
 
     public void MoveHere(SafeFileHandle file, string name, bool temporary = false)
