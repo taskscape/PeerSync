@@ -32,6 +32,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
         {
             using var parent = tree.Directory(ApplyState.Parent(retained.Destination), privatePath: !retained.PublicCopy);
             using var file = parent.OpenFile(ApplyState.Name(retained.Destination), mutation: true); Verify(file, retained, token);
+            await CaptureRetainedAsync(tree, file, retained, token).ConfigureAwait(false);
             if (!await index.AccountExistingHistoryAsync(marker, Protection(retained), token).ConfigureAwait(false))
                 throw new InvalidOperationException("History changed while bootstrapping retention.");
             Signal("accounted", Guid.NewGuid()); return;
@@ -66,6 +67,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
             {
                 using var parent = tree.Directory(ApplyState.Parent(retained.Destination), privatePath: !retained.PublicCopy);
                 using var file = parent.OpenFile(ApplyState.Name(retained.Destination), mutation: true); Verify(file, retained, token);
+                await CaptureRetainedAsync(tree, file, retained, token).ConfigureAwait(false);
                 if (!await index.AccountExistingHistoryAsync(new(retained.MarkerKey, marker), Protection(retained), token).ConfigureAwait(false))
                     throw new InvalidOperationException("History changed while accounting for retention.");
                 return retained.PublicCopy;
@@ -91,7 +93,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
             if (state.Prepared && VerifyLocation(tree, state, token) && CanRetain(state))
             {
                 using var installed = parent.OpenFile(ApplyState.Name(state.Destination), mutation: true);
-                Verify(installed, state, token); await CompleteAsync(state, intent, installed, flushData: false, token).ConfigureAwait(false); return;
+                Verify(installed, state, token); await CompleteAsync(tree, state, intent, installed, flushData: false, token).ConfigureAwait(false); return;
             }
             if (state.ExistingDestination.Length != 0)
             {
@@ -173,7 +175,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
                     }
                 }
                 Signal("installed", intent.Id);
-                await CompleteAsync(state, intent, file, flushData: true, token).ConfigureAwait(false);
+                await CompleteAsync(tree, state, intent, file, flushData: true, token).ConfigureAwait(false);
             }
             finally { file?.Dispose(); }
         }
@@ -189,9 +191,10 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
         }
     }
 
-    private async Task CompleteAsync(HistoryState state, ApplyIntent intent, SafeFileHandle file, bool flushData, CancellationToken token)
+    private async Task CompleteAsync(SafeFileTree tree, HistoryState state, ApplyIntent intent, SafeFileHandle file, bool flushData, CancellationToken token)
     {
         Verify(file, state, token);
+        if (state.ExistingDestination.Length != 0) await CaptureRetainedAsync(tree, file, state, token).ConfigureAwait(false);
         if (state.ExistingDestination.Length == 0)
         {
             FileMetadata.SetMtime(file, state.Source.MtimeTicks); FileMetadata.SetSyncedAttributes(file, state.Source.Attributes);
@@ -217,7 +220,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
             if (!CanRetain(state)) return false;
             var intent = new ApplyIntent(Guid.NewGuid(), source.Path, sequence, state.Encode());
             await index.ReserveApplyAsync(intent, token).ConfigureAwait(false); Signal("reserved", intent.Id);
-            await CompleteAsync(state, intent, file, flushData: false, token).ConfigureAwait(false); return true;
+            await CompleteAsync(tree, state, intent, file, flushData: false, token).ConfigureAwait(false); return true;
         }
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return false; }
     }
@@ -235,6 +238,11 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return false; }
     }
     private bool CanRetain(HistoryState state) => state.PublicCopy || state.ExistingDestination.Length == 0 || index.CanRetainHistoryArchive(Protection(state));
+    private async Task CaptureRetainedAsync(SafeFileTree tree, SafeFileHandle file, HistoryState state, CancellationToken token)
+    {
+        using var blocks = new PublishedBlocks(tree); blocks.CaptureFile(file, state.Source, token);
+        await blocks.FlushAsync(index, token, journal).ConfigureAwait(false);
+    }
     private static HistoryArchiveProtection Protection(HistoryState state) => new(state.Root, state.TemporaryId, state.Source.Path,
         state.Destination, state.Source.Size, state.Source.FileHash.ToArray(), state.ArchivedTicks, state.PublicCopy);
     private static void Verify(SafeFileHandle file, HistoryState state, CancellationToken token)

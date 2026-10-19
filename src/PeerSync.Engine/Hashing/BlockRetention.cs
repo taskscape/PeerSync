@@ -16,6 +16,8 @@ public sealed record BlockSweepResult(int Deleted, int Missing, int Cancelled, i
     long OwnedBytes, long CapacityBytes, bool WaitingForRecovery = false)
 {
     public bool CapacityExceeded => !WaitingForRecovery && OwnedBytes > CapacityBytes;
+    public int MetadataMutations { get; init; }
+    public bool MetadataCleanupPending { get; init; }
 }
 
 /// <summary>Host owns keys/index/journal. Fresh authenticated references and
@@ -55,6 +57,7 @@ public sealed class BlockRetention
         using var references = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         Guid session = Guid.NewGuid(); var watch = Stopwatch.StartNew(); int deleted = 0, missing = 0, cancelled = 0, deferred = 0, visited = 0; long removed = 0, cap = 0;
         TimeSpan nextProgress = TimeSpan.FromSeconds(5);
+        int metadataMutations = 0; bool metadataPending = false;
         try
         {
             using var tree = new SafeFileTree(rootPath); byte[] root = tree.Identity.ToArray();
@@ -85,6 +88,11 @@ public sealed class BlockRetention
             }
             if (!fresh.AllKnownSourcesCovered) { deferred += checked((int)Math.Min(int.MaxValue, fresh.ArchivesWithoutManifest + fresh.CaptureDeferrals)); Log("block.sweep_wait", code: "reference-coverage"); return Result(waiting: true); }
             snapshot = fresh.SnapshotId!.Value; Checkpoint?.Invoke("refreshed");
+            var metadata = await index.PruneRetiredMetadataAsync(snapshot, root, now, settings.ArchiveDays, cancellationToken: cancellationToken).ConfigureAwait(false);
+            metadataMutations = metadata.Mutations; metadataPending = metadata.MoreWork; Checkpoint?.Invoke("metadata-pruned");
+            journal?.TryWrite(new("block.metadata_pruned", "block-sweep") { SessionId = session, Level = DiagnosticLevel.Debug,
+                ItemsChanged = metadata.Mutations, ErrorCode = metadata.MoreWork ? "batch-limit" : null,
+                RetryInMilliseconds = metadata.MoreWork ? 10000 : null, ElapsedMilliseconds = watch.ElapsedMilliseconds });
             byte[]? cursor = null;
             do
             {
@@ -137,7 +145,8 @@ public sealed class BlockRetention
         }
         catch (Exception error) { Log("block.sweep_failed", error: error); throw; }
 
-        BlockSweepResult Result(bool waiting = false) => new(deleted, missing, cancelled, deferred, removed, index.ReadOwnedBlockBytes(), cap, waiting);
+        BlockSweepResult Result(bool waiting = false) => new(deleted, missing, cancelled, deferred, removed, index.ReadOwnedBlockBytes(), cap, waiting)
+        { MetadataMutations = metadataMutations, MetadataCleanupPending = metadataPending };
         void Progress() { if (watch.Elapsed >= nextProgress) { Log("block.sweep_progress"); nextProgress = watch.Elapsed + TimeSpan.FromSeconds(5); } }
         void Log(string name, Guid? id = null, Exception? error = null, string? code = null) => journal?.TryWrite(new(name, "block-sweep")
         { SessionId = id ?? session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = code ?? error?.GetType().Name,
