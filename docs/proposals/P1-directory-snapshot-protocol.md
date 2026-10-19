@@ -6,8 +6,12 @@ directory metadata record alone cannot identify its children. Packet arrival,
 forwarding identity and the spelling of an old child's parent are insufficient:
 causal parent case renames may retain the child's original signed path.
 
-Add optional `directory_snapshot_hash` (field 13) to FileRecordBody. A live
-directory may carry a 32-byte BLAKE3 root; files and tombstones cannot carry it.
+Add optional `directory_snapshot_hash` (field 13) and exact encoded
+`directory_snapshot_length` (field 14) to FileRecordBody. A live directory may
+carry a 32-byte BLAKE3 root and its bounded Entries/Branch node length; files
+and tombstones cannot carry either. Length allows the existing exact-length
+block-fetch contract to request the root without guessing or relaxing validation.
+Legacy records have both fields empty/zero; a present root needs both fields.
 Missing roots remain valid legacy metadata, never proof of an empty subtree.
 Keep original signed envelopes intact. Snapshot links describe the logical
 published subtree; ignored/unsupported/withheld entries cannot be invented.

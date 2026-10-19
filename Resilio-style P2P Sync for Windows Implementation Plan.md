@@ -629,7 +629,8 @@ Remote receipt remains whole-batch atomic with its cursor. Other resolver
 failures or cancellation roll back the current entire recomputation batch.
 
 Directory case preservation requires a signed description of descendants.
-Add an optional directory_snapshot_hash to live directory bodies, binding a
+Add optional directory_snapshot_hash and exact directory_snapshot_length
+fields to live directory bodies, binding a
 Merkle snapshot of exact original signed child envelopes and nested directory
 roots. Missing legacy hashes never prove emptiness. Capture bottom-up after
 children publish, retain the complete graph in reference coverage and keep
