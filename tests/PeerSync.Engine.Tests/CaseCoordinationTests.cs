@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using PeerSync.Core.Paths;
 using PeerSync.Crypto;
+using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Sync;
 using PeerSync.Net.InMemory;
 using PeerSync.Storage.FolderDb;
@@ -230,6 +231,79 @@ public sealed class CaseCoordinationTests : IDisposable
         for (int pass = 0; pass < 8; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
         File.ReadAllText(Path.Combine(c.Root, "node", "child")).ShouldBe(First);
         c.Index.Needed.Count().ShouldBe(0, CaseState(c)); c.Index.HasPendingDirectoryPublications().ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IndependentlyPreservedDirectoryCopiesConvergeThroughFourNodeGossip(bool readonlyReceiver)
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2);
+        await using var c = await NodeAsync(3); await using var d = await NodeAsync(4, readOnly: readonlyReceiver);
+        await PublishDirectory(a, "topic", "nested/shared.txt", First, early);
+        await PublishDirectory(b, "TOPIC", "nested/shared.txt", Second, early.AddMinutes(1));
+        Node[] nodes = [a, b, c, d]; var network = new InMemoryNetwork();
+        var endpoints = nodes.ToDictionary(node => node, node => network.Register(node.Id, node.Engine.CreateHandler));
+        var links = new List<(Node Owner, Node Sender, PeerFolderConnection Connection)>();
+        try
+        {
+            foreach (var receiver in nodes)
+                foreach (var sender in nodes.Where(node => !ReferenceEquals(node, receiver)))
+                    links.Add((receiver, sender, await receiver.Engine.ConnectAsync(endpoints[receiver].Connect(sender.Id), Token)));
+            // First create both receiver copies independently from the originals.
+            foreach (var link in links.Where(link => (link.Owner == c || link.Owner == d) && (link.Sender == a || link.Sender == b)))
+                await link.Connection.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+            for (int pass = 0; pass < 8; pass++)
+            {
+                var first = await c.Engine.RunPassAsync(Token); var second = await d.Engine.RunPassAsync(Token);
+                long now = nodes.Max(node => node.Clock.GetUtcNow().UtcTicks);
+                long? next = new[] { first.NextAttemptTicks, second.NextAttemptTicks }.Where(ticks => ticks > now).Min();
+                foreach (var node in nodes) node.Clock.AdvanceTo(next);
+            }
+            foreach (var receiver in new[] { c, d })
+                File.ReadAllText(Path.Combine(Directory.GetDirectories(receiver.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal)), "nested", "shared.txt")).ShouldBe(First);
+            for (int cycle = 0; cycle < 16; cycle++)
+            {
+                var deadlines = new List<long>();
+                foreach (var link in links)
+                {
+                    await link.Connection.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+                    var result = await link.Owner.Engine.RunPassAsync(Token);
+                    if (result.NextAttemptTicks is long deadline) deadlines.Add(deadline);
+                }
+                long now = nodes.Max(node => node.Clock.GetUtcNow().UtcTicks);
+                long? next = deadlines.Where(ticks => ticks > now).Select(ticks => (long?)ticks).Min();
+                foreach (var node in nodes) node.Clock.AdvanceTo(next);
+            }
+            string? stableCopy = null;
+            foreach (var node in nodes)
+            {
+                string copy = Directory.GetDirectories(node.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
+                stableCopy ??= Path.GetFileName(copy); Path.GetFileName(copy).ShouldBe(stableCopy);
+                File.ReadAllText(Path.Combine(copy, "nested", "shared.txt")).ShouldBe(First);
+                File.ReadAllText(Path.Combine(node.Root, "TOPIC", "nested", "shared.txt")).ShouldBe(Second);
+                node.Index.ReadPendingCasePreservations().ShouldBeEmpty(CaseState(node)); node.Index.Needed.Count().ShouldBe(0, CaseState(node));
+                node.Index.HasPendingDirectoryPublications().ShouldBeFalse(CaseState(node));
+            }
+            var uncovered = new List<string>();
+            foreach (var node in nodes)
+            {
+                var references = new BlockReferences(node.Root, node.Index, node.Access ?? keys, node.Id);
+                var coverage = await references.RefreshAsync(Token);
+                for (int pass = 1; pass < 4 && !coverage.AllKnownSourcesCovered; pass++) coverage = await references.RefreshAsync(Token);
+                if (!coverage.AllKnownSourcesCovered)
+                {
+                    var graphs = node.Index.LocalFiles.ReadAll().Where(row => row is { Type: 1, Deleted: false, Record: not null }).Select(row =>
+                    {
+                        var graph = node.Index.ReadDirectoryGraph(CaseConflictPolicy.SourceId(VersionView.Open(row.Record!, node.Access ?? keys, node.Id)));
+                        return row.Path + ":" + (graph is null ? "absent" : graph.Complete ? "complete" : "pending");
+                    });
+                    uncovered.Add("node=" + node.Id[0] + " captures=" + node.Index.HasDirectoryCaptures() + " graphs=" + string.Join(',', graphs) + " " + coverage);
+                }
+            }
+            uncovered.ShouldBeEmpty("Gossip reference coverage after bounded continuation: " + string.Join("; ", uncovered));
+        }
+        finally { foreach (var link in links) await link.Connection.DisposeAsync(); }
     }
     private static async Task Publish(Node node,string path,string text,DateTime at)
     { string disk=Path.Combine(node.Root,path); File.WriteAllText(disk,text); File.SetLastWriteTimeUtc(disk,at); node.Engine.RequestScan(); await node.Engine.RunPassAsync(Token); }
