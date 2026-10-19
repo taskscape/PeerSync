@@ -729,6 +729,14 @@ coverage, FULL reserve before preparation/rename and FULL identity accounting
 before intent release. Preserve changed/occupied temporaries and replay by
 native identity. Share a 1000-unit graph budget; root creation alone never
 completes subtree preservation or publication.
+Member installation uses schema-28 source/destination-root-native-ID keyed
+cursors and original graph-link/member-ID/destination rows. FULL kind-9 intent
+reservation and installation/cursor accounting bracket guarded no-overwrite
+mutation. Reauthenticate local original envelopes during recovery and verify
+every parent native ID without quadratic handle retention. Collisions/edits
+preserve earlier partial trees and select another root slot; installation
+coverage alone never completes publication. Details remain in the subtree
+materialization proposal, including namespace/publication activation barriers.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

@@ -69,3 +69,37 @@ the intent and requires recovery before scanning. Diagnostic stages/correlation
 identify graph, reservation, preparation, installation, accounting and replay
 without logging source envelopes or paths. Member intents/journals follow this
 root foundation and must bind the accounted destination-root native identity.
+
+## Member ledger and intent
+
+Schema 28 stores one installation cursor per original source ID/destination-root
+native ID and one row per original canonical member. Bind the original graph
+record hash/length, member source ID, type and projected destination; retain no
+rewritten envelope. FULL-reserve the next exact graph member and a local kind-9
+intent together. The intent binds physical/source/root/member identities,
+metadata link, destination, sibling GUID temporary/native ID and preparation
+state. Reauthenticate the original envelope from locally retained graph metadata
+during recovery; do not duplicate two potentially 16 MiB signed bodies into an
+intent. FULL native identity accounting, cursor advancement and intent removal
+are atomic. Traversal exhaustion means installation coverage, never source
+completion or publication proof.
+
+Pin the accounted destination root and every intermediate parent by their
+ledger native IDs, opening one guarded component at a time. Create directory
+members before their children. File assembly uses the original authenticated
+chunk list and advertisers of the exact original root. Prepared files require
+independent identity/size/whole-hash verification; prepared directories require
+identity/metadata/emptiness. Installation is a no-overwrite held-handle move.
+Recovery preserves edited or unclassifiable objects. Nonempty unprepared file
+staging without an authenticated content proof stays protected; directory
+staging with unknown children also stays protected.
+
+A foreign member occupant, edited installed member or changed ancestor causes
+the whole copy attempt to select another root slot after safely releasing its
+intent. Retain the earlier tree and its old identity-bound ledger; never move,
+delete or overwrite its members to make it fit. New root identities start new
+cursors. Bound admission/advancement to member pages, retain immediate scheduling
+while making progress, and use persistent backoff for unavailable data. Source
+barriers and original graph references remain until all members and RW/RO
+publication are proven. Incoming mutation of a pending copy namespace and
+intermediate directory advertisement must also be guarded before activation.
