@@ -737,6 +737,13 @@ every parent native ID without quadratic handle retention. Collisions/edits
 preserve earlier partial trees and select another root slot; installation
 coverage alone never completes publication. Details remain in the subtree
 materialization proposal, including namespace/publication activation barriers.
+Pending case preservation blocks ordinary incoming source/copy namespace
+mutation including descendants and destructive ancestor transitions; keep the
+narrow existing missing-ancestor-directory creation allowance. Share exact
+ancestor/range logic with late/recovery and FULL commit guards. Hold directory
+advertisements at/above/below unfinished copied roots until identity-bound
+member coverage is exhausted, preserving signed rows and pausing templates.
+Coverage releases only publication holding, never case-source completion.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

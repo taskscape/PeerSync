@@ -103,3 +103,23 @@ while making progress, and use persistent backoff for unavailable data. Source
 barriers and original graph references remain until all members and RW/RO
 publication are proven. Incoming mutation of a pending copy namespace and
 intermediate directory advertisement must also be guarded before activation.
+
+## Namespace and publication barriers
+
+While a case source is pending, ordinary incoming mutation waits at the original
+source or any descendant, and at a reserved copy destination or any descendant.
+Ancestor mutation also waits when it can replace/delete that namespace. Retain
+the existing narrow allowance for creating a missing live ancestor directory;
+it does not permit mutation inside a reserved copy root. Apply the same test
+in selection, late native/recovery checks and FULL ordinary apply commit.
+Literal `%`/`_` names and deep paths use exact indexed ancestor/range checks.
+Owned case workers and explicit local restore retain their separate authority.
+
+Directory advertisements at, above or below an unfinished directory-copy root
+wait until its identity-bound member cursor is exhausted. This includes legacy
+metadata-only scanner publication as well as private snapshot staging/worker
+completion. Preserve any previous signed row; pause existing templates and
+resume after installation coverage. File versions may publish through ordinary
+scanning, but no partially materialized directory is presented as an empty or
+complete subtree. Installation coverage releases this publication hold only;
+incoming mutation remains blocked until whole-source completion proof succeeds.
