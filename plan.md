@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.2.4b2b2b: capture verified private archive bytes through ordinary block ownership, then stage bounded root/source/file-bound manifests and FULL-activate after complete hash/length verification. Include active manifests and stable provenance coverage in reference snapshots, retaining detached/unknown-source protection across row removal/reuse. Policy release and sweeping remain mandatory follow-up work. | Detecting local changes: published block ownership |
 | 2026-10-19 | P1.2.4b2b2a: migration and database triggers preserve exact archive provenance across creation, metadata replacement and missing-row deletion, in the original transaction. Stable source IDs prevent archive-ID reuse from conflating versions. This is reference-protection metadata, not ownership/deletion authorization. | Detecting local changes: published block ownership |
 | 2026-10-19 | Run 39224281962 passes all 633 tests and native probes, then x64 exceeds 15 minutes during repeated ReadyToRun compilation of P0 bundles. Publish these six self-contained diagnostic executables using JIT, preserving locked restore, outputs, signing and all checks. Production installer ReadyToRun remains required. | Testing strategy: CI; Packaging and deployment |
 | 2026-10-19 | Billing investigation found 49 commits with duplicate feature-push/PR CI runs. Run the full unchanged matrix on PR updates, main pushes and manual dispatch only; batch related pending work for a single tested head. Preserve native checks, both builds, publishing and 600-second fuzz. | Testing strategy: CI |
@@ -1005,6 +1006,8 @@ public static class PathRules
           - [ ] **P1.2.4b2b2a Transactional archive provenance** (`PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
             - Done when: migrate existing archive rows and transactionally preserve exact source/root metadata on every insert, update and removal, including apply/history/restore completion and missing reconciliation. Stable IDs survive archive-ID reuse, cancellation/rollback and reopening; original archive writes fail if provenance cannot commit. Content manifests and policy release remain mandatory parent work.
             - Implemented locally with [verification](docs/verification/P1.2.4b2b2a-archive-provenance-2026-10-19.md): 14 Storage additions and native missing/retirement assertions pass with all 647 canonical cases plus native/probe/publishing in 110.14 s, exit 0 (separate CI fuzz skipped locally). CI/merge pending; no content release/deletion is enabled.
+          - [ ] **P1.2.4b2b2b Verified archive content manifests** (`PeerSync.Engine/Archive/`, `PeerSync.Engine/Hashing/`, `PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
+            - Done when: root/source/native-file-bound archive manifests stage in bounded batches and FULL-activate only after whole-file verification and block registration. References include verified content and stable provenance coverage after row removal/reuse; interrupted capture/activation retains prior protection. Missing/changed/locked/linked/reparse/oversized sources defer visibly, with native/storage/gate/restart tests. No policy release or deletion is enabled by this child.
 
 ### 7.5 Code: FastCDC (P1.2.1)
 
