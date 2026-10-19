@@ -31,7 +31,7 @@ try {
         }
         & "$PSScriptRoot/Test-Diagnostics.ps1"
         # Only projects with real tests are counted; future-phase skeletons are excluded.
-        foreach ($name in @('Core','Crypto','Protocol','Engine')) {
+        foreach ($name in @('Core','Crypto','Protocol','Engine','Storage')) {
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
         }
@@ -51,7 +51,7 @@ try {
     $clock.Stop()
     $fuzzDuration = 0
     if ($fuzz) { $fuzzDuration = $FuzzSeconds }
-    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P0';gateP0Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
+    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P1';gateP1Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
 }
 finally {
     if ($fuzz) {

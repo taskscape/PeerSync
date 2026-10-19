@@ -211,6 +211,17 @@ One SQLite file per folder at `%ProgramData%\PeerSync\state\folders\<FolderId>.d
 | `archive` | Archived versions: original path, archive path, time, file hash |
 | `meta` | Schema version, folder settings, local sequence counter |
 
+Each normalized database path has one writer owner in the service process.
+Writes run through a bounded single-reader channel, with one transaction per
+queued operation; failed/cancelled operations roll back without poisoning the
+next write. Readers own separate read-only connections. Connections use WAL,
+NORMAL synchronous mode, foreign keys, a 5-second SQLite busy timeout and memory
+temp storage. Migrations run before exposing the database, back up through
+SQLite's online backup API (including committed WAL data), then apply SQL and
+`user_version` in one transaction. Future schema versions are rejected. Because
+Microsoft.Data.Sqlite's async ADO.NET calls execute synchronously, the writer
+runs on a worker task rather than blocking the service caller.
+
 Version vectors use an 8-byte short device id (the first 8 bytes of DeviceId) to keep records small.
 Missing counters are zero; canonical vectors omit zero entries. Incrementing
 an exhausted 64-bit counter fails instead of wrapping. The Core compact

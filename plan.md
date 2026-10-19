@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.3.1: one normalized-path writer owner and a bounded channel, transactional operations with rollback, independent read-only connections, and online SQLite backup before transactional user_version migrations. Run synchronous SQLite I/O on the writer worker; retain WAL/NORMAL/foreign_keys/busy_timeout/temp_store settings. | Sync engine design: metadata database |
 | 2026-10-19 | P1.2.2: bound one-pass hashing to the original length and compare handle/path size, timestamps, attributes and 128-bit file identity. Detected mutation/removal/replacement retries; progress exposes counts only. This is metadata-based detection with shared writers, not an atomic snapshot. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.1.5: specify the ignore glob subset and ancestry/negation behavior, accept Windows pattern separators, and match Unicode scalars without regex backtracking. Local rule text is bounded at 64 KiB, 1,024 rules and 4,096 characters per line. Invalid paths and internal metadata remain excluded. | Sync engine design: Archive, ignore rules and special files |
 | 2026-10-19 | P1.1.3/P1.1.4: Core owns the immutable signed envelope and pure path rules; the factory lives in Protocol (references Core/Crypto) to avoid a Core-Crypto cycle. Sign and forward exact body bytes with folder/domain binding; verify before parsing. Path containment is lexical; filesystem layers must also reject reparse traversal. | Protocol specification: FileRecord; solution structure |
@@ -1062,7 +1063,7 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
 
 ### P1.3 Storage
 
-- [ ] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`)
+- [ ] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) [WIP @Codex 2026-10-19]
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.
 - [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`)
   - Done when: the schema in 7.7 is created by migration 1. Repositories cover `local_files`, `remote_files`, `needed`, `chunks`, `devices`, `archive` and `meta`. Bulk updates commit in batches of 1,000 rows per transaction. Indexing 1M rows takes under 60 s on the reference SSD.
@@ -1070,6 +1071,10 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
   - Done when: `peersync.db` has `folders` (id, path, access level, protected key, `settings_json`, paused), `devices`, `pending_approvals` and `audit_log`. Folder keys are stored only through `FolderKeyProtector`.
 
 ### 7.7 Code: SQLite setup and folder schema (P1.3)
+
+Connection/writer/migration plumbing is superseded by `src/PeerSync.Storage/Db.cs`.
+It enforces one in-process writer per normalized path, uses separate read-only
+connections, and backs up through SQLite before transactional migrations.
 
 **Tricky:**
 

@@ -16,7 +16,7 @@ dotnet test --project tests/PeerSync.Core.Tests/PeerSync.Core.Tests.csproj -c Re
 dotnet test --project tests/PeerSync.Crypto.Tests/PeerSync.Crypto.Tests.csproj -c Release --report-trx
 ./build/Run-P0.ps1             # native local probes, including 1 GiB QUIC transfers
 ./build/Run-ServiceP0.ps1      # elevated; temporary services and one standard user, cleaned up
-./build/Verify.ps1             # CI parity: build, actual P0 tests, probes, 10 min fuzz, publish
+./build/Verify.ps1             # CI parity: build, local tests, probes, 10 min fuzz, publish
 ./build/Publish.ps1 -Runtime win-x64
 ```
 
