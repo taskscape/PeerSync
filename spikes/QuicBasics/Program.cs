@@ -39,7 +39,9 @@ string stage = "certificate";
 long transferred = 0;
 var runClock = Stopwatch.StartNew();
 var clock = new Stopwatch();
-double nextProgressSeconds = 5;
+// Stream/session setup already consumes the authenticated transfer deadline.
+// Always expose the first completed data unit, then rate-limit later samples.
+double nextProgressSeconds = 0;
 log.Write(new("transport.start", server ? "listen" : "dial")
     { SessionId = session, Transport = DiagnosticTransport.Quic, RemoteAddress = remoteAddress });
 try

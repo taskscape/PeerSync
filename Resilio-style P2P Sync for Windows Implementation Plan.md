@@ -556,6 +556,59 @@ the device-first primary key alone cannot serve that access pattern efficiently.
 
 ### Applying remote changes
 
+The pull coordinator consumes bounded durable work descriptors computed from
+authenticated decisions in the same transaction as needed rows. Descriptors
+cache stage, size, mtime and a version/target fingerprint, so priority queries
+do not load every signed body. Directory creation precedes files; files use
+configured size/age priority with stable path ties; file deletions precede
+deepest-first directory deletions. The applier rechecks the actual decision.
+Persist each sender's monotonically advertised target cursor before accepting
+destructive scheduled work. A received cursor must reach that target before
+its tombstones apply; missing knowledge blocks deletion. Recheck under the
+reference gate through deletion, without holding that gate across downloads.
+Index-generation reset handling belongs to the P2 transport; never silently
+lower an outstanding target for the same generation.
+Persist root/fingerprint-bound retries only while that exact needed work is
+current. Back off 10, 20, 40, 80, 160, 320 then 600 seconds, capped at 600;
+new work invalidates the old delay and removed needed rows cascade retries.
+Clock rollback must not produce an unbounded wait. Needed hashes remain
+protected while work waits. Downloads route by the source selected inside the
+applier, not a stale outer snapshot. Recover before startup scan, rescan kept
+unknown/conflict data outside mutation gates, and continue independent work
+after deferred targets. Case-clash and hierarchy coordination remain required
+parts of the complete puller, not implied by queue metadata alone.
+
+The host owns one pull coordinator per folder. Its bounded passes recover pending
+intents, scan at startup, rebuild legacy needed metadata once, and then consume
+up to 1,000 eligible entries. Filter cached deletion stages awaiting sender ranges
+before LIMIT so waiting deletions cannot starve complete independent work. The
+applier still checks actual work under its gates. A fresh unbound index with no
+intents can bind and scan; unbound recovery state fails closed. All coordinator
+scans share the process-wide rescan budget. Later scans return changed paths for
+incremental needed recomputation. Coalesce preserved/changed-target scans once
+per batch and perform them outside mutation gates. Follow-up history scans and
+transient scan failures request another pass, with bounded delays on failure.
+Recover failed staged operations before attempting another target; if recovery
+itself is unavailable, stop that pass and retry the folder. Preserve exact-work
+backoff through restart and continue other eligible paths after ordinary failures.
+The cancellable loop wakes on coalesced index/local notifications, the next
+eligible durable retry or the periodic scan deadline. Watcher/host notifications
+request scans explicitly; waiting for work holds no mutation or scan gate.
+
+Scheduled deletion intents persist their barrier requirement in local recovery
+formats (kind 5 file/type transitions and kind 6 directories; legacy kinds 1/3
+retain direct-call semantics). Staging abandonment needs no range barrier, but
+prepared deletion recovery reacquires the reference gate and checks the sender's
+current target through all remaining destructive mutation and commit. Incomplete
+knowledge preserves the journal and target while index receipt remains available.
+Live timestamps unrepresentable by Windows mutation APIs are blocked per item,
+without terminating independent work. Incremental scans include native-cache-only
+paths and filter invalid wire names before needed selection. Mark needed repair
+pending before each scan, clear it only after needed recomputation succeeds, and
+rebuild on the next pass after partial scan/recompute failure; fresh coordinators
+already rebuild at startup. Never infer an unchanged second walk repaired a
+partially committed first walk.
+
 Filesystem mutation primitives open every directory component relative to a
 pinned root, reject reparse traversal and hold directory leases that disallow
 rename while the operation is active. Creates use exclusive-create semantics;
@@ -809,7 +862,10 @@ validation tools; engine paths use TryWrite and expose a dropped-event count.
 Cross-machine diagnostic refinement (2026-10-18): retain managed HRESULT,
 native socket error and QUIC transport/application error numbers as separate
 metadata. Failed probes report the operation stage and transferred bytes;
-progress is emitted at bounded intervals. Collection must reject a bundle
+the first completed data unit emits progress immediately, followed by bounded
+five-second intervals while data advances. Stream setup can consume part of a
+short authenticated transfer deadline, so initial progress must not require five
+payload seconds. Collection must reject a bundle
 with no recent valid debug events and report file/event counts. The P0 QUIC
 probe gives connection establishment and the transfer independent deadlines,
 so waiting for the second operator does not consume the transfer budget.

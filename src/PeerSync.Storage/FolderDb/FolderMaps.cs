@@ -33,9 +33,18 @@ internal static class FolderMaps
         r => { RequireBytes(r.DeviceId, 32); RequirePath(r.PathKey); ArgumentNullException.ThrowIfNull(r.Vector); ArgumentNullException.ThrowIfNull(r.Record); });
 
     public static RowMap<NeededRow> Needed { get; } = new("needed", ["path_key"],
-    [new("path_key", Text, r => r.PathKey.ToUpperInvariant()), new("source_device", Blob, r => r.SourceDevice), new("priority", Integer, r => r.Priority)],
-        r => new(r.GetString(0), r.GetFieldValue<byte[]>(1), r.GetInt32(2)),
+    [new("path_key", Text, r => r.PathKey.ToUpperInvariant()), new("source_device", Blob, r => r.SourceDevice), new("priority", Integer, r => r.Priority),
+        new("work_stage", Integer, r => r.Work?.Stage), new("work_size", Integer, r => r.Work?.Size), new("work_mtime", Integer, r => r.Work?.MtimeTicks), new("work_hash", Blob, r => r.Work?.Fingerprint)],
+        ReadNeeded,
         r => { RequirePath(r.PathKey); RequireBytes(r.SourceDevice, 32); });
+
+    internal static NeededRow ReadNeeded(SqliteDataReader reader)
+    {
+        bool absent = reader.IsDBNull(3);
+        if (Enumerable.Range(4, 3).Any(i => reader.IsDBNull(i) != absent)) throw new InvalidDataException("Incomplete pull work descriptor.");
+        return new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetInt32(2))
+        { Work = absent ? null : new(reader.GetInt32(3), reader.GetInt64(4), reader.GetInt64(5), reader.GetFieldValue<byte[]>(6)) };
+    }
 
     public static RowMap<ChunkRow> Chunks { get; } = new("chunks", ["hash", "path_key", "file_offset"],
     [new("hash", Blob, r => r.Hash), new("path_key", Text, r => r.PathKey.ToUpperInvariant()),

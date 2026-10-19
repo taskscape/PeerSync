@@ -24,6 +24,7 @@ public sealed class DirectoryApplier
     private readonly FolderIndex index;
     private readonly FolderKeys keys;
     private readonly NeededSet needed;
+    private readonly byte[] ownDevice;
     private readonly DiagnosticJournal? journal;
     internal Action<string>? Checkpoint { get; set; }
 
@@ -32,10 +33,14 @@ public sealed class DirectoryApplier
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath); ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(keys);
         this.rootPath = Path.GetFullPath(rootPath); this.index = index; this.keys = keys;
-        needed = new(index, keys, ownDevice, settings, journal: journal); this.journal = journal;
+        needed = new(index, keys, ownDevice, settings, journal: journal); this.journal = journal; this.ownDevice = ownDevice.ToArray();
     }
 
-    public async Task<DirectoryApplyResult> ApplyAsync(string path, CancellationToken cancellationToken = default)
+    public Task<DirectoryApplyResult> ApplyAsync(string path, CancellationToken cancellationToken = default) => ApplyCoreAsync(path, false, cancellationToken);
+
+    public Task<DirectoryApplyResult> ApplyScheduledAsync(string path, CancellationToken cancellationToken = default) => ApplyCoreAsync(path, true, cancellationToken);
+
+    private async Task<DirectoryApplyResult> ApplyCoreAsync(string path, bool scheduled, CancellationToken cancellationToken)
     {
         string key = PathRules.Key(path); Guid session = Guid.NewGuid();
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
@@ -43,13 +48,18 @@ public sealed class DirectoryApplier
         {
             if (index.ReadApplyIntents().Any()) throw new IOException("Recover pending application before changing directories.");
             using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); Signal("start", session);
-            var known = index.LocalFiles.Find(key);
-            var decision = needed.Decide(new(key, known, index.RemotesForPath(path).ToArray()));
+            using var selection = await ScheduledApplySelection.AcquireAsync(index, needed, ownDevice, key, scheduled, cancellationToken).ConfigureAwait(false);
+            var known = selection.Known; var decision = selection.Decision;
             if (decision.BlockedReason is not null) { Signal("blocked", session); return new(FileApplyOutcome.Blocked); }
             if (!decision.RequiresApply) { Signal("unchanged", session); return new(FileApplyOutcome.Unchanged); }
+            if (!selection.RangeComplete) { Signal("index-range-pending", session); return new(FileApplyOutcome.Deferred); }
             if (decision.Winner!.Type != 1) { Signal("unsupported-type", session); return new(FileApplyOutcome.Deferred); }
             var version = VersionView.Open(decision.DesiredRecord!, keys, decision.Winner.SourceDevice.ToArray());
-            if (!version.Deleted) FileMetadata.ValidateMtime(version.MtimeTicks);
+            if (!version.Deleted)
+            {
+                try { FileMetadata.ValidateMtime(version.MtimeTicks); }
+                catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return new(FileApplyOutcome.Blocked); }
+            }
             using var parent = tree.Directory(ApplyState.Parent(version.Path));
             using var existing = TryNode(parent, ApplyState.Name(version.Path));
             if (existing is not null)
@@ -61,7 +71,7 @@ public sealed class DirectoryApplier
                 { Signal("identity-changed", session); return new(FileApplyOutcome.Deferred, RequiresScan: true); }
             }
             var state = new DirectoryState { Root = tree.Identity.ToArray(), Version = version, Vector = decision.Vector,
-                DirectoryId = existing is null ? [] : Identity(FileSnapshot.Read(existing)) };
+                DirectoryId = existing is null ? [] : Identity(FileSnapshot.Read(existing)), ScheduledDeletion = scheduled && version.Deleted };
             var intent = new ApplyIntent(session, version.Path, known?.LocalSequence, state.Encode());
             await index.ReserveApplyAsync(intent, cancellationToken).ConfigureAwait(false); Signal("staging", session);
             using var created = existing is null && !version.Deleted ? parent.CreateDirectory(ApplyState.Name(version.Path)) : null;
@@ -91,6 +101,7 @@ public sealed class DirectoryApplier
             await index.AbandonApplyAsync(intent, token).ConfigureAwait(false); Signal("recover-staging", intent.Id);
             return new(FileApplyOutcome.Deferred, RequiresScan: true);
         }
+        using var deletionBarrier = await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version, ownDevice, state.ScheduledDeletion, token).ConfigureAwait(false);
         using var parent = tree.Directory(ApplyState.Parent(state.Version.Path));
         using var node = TryNode(parent, ApplyState.Name(state.Version.Path));
         if (node is not null && ((FileSnapshot.Read(node).Attributes & FileAttributes.Directory) == 0

@@ -106,9 +106,14 @@ public sealed class NeededSetTests : IDisposable
         await needed.ApplyIndexUpdateAsync(Device(1), 0, 1, [record], Token);
         await Should.ThrowAsync<CryptographicException>(() => needed.ApplyIndexUpdateAsync(Device(1), 1, 2,
             [new Envelope(record.Body, new byte[64], 2)], Token));
+        await needed.AnnounceIndexRangeAsync(Device(1), 2, Token);
+        await needed.ApplyIndexUpdateAsync(Device(1), 1, 2, [], Token);
+        await needed.AnnounceIndexRangeAsync(Device(1), 2, Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => needed.AnnounceIndexRangeAsync(Device(1), 1, Token));
         string log = await File.ReadAllTextAsync(Path.Combine(fixture, "logs", "debug.jsonl"), Token);
         log.ShouldContain("index.receive_complete"); log.ShouldContain("index.replay"); log.ShouldContain("index.receive_failed");
         log.ShouldContain("sessionId"); log.ShouldContain("itemsVisited");
+        log.ShouldContain("index.range_pending"); log.ShouldContain("index.range_complete"); log.ShouldContain("index.range_failed");
         log.ShouldNotContain("private sync content"); log.ShouldNotContain(keys.ExportText());
     }
 
@@ -221,6 +226,60 @@ public sealed class NeededSetTests : IDisposable
         using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(Token); cancelled.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => needed.ApplyIndexUpdateAsync(Device(1), 1, 2, [], cancelled.Token));
         index.Devices.Find(Device(1))!.LastSequenceReceived.ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData(0u, false, 1)]
+    [InlineData(1u, false, 0)]
+    [InlineData(0u, true, 2)]
+    [InlineData(1u, true, 3)]
+    public async Task AuthenticatedWinnerAtomicallyCachesItsSchedulingStage(uint type, bool deleted, int stage)
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        var body = ConflictResolverTests.Body(1, 1, 20, 20, "private content", deleted); body.Type = type;
+        if (type == 1) { body.Size = 0; body.FileHash = ByteString.Empty; body.Chunks.Clear(); }
+        var record = SignedRecordFactory.Create(body, keys, 1); var needed = new NeededSet(index, keys, Device(9));
+        await needed.ApplyIndexUpdateAsync(Device(1), 0, 1, [record], Token);
+        var row = index.Needed.Find("file")!; row.SourceDevice.ShouldBe(Device(1)); row.Work.ShouldNotBeNull();
+        row.Work.Stage.ShouldBe(stage); row.Work.Size.ShouldBe((long)body.Size); row.Work.MtimeTicks.ShouldBe(body.MtimeTicks);
+        row.Work.Fingerprint.Length.ShouldBe(32); row.Work.ToString().ShouldNotContain("private content");
+        index.Devices.Find(Device(1))!.LastSequenceReceived.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task StableRecomputeRetainsBackoffButNewRemoteOrNativeLocalWorkInvalidatesIt()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        byte[] root = new byte[24]; await index.Meta.UpsertAsync([new("_root-identity", root)], Token);
+        var needed = new NeededSet(index, keys, Device(9));
+        await needed.ApplyIndexUpdateAsync(Device(1), 0, 1, [Record(1, 1, 20, "first", 1)], Token);
+        byte[] first = index.Needed.Find("file")!.Work!.Fingerprint;
+        await index.RecordPullFailureAsync("file", root, first, 100, Token);
+        await needed.RecomputeAsync(["file"], Token); index.Needed.Find("file")!.Work!.Fingerprint.ShouldBe(first);
+        index.ReadPullRetry("file")!.Attempts.ShouldBe(1);
+        await needed.ApplyIndexUpdateAsync(Device(1), 1, 2, [Record(1, 2, 30, "second", 2)], Token);
+        byte[] second = index.Needed.Find("file")!.Work!.Fingerprint; second.ShouldNotBe(first); index.ReadPullRetry("file").ShouldBeNull();
+        var local = Local(Record(9, 1, 1, "local old", 1)); await index.LocalFiles.UpsertAsync([local], Token); await needed.RecomputeAsync(["file"], Token);
+        byte[] beforeNativeChange = index.Needed.Find("file")!.Work!.Fingerprint;
+        await index.RecordPullFailureAsync("file", root, beforeNativeChange, 100, Token);
+        await index.LocalFiles.UpsertAsync([local with { ChangeFileTime = 12 }], Token); await needed.RecomputeAsync(["file"], Token);
+        index.Needed.Find("file")!.Work!.Fingerprint.ShouldNotBe(beforeNativeChange); index.ReadPullRetry("file").ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task FailedNeededRewriteRestoresPreviousDescriptorAndDoesNotAdvancePeerCursor()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); var needed = new NeededSet(index, keys, Device(9));
+        await needed.ApplyIndexUpdateAsync(Device(1), 0, 1, [Record(1, 1, 20, "first", 1)], Token);
+        byte[] first = index.Needed.Find("file")!.Work!.Fingerprint;
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()))
+        {
+            connection.Open(); using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TRIGGER reject_work BEFORE UPDATE OF work_hash ON needed BEGIN SELECT RAISE(ABORT,'test'); END;"; command.ExecuteNonQuery();
+        }
+        await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(() => needed.ApplyIndexUpdateAsync(Device(1), 1, 2, [Record(1, 2, 30, "second", 2)], Token));
+        index.Needed.Find("file")!.Work!.Fingerprint.ShouldBe(first); index.Devices.Find(Device(1))!.LastSequenceReceived.ShouldBe(1);
+        index.RemotesForPath("file").Single().Record.Body.ToArray().ShouldBe(Record(1, 1, 20, "first", 1).Body.ToArray());
     }
 
     private Envelope Record(ulong author, ulong counter, long time, string content, ulong sequence) =>

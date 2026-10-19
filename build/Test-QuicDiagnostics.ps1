@@ -1,8 +1,9 @@
 [CmdletBinding()]
-param()
+param([string]$ExecutablePath)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$executable = Join-Path $root 'spikes/QuicBasics/bin/Release/net10.0-windows10.0.20348.0/QuicBasics.exe'
+$executable = if ($ExecutablePath) { (Resolve-Path -LiteralPath $ExecutablePath).ProviderPath }
+    else { Join-Path $root 'spikes/QuicBasics/bin/Release/net10.0-windows10.0.20348.0/QuicBasics.exe' }
 $evidence = Join-Path $root 'artifacts/p0/quic-timeout'
 New-Item -ItemType Directory -Force $evidence | Out-Null
 
@@ -62,7 +63,15 @@ try {
     if ($failure.errorCode -ne 'ProbeTimeout' -or $failure.operation -ne 'receive' -or $failure.bytes -le 0 -or $null -eq $failure.hResult) {
         throw 'Timeout did not preserve its stage, progress and HRESULT'
     }
-    if (@($events | Where-Object eventName -eq 'transfer.progress').Count -eq 0) { throw 'Progress event missing' }
+    $progress = @($events | Where-Object eventName -eq 'transfer.progress')
+    if ($progress.Count -eq 0 -or $progress[0].bytes -le 0 -or $progress[0].bytes -gt 1048576 -or $progress[0].bytes -gt $failure.bytes -or $progress[0].elapsedMs -lt 0) {
+        throw 'Initial data progress event missing or invalid'
+    }
+    for ($i = 1; $i -lt $progress.Count; $i++) {
+        if ($progress[$i].bytes -le $progress[$i - 1].bytes -or $progress[$i].elapsedMs - $progress[$i - 1].elapsedMs -lt 4900) {
+            throw 'Progress counters or five-second cadence are invalid'
+        }
+    }
     if ($null -ne $failure.nativeError) { throw 'HRESULT was incorrectly labelled a native socket error' }
     Write-Host 'QUIC delayed start, transfer deadline, progress, error metadata and argument validation passed'
 }
