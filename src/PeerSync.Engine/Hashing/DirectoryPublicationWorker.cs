@@ -61,6 +61,8 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 }
                 stage = "publication";
                 var previous = index.LocalFiles.Find(queued.Path); var template = VersionView.Open(queued.Template, keys, source);
+                if (queued.ReconstructionOnly && template.ExportBody().DirectorySnapshotHash.Length != 32)
+                    throw new InvalidDataException("Reconstruction requires a signed snapshot root.");
                 LocalFileRow? publication = null;
                 bool identical = false;
                 if (previous is { Type: 1, Deleted: false, Record: not null, Flags: LocalFileState.None })
@@ -72,7 +74,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 }
                 if (!identical)
                 {
-                    if (!keys.CanWrite || template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
+                    if (queued.ReconstructionOnly || !keys.CanWrite || template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
                     var body = template.ExportBody(); body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
                     var record = SignedRecordFactory.Create(body, keys);
                     publication = new(queued.Path, 1, 0, body.MtimeTicks, queued.Attributes, false, body.ChangedTicks, null,

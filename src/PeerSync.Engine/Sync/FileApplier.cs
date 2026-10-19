@@ -126,7 +126,7 @@ public sealed partial class FileApplier
             stream.Flush(flushToDisk: true);
         }
         using var mutationReferences = selection.HoldsReferences ? null : await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-        if (index.HasPendingCasePreservation(key) || index.HasPendingDirectoryPublication(key, includeDescendants: true))
+        if (index.HasPendingCasePreservation(key) || index.HasBlockingDirectoryPublication(key, includeDescendants: true))
         {
             await ParkAsync(tree, state, intent, cancellationToken, tempHandle).ConfigureAwait(false);
             await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
@@ -220,7 +220,7 @@ public sealed partial class FileApplier
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);
-            if (!state.IsRestore && (index.HasPendingCasePreservation(state.Path) || index.HasPendingDirectoryPublication(state.Path, includeDescendants: true)))
+            if (!state.IsRestore && (index.HasPendingCasePreservation(state.Path) || index.HasBlockingDirectoryPublication(state.Path, includeDescendants: true)))
             {
                 if (state.OriginalId.Length == 0 && target is null || target is not null && HasIdentity(target, state.OriginalId))
                 {

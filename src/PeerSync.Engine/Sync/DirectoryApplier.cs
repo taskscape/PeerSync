@@ -115,7 +115,7 @@ public sealed class DirectoryApplier
         }
         using var deletionBarrier = await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version, ownDevice, state.ScheduledDeletion, token).ConfigureAwait(false);
         using var caseReferences = state.ScheduledDeletion ? null : await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
-        if (index.HasPendingCasePreservation(state.Version.Path) || index.HasPendingDirectoryPublication(state.Version.Path, includeDescendants: true)) return await ChangedAsync(intent, token).ConfigureAwait(false);
+        if (index.HasPendingCasePreservation(state.Version.Path) || index.HasBlockingDirectoryPublication(state.Version.Path, includeDescendants: true)) return await ChangedAsync(intent, token).ConfigureAwait(false);
         using var parentProbe = state.Version.Deleted ? tree.ProbeDirectory(ApplyState.Parent(state.Version.Path)) : null;
         if (parentProbe?.Absent == true)
         {

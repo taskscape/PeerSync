@@ -14,7 +14,7 @@ public sealed partial class Scanner
     {
         long now = clock.GetUtcNow().UtcTicks;
         var uncertain = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var problem in problems.Where(problem => problem.Code is "enumeration-failed" or "case-collision"))
+        foreach (var problem in problems.Where(problem => problem.Code is "enumeration-failed" or "case-collision" or "read-failed" or "changed-during-read" or "published-content-verification-failed"))
         {
             string path = problem.RelativePath.ToUpperInvariant(); uncertain.Add(path);
             for (int separator = path.LastIndexOf('/'); separator >= 0; separator = path.LastIndexOf('/'))
@@ -51,14 +51,15 @@ public sealed partial class Scanner
             if (uncertain.Contains("") || uncertain.Contains(key) || Under(key, protectedPrefixes)) continue;
             var old = index.LocalFiles.Find(entry.Path);
             bool sameNative = old is { Type: 1, Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry);
-            // A received nonempty root can describe children not yet materialized.
-            // Do not turn their temporary absence into a newly signed local root.
+            // Reconstruct the exact received root without blocking missing child
+            // arrival. A mismatch cannot authorize a new local snapshot.
+            bool reconstruct = false;
             if (old?.Record is not null)
             {
                 var received = VersionView.Open(old.Record, keys, device);
                 if (received.Type == 1 && !received.Deleted && !received.ModifiedBy.SequenceEqual(device)
                     && received.ExportBody().DirectorySnapshotHash.Length != 0 && !CacheMatchesIdentity(old, root, entry, null, null))
-                { Log("received_root_pending", scanSession, "incoming-graph-required"); continue; }
+                { reconstruct = true; Log("received_root_pending", scanSession, "exact-reconstruction-required"); }
             }
             using var fingerprint = new DirectoryChildFingerprint(entry.Path);
             if (children.TryGetValue(key, out var names)) foreach (string name in names) fingerprint.Add(name);
@@ -74,7 +75,7 @@ public sealed partial class Scanner
             long mtime = sameNative ? old!.MtimeTicks : sameQueuedNative ? VersionView.Open(existing!.Template, keys, device).MtimeTicks : entry.Native.MtimeTicks;
             if (existing is not null && existing.Path == entry.Path && existing.ExpectedLocalSequence == (old?.LocalSequence ?? 0)
                 && existing.Attributes == (uint)entry.Native.Attributes && existing.NativeId.AsSpan().SequenceEqual(entry.Native.FileId)
-                && existing.RootId.AsSpan().SequenceEqual(root) && existing.ExpectedChildren == inventory.Count
+                && existing.RootId.AsSpan().SequenceEqual(root) && existing.ExpectedChildren == inventory.Count && existing.ReconstructionOnly == reconstruct
                 && existing.ExpectedKeysHash.AsSpan().SequenceEqual(inventory.Hash)
                 && VersionView.Open(existing.Template, keys, device).MtimeTicks == mtime)
             {
@@ -83,10 +84,10 @@ public sealed partial class Scanner
                 Log("queue_retained", touched.Version, "stable-template");
                 continue;
             }
-            var row = Metadata(entry, old, LocalFileState.None) with { MtimeTicks = mtime, Vector = VersionVector.Increment(old?.Vector ?? EmptyVector, deviceShort) };
-            row = row with { Record = Sign(row, 0, []) };
+            var row = reconstruct ? old! : Metadata(entry, old, LocalFileState.None) with { MtimeTicks = mtime, Vector = VersionVector.Increment(old?.Vector ?? EmptyVector, deviceShort) };
+            if (!reconstruct) row = row with { Record = Sign(row, 0, []) };
             var staged = await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), entry.Path, root, entry.Native.FileId, old?.LocalSequence ?? 0,
-                row.Attributes, row.Record!, inventory.Hash, inventory.Count, now, now), token).ConfigureAwait(false);
+                row.Attributes, row.Record!, inventory.Hash, inventory.Count, now, now) { ReconstructionOnly = reconstruct }, token).ConfigureAwait(false);
             Log("queue_staged", staged.Version, "complete-inventory");
         }
         bool CacheMatchesIdentity(LocalFileRow row, byte[] identity, WalkEntry observed, DirectoryChildInventory? inventory, long? epoch)

@@ -118,6 +118,6 @@ public sealed partial class DirectorySnapshotCaptureTests
         }
         long now = DateTime.UtcNow.Ticks;
         return await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), path, index.Meta.Find("_root-identity")!.Value!, row.FileId!, row.LocalSequence,
-            row.Attributes, receivedTemplate ? row.Record! : SignedRecordFactory.Create(body, keys), wrongMembership ? new byte[32] : inventory.Hash, inventory.Count, now, now), Token);
+            row.Attributes, receivedTemplate ? row.Record! : SignedRecordFactory.Create(body, keys), wrongMembership ? new byte[32] : inventory.Hash, inventory.Count, now, now) { ReconstructionOnly = receivedTemplate }, Token);
     }
 }

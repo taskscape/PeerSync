@@ -16,6 +16,35 @@ public sealed class DirectoryPublicationTests : IDisposable
     public DirectoryPublicationTests() => Directory.CreateDirectory(fixture);
 
     [Fact]
+    public async Task ReconstructionRetainsPendingAndParentHoldsButPermitsIncomingNamespaceMutation()
+    {
+        await using var index = await Open(); var staged = await index.StageDirectoryPublicationAsync(Spec("topic/nested") with { ReconstructionOnly = true }, Token);
+        index.HasPendingDirectoryPublication("topic/nested/a").ShouldBeTrue(); index.HasPendingDirectoryPublication("topic", true).ShouldBeTrue();
+        index.HasBlockingDirectoryPublication("topic/nested/a", true).ShouldBeFalse(); index.HasBlockingDirectoryPublication("topic", true).ShouldBeFalse();
+        index.HasPendingChildDirectoryPublication("topic").ShouldBeTrue(); index.HasPendingDirectoryPublications().ShouldBeTrue();
+        await Should.ThrowAsync<InvalidOperationException>(() => index.StageDirectoryPublicationAsync(staged with { ReconstructionOnly = false }, Token));
+        await index.StageDirectoryPublicationAsync(Spec("topic"), Token);
+        index.HasBlockingDirectoryPublication("topic/nested/a", true).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ReconstructionModeSurvivesRestartAndChangedEpochWakesItsBackoff()
+    {
+        DirectoryPublication pending;
+        await using (var index = await Open())
+        {
+            pending = await index.StageDirectoryPublicationAsync(Spec("topic") with { ReconstructionOnly = true }, Token);
+            pending = await index.BindDirectoryPublicationKeysAsync(pending, index.ReadDirectoryCaptureEpoch(), Now, Token);
+            await index.RetryDirectoryPublicationAsync(pending, Now, Token);
+            (await index.StageDirectoryPublicationAsync(pending, Token)).NextTicks.ShouldNotBeNull();
+        }
+        await using var reopened = await Open(); reopened.ReadDirectoryPublication("topic")!.ReconstructionOnly.ShouldBeTrue();
+        await reopened.LocalFiles.UpsertAsync([new("topic/a", 0, 0, Now, 0, false, Now, new byte[32], new Dictionary<ulong, ulong>(), null, null)], Token);
+        var resumed = await reopened.StageDirectoryPublicationAsync(pending, Token); resumed.NextTicks.ShouldBeNull(); resumed.Attempts.ShouldBe(0);
+        reopened.ReadDueDirectoryPublications(Now).Single().Version.ShouldBe(pending.Version);
+    }
+
+    [Fact]
     public async Task RestartRetainsExactPrivateTemplateAndLeavesPreviousSignedRowUntouched()
     {
         DirectoryPublication staged; SignedRecord old = new([1], new byte[64]);

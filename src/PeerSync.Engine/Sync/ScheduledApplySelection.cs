@@ -48,7 +48,7 @@ internal sealed class ScheduledApplySelection : IDisposable
             selection.Decision = needed.Decide(new(key, selection.Known, index.RemotesForPath(key).ToArray()));
             bool newDirectory = selection.Decision.Winner is { Type: 1, Deleted: false } && selection.Known is null;
             if (index.HasPendingCasePreservation(key, includeDescendants: !newDirectory)) selection.Decision = selection.Decision with { BlockedReason = "case-preservation-pending" };
-            if (index.HasPendingDirectoryPublication(key, includeDescendants: true)) selection.Decision = selection.Decision with { BlockedReason = "directory-publication-pending" };
+            if (index.HasBlockingDirectoryPublication(key, includeDescendants: true)) selection.Decision = selection.Decision with { BlockedReason = "directory-publication-pending" };
         }
     }
 

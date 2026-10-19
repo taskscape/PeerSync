@@ -17,6 +17,7 @@ public sealed partial class FolderIndex
     {
         ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(capture);
         var queued = FreezePublication(expected); ValidatePublication(queued); var draft = FreezeCapture(capture);
+        if (queued.ReconstructionOnly && publication is not null) throw new InvalidDataException("Reconstruction cannot replace its received signed row.");
         if (nowTicks is < 1 or > 3155378975999999999) throw new ArgumentOutOfRangeException(nameof(nowTicks));
         if (draft.Hash is not { Length: 32 } || draft.Length is null || draft.BuilderState is not null || draft.Accepted != draft.MemberCount
             || draft.ParentPath != queued.Path || draft.MemberCount != queued.ExpectedChildren || draft.InputEpoch is null
@@ -37,6 +38,8 @@ public sealed partial class FolderIndex
                 if ((long)children.ExecuteScalar()! != 0) throw new InvalidOperationException("Child directory publication is pending.");
             }
             var prior = ReadCurrent();
+            if (queued.ReconstructionOnly && (prior?.Record is null || !prior.Record.Body.SequenceEqual(queued.Template.Body) || !prior.Record.Signature.SequenceEqual(queued.Template.Signature)))
+                throw new InvalidOperationException("Received reconstruction template changed.");
             if ((prior?.LocalSequence ?? 0) != queued.ExpectedLocalSequence) throw new InvalidOperationException("Directory publication source changed.");
             if (row is not null) LocalFiles.WriteBatch(connection, transaction, [row], cancellationToken);
             var current = row is null ? prior : ReadCurrent();

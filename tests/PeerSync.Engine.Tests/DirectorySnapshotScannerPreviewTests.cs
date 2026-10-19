@@ -77,7 +77,10 @@ public sealed partial class DirectorySnapshotCaptureTests
         body.Vv.Clear(); body.Vv.Add(new PeerSync.Protocol.Records.VvEntry { Device = 2, Counter = 1 });
         await index.LocalFiles.UpsertAsync([row with { Record = SignedRecordFactory.Create(body, keys), Vector = new Dictionary<ulong, ulong> { [2] = 1 } }], Token);
         var previous = index.LocalFiles.Find("topic")!; await PreviewScan(index);
-        index.ReadDirectoryPublication("topic").ShouldBeNull(); index.LocalFiles.Find("topic")!.LocalSequence.ShouldBe(previous.LocalSequence);
+        var reconstruction = index.ReadDirectoryPublication("topic")!; reconstruction.ReconstructionOnly.ShouldBeTrue();
+        reconstruction.Template.Body.ToArray().ShouldBe(previous.Record!.Body.ToArray());
+        index.HasBlockingDirectoryPublication("topic/late-child", true).ShouldBeFalse();
+        index.LocalFiles.Find("topic")!.LocalSequence.ShouldBe(previous.LocalSequence);
     }
     private async Task<ScanResult> PreviewScan(FolderIndex index, FolderKeys? access = null)
     {

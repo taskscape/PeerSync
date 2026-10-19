@@ -87,7 +87,7 @@ public sealed partial class DirectorySnapshotCaptureTests
         var template = receivedTemplate ? publication.Record! : SignedRecordFactory.Create(body, keys);
         var current = index.LocalFiles.Find("topic")!; long now = DateTime.UtcNow.Ticks;
         var queued = await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), "topic", draft.RootId, draft.NativeId, current.LocalSequence,
-            publication.Attributes, template, new byte[32], draft.MemberCount, now, now), Token);
+            publication.Attributes, template, new byte[32], draft.MemberCount, now, now) { ReconstructionOnly = receivedTemplate }, Token);
         return await index.BindDirectoryPublicationKeysAsync(queued, draft.InputEpoch!.Value, now, Token);
     }
     private async Task<DirectoryPublicationCommit> CommitQueue(FolderIndex index, DirectoryPublication queued, DirectoryCaptureState draft, LocalFileRow? publication, FolderKeys? access = null)
