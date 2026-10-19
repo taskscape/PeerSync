@@ -21,8 +21,14 @@ was posted. Squash commit `6934850733ca74ba68c20351b1a5a0f088fb51cd` has exactly
 the tested tree `8153aa3ac0645d2dcbe763630c7a1fbce4fc9b05`.
 
 Main-push [run 39315657236](https://github.com/taskscape/PeerSync/actions/runs/39315657236)
-is still in progress at this checkpoint. No main-green or phase-gate claim is
-made. Installed production service supervision, authenticated production sync
+passes all five required jobs on the exact squash above: x64 11m30s, ARM64
+4m42s, Server 2022 8m06s, Server 2025 13m02s and fuzz 11m16s. The previous
+c289313 main failure is superseded by this verified descendant, not relabelled
+as a passing old run. Runtime host, rendered status/reconnect and shared
+retention children meet their recorded acceptance. The installed-client child
+still needs its missing/stopped/actual PeerSync integration evidence; the parent
+also requires authenticated production transport. No phase gate is closed.
+Installed production service supervision, authenticated production sync
 transport, full app/installer and other P1 gate requirements remain open.
 
 The directory branch already contained the final tested head. After verifying
