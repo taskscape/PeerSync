@@ -222,6 +222,16 @@ SQLite's online backup API (including committed WAL data), then apply SQL and
 Microsoft.Data.Sqlite's async ADO.NET calls execute synchronously, the writer
 runs on a worker task rather than blocking the service caller.
 
+Fresh database initialization reserves the file with CreateNew. Under SQLite's
+immediate writer transaction it must still have version zero and an empty schema
+before all initial migrations and the final version are committed together.
+There is no prior user state to back up in this case. Any existing file (including
+an empty version-zero database), or a newly reserved file another process has
+populated, retains the ordinary backup-before-each-step upgrade path. Failed or
+cancelled initial DDL rolls back the entire schema; startup never exposes a
+partially initialized database. Keep the full native checks and 15-minute CI
+limit; reduce initialization I/O rather than skipping durability tests.
+
 Destructive filesystem application requires a durable intent first. Add an
 `apply_intents` journal keyed by operation ID and unique path key, with the
 expected local sequence and a bounded versioned engine recovery payload.
