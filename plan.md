@@ -685,7 +685,7 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
   - Done when: RW, RO and F keys round-trip through text. The checksum rejects any single-character typo. RO and F keys derived from an RW key match fixed test vectors. Keys are never printed by `ToString()`.
   - Ref: Protocol specification, Keys and identifiers.
   - Evidence: [key verification](docs/verification/P1.1.1-folder-keys-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39181190139). Merged tree equals the tested head.
-- [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`)
+- [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`) [WIP @Codex 2026-10-19]
   - Done when: compare, merge and increment are covered by property tests (compare is antisymmetric, merge is commutative and idempotent). Compact binary serialization is sorted by device.
 - [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`)
   - Done when: records are signed over the exact body bytes (see 7.3). Tampering with any byte fails verification. A forwarded record keeps its original signature.
