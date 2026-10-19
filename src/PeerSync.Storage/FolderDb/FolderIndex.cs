@@ -78,6 +78,7 @@ public sealed partial class FolderIndex : IAsyncDisposable
         RemoteFiles.ReadWhere("path_key=$k0", PathRules.Key(recordPath));
 
     public IEnumerable<NeededRow> NeededByPriority() => Needed.ReadWhere("1=1 ORDER BY priority DESC,path_key");
+    public IEnumerable<ArchiveRow> ArchivesByAge() => Archive.ReadWhere("1=1 ORDER BY archived_ticks,id");
     public ValueTask DisposeAsync() => database.DisposeAsync();
 
     internal static long ReadSequence(SqliteConnection connection, SqliteTransaction transaction)

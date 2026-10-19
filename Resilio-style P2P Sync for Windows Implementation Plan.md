@@ -415,8 +415,9 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
   cap holds. Use the actual hosting volume capacity, independent of user disk
   quotas. Delete only indexed archive files whose guarded bytes still match
   the recorded size/hash; pin every ancestor, reject reparse traversal and keep
-  changed or locked entries for retry. Remove filesystem data before its index
-  row so an interrupted cleanup leaves a reconcilable missing-file row, never
+  changed or locked entries for retry. If the oldest eligible version is blocked, defer cap-only eviction of
+  newer versions; independent age-expired versions can still be pruned. Remove
+  filesystem data before its index row so an interrupted cleanup leaves a reconcilable missing-file row, never
   unaccounted retained data. Missing indexed files are reconciled on retry.
   Do not recursively sweep unknown archive files or directories. A persisted
   successful-run timestamp schedules daily cleanup across host restarts;

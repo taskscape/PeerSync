@@ -46,5 +46,6 @@ supersedes their pending-billing/CI/merge status.
 Completed acceptance supports P1.3.2, P1.3.3, P1.4.1, P1.4.2, P1.4.3,
 P1.5.1 and P1.5.3a. Conflict-table filesystem integration, the puller, archive
 policy, clock guard, simulation and Gate P1 remain open. Regular-file
-application/recovery is separately in PR #21; its local results do not claim
-green remote CI or completion. No production sync deployment is available.
+application/recovery subsequently merged in PR #21 with green CI; its separate
+[verification report](P1.5.3b-recoverable-install-2026-10-19.md) records that
+run and merge. No production sync deployment or phase completion is available.

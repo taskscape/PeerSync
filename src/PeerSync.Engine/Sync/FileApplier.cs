@@ -1,8 +1,6 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -10,6 +8,7 @@ using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Paths;
 using PeerSync.Core.Settings;
 using PeerSync.Crypto;
+using PeerSync.Engine.Archive;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Native;
 using PeerSync.Storage.FolderDb;
@@ -391,44 +390,12 @@ public sealed class FileApplier
         byte[] result = new byte[16]; BinaryPrimitives.WriteUInt64LittleEndian(result, snapshot.IdLow);
         BinaryPrimitives.WriteUInt64LittleEndian(result.AsSpan(8), snapshot.IdHigh); return result;
     }
-    private static byte[] Hash(SafeFileHandle file, CancellationToken token)
-    {
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
-        try
-        {
-            using var hasher = Blake3.Hasher.New(); long offset = 0, length = RandomAccess.GetLength(file);
-            while (offset < length)
-            {
-                token.ThrowIfCancellationRequested(); int read = RandomAccess.Read(file, buffer.AsSpan(0, (int)Math.Min(buffer.Length, length - offset)), offset);
-                if (read == 0) throw new EndOfStreamException(); hasher.Update(buffer.AsSpan(0, read)); offset += read;
-            }
-            return hasher.Finalize().AsSpan().ToArray();
-        }
-        finally { ArrayPool<byte>.Shared.Return(buffer); }
-    }
+    private static byte[] Hash(SafeFileHandle file, CancellationToken token) => GuardedFile.Hash(file, token);
     private static string RetainedPath(ApplyState state, LoserFate fate, int collision)
     {
         var at = new DateTimeOffset(state.ArchivedTicks, TimeSpan.Zero);
         if (fate == LoserFate.ConflictCopy) return ConflictNames.CopyPath(state.Original, at, state.OriginalDevice, collision);
-        string parent = ApplyState.Join(".psp/archive", ApplyState.Parent(state.Original));
-        string name = ApplyState.Name(state.Original); int dot = name.LastIndexOf('.');
-        string stem = dot <= 0 ? name : name[..dot], extension = dot <= 0 ? "" : name[dot..];
-        string suffix = "~" + at.UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)
-            + (collision == 1 ? "" : "-" + collision.ToString(CultureInfo.InvariantCulture));
-        int budget = Math.Min(255, 4109 - parent.Length - 1);
-        if (budget <= suffix.Length) throw new PathTooLongException("No archive slot fits this directory.");
-        extension = Prefix(extension, budget - suffix.Length - 1).TrimEnd(' ', '.');
-        stem = Prefix(stem, budget - suffix.Length - extension.Length).TrimEnd(' ', '.');
-        if (stem.Length == 0) stem = "f";
-        string path = ApplyState.Join(parent, stem + suffix + extension);
-        if (!PathRules.IsValid(path[13..])) throw new PathTooLongException("Archive path cannot be represented.");
-        return path;
-    }
-    private static string Prefix(string value, int count)
-    {
-        if (value.Length <= count) return value;
-        if (count > 0 && char.IsHighSurrogate(value[count - 1])) count--;
-        return value[..count];
+        return ArchiveNames.Candidate(state.Original, at, collision);
     }
     private void Signal(string stage, Guid session)
     {
