@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core types complete; chunk hashing and storage underway | - |
+| P1 Local sync engine | 4-8 | In progress: core types and chunk hashing complete; storage underway | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -923,10 +923,11 @@ public static class PathRules
 
 ### P1.2 Chunking and hashing
 
-- [ ] **P1.2.1 Gear table and FastCDC chunker** (`PeerSync.Crypto/Chunking/`) [WIP @Codex 2026-10-19]
+- [x] **P1.2.1 Gear table and FastCDC chunker** (`PeerSync.Crypto/Chunking/`) (#8)
   - Done when: boundaries match golden vectors checked into the repo, and boundaries are identical whatever buffer size the caller reads with. Speed meets the P0.2.4 target.
-- [ ] **P1.2.2 Streaming file hasher** (`PeerSync.Engine/Hashing/FileHasher.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.2.2 Streaming file hasher** (`PeerSync.Engine/Hashing/FileHasher.cs`) (#8)
   - Done when: one sequential read produces chunk hashes and the whole-file hash. A file modified during hashing returns "retry later" rather than a wrong record. Files locked by other apps are opened with `FileShare.ReadWrite | FileShare.Delete`.
+  - P1.2 evidence: [golden vectors, 1.078 GB/s benchmark and mutation checks](docs/verification/P1.2-chunk-hashing-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39183549325). Merged tree equals the tested head.
 
 ### 7.5 Code: FastCDC (P1.2.1)
 

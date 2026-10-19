@@ -10,7 +10,12 @@ and ignore rules are completed through
 [CI jobs green](https://github.com/taskscape/PeerSync/actions/runs/39182383820)
 in 13m03s. Local verification passed 121 cases and 70,000 generated property
 examples; full fuzz passed 127,929 seeds over 600 seconds without crashes.
-Chunk hashing and SQLite storage are underway. P0 gate passed on
+Chunk hashing is completed through [PR #8](https://github.com/taskscape/PeerSync/pull/8),
+with all five [CI jobs green](https://github.com/taskscape/PeerSync/actions/runs/39183549325)
+in 13m37s. Independent boundaries cover all size classes; native throughput
+reached 1.078 GB/s on the warm-cache 10 GiB reference corpus. Local verification
+passed 135 cases; required CI fuzz completed 137,749 seeds over 600 seconds
+without crashes. SQLite storage is underway. P0 gate passed on
 2026-10-19 under the user's approved external-test deferrals. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
 Ten tasks and the performance/certificate subchecks are verified. The CI
