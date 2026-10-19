@@ -1521,7 +1521,7 @@ Our own writes need no special suppression: the puller records the new state in 
       - Done when: empty/nonempty/nested and file/directory clashes preserve every authenticated subtree member under stable case-copy destinations, with complete references, bounded recovery and normal RW/RO publication. Legacy absence never authorizes guessing a tree. Follow the [snapshot protocol design](docs/proposals/P1-directory-snapshot-protocol.md).
       - [ ] **P1.5.3h4a Directory baselines and snapshot wire foundations** [WIP @codex 2026-10-19]
         - Done when: connected directory failure baselines are retained; optional signed directory roots and canonical bounded node/envelope codecs preserve exact bytes, reject malformed inputs and pass focused/full verification. This foundation enables no directory copy mutations.
-      - [ ] **P1.5.3h4b Bottom-up capture and graph reference lifecycle**
+      - [ ] **P1.5.3h4b Bottom-up capture and graph reference lifecycle** [WIP @codex 2026-10-19]
         - Done when: exact child publications produce durable bounded snapshots without native-mtime feedback, metadata/file references survive replacements and restarts, incomplete graphs block sweeping, and nested convergence/streaming/cancellation checks pass.
       - [ ] **P1.5.3h4c Guarded directory/member application and recovery**
         - Done when: root/source/member/native-bound no-overwrite journals preserve every visible version, complete only after publication and pass arrival-order/gossip/late-page/crash/reference/collision/native regressions plus the full parent criteria.
