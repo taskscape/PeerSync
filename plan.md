@@ -1616,6 +1616,7 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
   - Done when: `CsCheck` generates random edits, renames, deletes, partitions and heals on 3 to 7 nodes, each with a temp folder. After the network heals, all trees are identical. Every overwritten version exists in some node's archive or as a conflict copy. 1,000 seeds run in CI, and failing seeds are saved as regression tests.
   - [ ] **P1.6.2a Reproducible real-engine scenarios and loss oracle** [WIP @codex 2026-10-19]
     - Done when: generated/replayed operation traces use actual engine folders, heal to byte-identical visible trees and verify preservation from current/archive/conflict files. Save failure evidence and promote found regressions. Initial bounded smoke does not close the parent or phase gate.
+    - Local [simulation evidence](docs/verification/P1.6.2a-real-engine-simulation-2026-10-19.md): 100 distinct three-to-seven-node cases pass convergence/preservation. A checker regression excludes internal staging from user trees; a native negative-control test rejects private cache alone as preservation. Canonical verification now passes 958 cases including an eight-scenario smoke. Full coverage, 1,000 CI cases, five consecutive days and main/CI evidence remain pending.
 
 ### Gate P1
 

@@ -35,6 +35,7 @@ try {
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
         }
+        & "$PSScriptRoot/Run-Simulation.ps1" -Cases 8 -NoBuild
         & "$PSScriptRoot/Run-P0.ps1"
         & "$PSScriptRoot/Test-QuicDiagnostics.ps1"
     }

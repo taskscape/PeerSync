@@ -41,6 +41,7 @@ jobs:
             artifacts/verification-*.json
             artifacts/environment-*.json
             artifacts/tests/
+            artifacts/simulation/
             artifacts/p0/
             artifacts/fuzz/
             artifacts/signing/
