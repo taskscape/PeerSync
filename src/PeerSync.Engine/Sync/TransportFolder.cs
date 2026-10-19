@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Google.Protobuf;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Settings;
+using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
 using PeerSync.Net;
@@ -22,6 +23,7 @@ public sealed class TransportFolder : IAsyncDisposable
     private readonly string rootPath;
     private readonly Puller puller;
     private readonly ConcurrentDictionary<string, PeerFolderConnection> peers = new(StringComparer.Ordinal);
+    private readonly PeerClockStatusLedger clockStatuses = new();
     private readonly object lifecycle = new();
     private readonly TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int disposed;
@@ -39,8 +41,18 @@ public sealed class TransportFolder : IAsyncDisposable
     { RequireOpen(); return puller.RunPassAsync(cancellationToken); }
     public void RequestScan() { RequireOpen(); puller.RequestScan(); }
 
+    /// <summary>Active authenticated-session clocks and bounded recent closed
+    /// failures, for service status. Truncation is explicit; this grants no admission.</summary>
+    public PeerClockStatusPage ReadClockStatuses(int limit = 1000)
+    { RequireOpen(); return clockStatuses.Read(limit); }
+
+    private PeerIndexSession OpenSession(byte[] authenticatedPeer)
+    {
+        var session = puller.OpenPeerIndexSession(authenticatedPeer); clockStatuses.Register(session); return session;
+    }
+
     public IPeerRequestHandler CreateHandler(byte[] authenticatedPeer)
-    { RequireOpen(); return new Handler(this, puller.OpenPeerIndexSession(authenticatedPeer)); }
+    { RequireOpen(); return new Handler(this, OpenSession(authenticatedPeer)); }
 
     /// <summary>Takes ownership of the supplied transport, including on failure.</summary>
     public async Task<PeerFolderConnection> ConnectAsync(IPeerTransport transport, CancellationToken cancellationToken = default)
@@ -50,7 +62,7 @@ public sealed class TransportFolder : IAsyncDisposable
         {
             RequireOpen(); byte[] remote = transport.RemoteDeviceId.ToArray();
             if (remote.AsSpan().SequenceEqual(own)) throw new InvalidOperationException("Cannot connect folder to itself.");
-            connection = new(this, transport, puller.OpenPeerIndexSession(remote));
+            connection = new(this, transport, OpenSession(remote));
             await connection.HandshakeAsync(cancellationToken).ConfigureAwait(false);
             lock (lifecycle)
             {
@@ -88,6 +100,7 @@ public sealed class TransportFolder : IAsyncDisposable
     private void RequireOpen() => ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
     internal void Remove(PeerFolderConnection peer)
         => peers.TryRemove(new KeyValuePair<string, PeerFolderConnection>(Convert.ToHexString(peer.RemoteDeviceId), peer));
+    internal void RetireClockSession(PeerIndexSession session) => clockStatuses.Retire(session);
 
     public ValueTask DisposeAsync()
     {
@@ -115,7 +128,9 @@ public sealed class TransportFolder : IAsyncDisposable
         public ValueTask<Hello> ExchangeHelloAsync(Hello hello, CancellationToken cancellationToken)
         {
             folder.RequireOpen(); cancellationToken.ThrowIfCancellationRequested(); ValidateHello(hello, session.RemoteDeviceId);
-            session.ObserveHello(hello); session.RequireClock(); return ValueTask.FromResult(folder.CreateHello());
+            // Each endpoint needs the other's UTC sample to report its own
+            // signed offset. Index/block methods still require clock admission.
+            session.ObserveHello(hello); return ValueTask.FromResult(folder.CreateHello());
         }
         public ValueTask<long> ReadIndexTargetAsync(CancellationToken cancellationToken)
         { folder.RequireOpen(); cancellationToken.ThrowIfCancellationRequested(); return ValueTask.FromResult(session.ReadIndexTarget()); }
@@ -132,6 +147,6 @@ public sealed class TransportFolder : IAsyncDisposable
             }, cancellationToken).ConfigureAwait(false);
             session.RequireClock(); return bytes;
         }
-        public ValueTask DisposeAsync() { session.Disconnect(); return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { session.Disconnect(); folder.RetireClockSession(session); return ValueTask.CompletedTask; }
     }
 }

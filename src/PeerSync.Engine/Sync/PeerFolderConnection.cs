@@ -82,7 +82,7 @@ public sealed class PeerFolderConnection : IAsyncDisposable
             if (disposed != 0) return new(closed.Task);
             Volatile.Write(ref disposed, 1); if (active == 0) drained.TrySetResult();
         }
-        owner.Remove(this); session.Disconnect(); _ = CloseAsync(); return new(closed.Task);
+        owner.Remove(this); session.Disconnect(); owner.RetireClockSession(session); _ = CloseAsync(); return new(closed.Task);
     }
     private async Task CloseAsync()
     {

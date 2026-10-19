@@ -53,6 +53,19 @@ public sealed class TransportFolderTests : IDisposable
         a.Index.Archive.ReadAll().Any(row => File.ReadAllText(Path.Combine(a.Root, row.ArchivePath.Replace('/', Path.DirectorySeparatorChar))) == "first version").ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(-11)]
+    [InlineData(11)]
+    public async Task SkewedHandshakeReportsTheCallersOwnSignedOffset(int localJumpMinutes)
+    {
+        var localTime=new NodeClock(); localTime.Jump(TimeSpan.FromMinutes(localJumpMinutes));
+        await using var a=await NodeAsync(1,localTime); await using var b=await NodeAsync(2,new NodeClock());
+        var network=new InMemoryNetwork(); var endpoint=network.Register(a.Id,a.Engine.CreateHandler); network.Register(b.Id,b.Engine.CreateHandler);
+        var failure=await Should.ThrowAsync<PeerClockException>(()=>a.Engine.ConnectAsync(endpoint.Connect(b.Id),Token));
+        failure.Status.OffsetTicks.ShouldBe(-localJumpMinutes*TimeSpan.TicksPerMinute);
+        a.Index.RemoteFiles.Count().ShouldBe(0); b.Index.RemoteFiles.Count().ShouldBe(0);
+    }
+
     [Fact]
     public async Task ReconnectUsesDurableCursorAndFreshClockSession()
     {
