@@ -688,9 +688,9 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
   - Evidence: [key verification](docs/verification/P1.1.1-folder-keys-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39181190139). Merged tree equals the tested head.
 - [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`) [WIP @Codex 2026-10-19]
   - Done when: compare, merge and increment are covered by property tests (compare is antisymmetric, merge is commutative and idempotent). Compact binary serialization is sorted by device.
-- [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`)
+- [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`) [WIP @Codex 2026-10-19]
   - Done when: records are signed over the exact body bytes (see 7.3). Tampering with any byte fails verification. A forwarded record keeps its original signature.
-- [ ] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`)
+- [ ] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`) [WIP @Codex 2026-10-19]
   - Done when: all hostile cases in 7.4 are rejected, valid Unicode names pass, and a fuzz target exists.
   - Ref: Security model, hostile paths.
 - [ ] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`)
