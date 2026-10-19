@@ -112,6 +112,13 @@ public sealed class BlockReferences
                     throw new DirectoryGraphPending(); // Legacy metadata never proves an empty preserved subtree.
                 await AddVersionAsync(version, BlockReferenceKind.Needed).ConfigureAwait(false);
             }
+            foreach (var retained in index.ReadRetainedDirectoryCases(root, DateTime.UtcNow.Ticks))
+            {
+                cancellationToken.ThrowIfCancellationRequested(); var version = VersionView.Open(retained.Record, keys, retained.SourceDevice);
+                if (version.Type != 1 || version.Deleted || PathRules.Key(version.Path) != retained.PathKey || !CaseConflictPolicy.SourceId(version).AsSpan().SequenceEqual(retained.SourceId))
+                    throw new InvalidDataException("Retained directory case manifest changed.");
+                await AddVersionAsync(version, BlockReferenceKind.History).ConfigureAwait(false);
+            }
             var archiveCoverage = new List<ArchiveReferenceSource>(1000);
             foreach (var marker in index.Meta.ReadAll())
             {

@@ -116,11 +116,17 @@ public sealed partial class FileApplier
 
     internal async Task<IReadOnlyList<string>> CompleteCaseCopiesAsync(CancellationToken token)
     {
+        if (DirectoryCaseVerificationWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory case verification work bound.");
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
-        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); var completed = new List<string>();
+        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); var completed = new List<string>(); int verificationBudget = DirectoryCaseVerificationWorkLimit;
         foreach (var pending in index.ReadDueCasePreservations(tree.Identity.ToArray(), CaseNow))
         {
             token.ThrowIfCancellationRequested(); var source = OpenCaseSource(tree, pending);
+            if (source.Type == 1)
+            {
+                var result = await CompleteDirectoryCaseAsync(tree, pending, source, verificationBudget, token).ConfigureAwait(false); verificationBudget -= result.Processed;
+                if (result.Completed) completed.Add(pending.Source.PathKey); continue;
+            }
             if (source.Type != 0 || pending.DestinationPath is not { } destination || pending.InstalledFileId is null) continue;
             try
             {
