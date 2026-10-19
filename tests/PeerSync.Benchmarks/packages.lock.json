@@ -230,6 +230,14 @@
           "System.Security.Cryptography.ProtectedData": "[10.0.13, )"
         }
       },
+      "peersync.engine": {
+        "type": "Project",
+        "dependencies": {
+          "PeerSync.Crypto": "[1.0.0, )",
+          "PeerSync.Protocol": "[1.0.0, )",
+          "PeerSync.Storage": "[1.0.0, )"
+        }
+      },
       "peersync.protocol": {
         "type": "Project",
         "dependencies": {

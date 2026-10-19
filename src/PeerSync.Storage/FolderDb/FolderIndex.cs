@@ -33,11 +33,16 @@ public sealed class FolderIndex : IAsyncDisposable
 
     public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
-        using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations.0001_initial.sql")
-            ?? throw new InvalidOperationException("Missing folder schema resource.");
-        using var reader = new StreamReader(resource);
-        string sql = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var database = await Db.OpenAsync(path, [new(1, sql)], cancellationToken).ConfigureAwait(false);
+        var migrations = new List<DbMigration>();
+        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql" })
+        {
+            using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations." + file)
+                ?? throw new InvalidOperationException("Missing folder schema resource.");
+            using var reader = new StreamReader(resource);
+            string sql = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            migrations.Add(new(migrations.Count + 1, sql));
+        }
+        var database = await Db.OpenAsync(path, migrations, cancellationToken).ConfigureAwait(false);
         try { return new(database); }
         catch { await database.DisposeAsync().ConfigureAwait(false); throw; }
     }

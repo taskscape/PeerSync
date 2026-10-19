@@ -63,6 +63,11 @@ public sealed class DiagnosticJournal : IDisposable
             transportErrorCode = entry.TransportErrorCode,
             applicationErrorCode = entry.ApplicationErrorCode,
             retryInMs = entry.RetryInMilliseconds,
+            itemsVisited = entry.ItemsVisited,
+            itemsChanged = entry.ItemsChanged,
+            itemsHashed = entry.ItemsHashed,
+            itemsSkipped = entry.ItemsSkipped,
+            itemsDeferred = entry.ItemsDeferred,
             remoteAddress = entry.RemoteAddress?.ToString(),
         }, Json);
         if (line.Length > 4095) throw new ArgumentException("Diagnostic event exceeds the record limit.", nameof(entry));
@@ -112,6 +117,11 @@ public enum DiagnosticTransport { Quic, Tcp, Http2, Http3, NamedPipe, Relay }
 
 public sealed record DiagnosticEvent(string Event, string Operation)
 {
+    public long? ItemsVisited { get; init; }
+    public long? ItemsChanged { get; init; }
+    public long? ItemsHashed { get; init; }
+    public long? ItemsSkipped { get; init; }
+    public long? ItemsDeferred { get; init; }
     public DiagnosticLevel Level { get; init; } = DiagnosticLevel.Information;
     public Guid? SessionId { get; init; }
     public DiagnosticTransport? Transport { get; init; }
