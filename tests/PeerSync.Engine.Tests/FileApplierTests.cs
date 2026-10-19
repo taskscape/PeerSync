@@ -533,6 +533,60 @@ public sealed class FileApplierTests : IDisposable
             .WaitAsync(TimeSpan.FromSeconds(5), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
     }
 
+    [Theory]
+    [InlineData("prepared")]
+    [InlineData("archived")]
+    public async Task ScheduledDeletionRecoveryRetainsItsBarrierAcrossANewerSenderTarget(string boundary)
+    {
+        File.WriteAllBytes(Disk("file.txt"),Old); await using var index=await PrepareAsync("file.txt");
+        await ReceiveAsync(index,"file.txt",[],deleted:true); var needed=new NeededSet(index,keys,own); await needed.AnnounceIndexRangeAsync(remote,1,Token);
+        var interrupted=new FileApplier(Root,index,keys,own) { Checkpoint=stage=>{ if(stage==boundary) throw new IOException("injected"); } };
+        await Should.ThrowAsync<IOException>(()=>interrupted.ApplyScheduledAsync("file.txt",(_,_,_,_)=>throw new InvalidOperationException(),Token));
+        var intent=index.ReadApplyIntents().Single(); BinaryPrimitives.ReadInt32LittleEndian(intent.Payload).ShouldBe(5);
+        ApplyState.Decode(intent,keys).ScheduledDeletion.ShouldBeTrue();
+        await needed.AnnounceIndexRangeAsync(remote,2,Token);
+        var recovery=new FileApplier(Root,index,keys,own);
+        await Should.ThrowAsync<IndexRangeRecoveryPendingException>(()=>recovery.RecoverAsync(Token)); index.ReadApplyIntents().Count().ShouldBe(1);
+        File.Exists(Disk("file.txt")).ShouldBe(boundary=="prepared");
+        if(boundary=="prepared") File.ReadAllBytes(Disk("file.txt")).ShouldBe(Old);
+        else File.ReadAllBytes(Disk(ApplyState.Decode(intent,keys).Retained)).ShouldBe(Old);
+        await needed.ApplyIndexUpdateAsync(remote,1,2,[],Token); Task<RemoteIndexRange>? queued=null;
+        recovery.Checkpoint=stage=>
+        {
+            if(stage!="recover-complete") return; queued=needed.AnnounceIndexRangeAsync(remote,3,Token); queued.IsCompleted.ShouldBeFalse();
+        };
+        (await recovery.RecoverAsync(Token)).ShouldBe(1); (await queued!.WaitAsync(TimeSpan.FromSeconds(5),Token)).Complete.ShouldBeFalse();
+        File.Exists(Disk("file.txt")).ShouldBeFalse(); index.ReadApplyIntents().ShouldBeEmpty();
+        File.ReadAllBytes(Disk(index.Archive.ReadAll().Single().ArchivePath)).ShouldBe(Old);
+    }
+
+    [Fact]
+    public async Task UnpreparedScheduledDeletionCanBeAbandonedWhileANewerRangeIsIncomplete()
+    {
+        File.WriteAllBytes(Disk("file.txt"),Old); await using var index=await PrepareAsync("file.txt");
+        await ReceiveAsync(index,"file.txt",[],deleted:true); var needed=new NeededSet(index,keys,own); await needed.AnnounceIndexRangeAsync(remote,1,Token);
+        var applier=new FileApplier(Root,index,keys,own) { Checkpoint=stage=>{ if(stage=="staging") throw new IOException("injected"); } };
+        await Should.ThrowAsync<IOException>(()=>applier.ApplyScheduledAsync("file.txt",(_,_,_,_)=>throw new InvalidOperationException(),Token));
+        await needed.AnnounceIndexRangeAsync(remote,2,Token); (await new FileApplier(Root,index,keys,own).RecoverAsync(Token)).ShouldBe(1);
+        index.ReadApplyIntents().ShouldBeEmpty(); File.ReadAllBytes(Disk("file.txt")).ShouldBe(Old);
+    }
+
+    [Fact]
+    public async Task RecoveryRangeReadFailureReleasesReferenceGateForIndexReceipt()
+    {
+        File.WriteAllBytes(Disk("file.txt"),Old); await using var index=await PrepareAsync("file.txt");
+        await ReceiveAsync(index,"file.txt",[],deleted:true); var needed=new NeededSet(index,keys,own); await needed.AnnounceIndexRangeAsync(remote,1,Token);
+        var applier=new FileApplier(Root,index,keys,own) { Checkpoint=stage=>{ if(stage=="prepared") throw new IOException("injected"); } };
+        await Should.ThrowAsync<IOException>(()=>applier.ApplyScheduledAsync("file.txt",(_,_,_,_)=>throw new InvalidOperationException(),Token));
+        using(var connection=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource=Database,Pooling=false }.ToString()))
+        {
+            connection.Open(); using var command=connection.CreateCommand(); command.CommandText="DROP TABLE remote_index_ranges;"; command.ExecuteNonQuery();
+        }
+        await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(()=>new FileApplier(Root,index,keys,own).RecoverAsync(Token));
+        (await needed.ApplyIndexUpdateAsync(remote,1,2,[],Token).WaitAsync(TimeSpan.FromSeconds(5),Token)).Applied.ShouldBeTrue();
+        File.ReadAllBytes(Disk("file.txt")).ShouldBe(Old); index.ReadApplyIntents().Count().ShouldBe(1);
+    }
+
     private async Task<FolderIndex> PrepareAsync(string path)
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

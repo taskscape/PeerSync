@@ -270,6 +270,72 @@ public sealed class PullerTests : IDisposable
         index.Archive.ReadAll().Select(row=>File.ReadAllBytes(Disk(row.ArchivePath))).ShouldContain(bytes=>bytes.SequenceEqual(user));
     }
 
+    [Theory]
+    [InlineData(0u,0L)]
+    [InlineData(1u,0L)]
+    [InlineData(0u,504911232000000000L)]
+    [InlineData(1u,504911232000000000L)]
+    public async Task UnrepresentableNativeTimestampBlocksOnlyItsItem(uint type,long mtime)
+    {
+        File.WriteAllBytes(Disk("bad"),Old); await using var index=await FolderIndex.OpenAsync(Database,Token); using var puller=Coordinator(index);
+        await puller.RunPassAsync(Token); var body=VersionView.Open(Record(index,"bad",1,type==0?New:[],type),keys,Peer).ExportBody(); body.MtimeTicks=mtime;
+        await puller.ReceiveIndexAsync(Peer,0,2,[SignedRecordFactory.Create(body,keys,1),Record(index,"good",2,New)],Token);
+        var result=await puller.RunPassAsync(Token); result.Applied.ShouldBe(1); result.Deferred.ShouldBe(1); result.Failed.ShouldBe(0);
+        File.ReadAllBytes(Disk("bad")).ShouldBe(Old); File.ReadAllBytes(Disk("good")).ShouldBe(New);
+        index.ReadPullRetry("bad")!.Attempts.ShouldBe(1); index.ReadApplyIntents().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task IncrementalScanExcludesNonNfcWireNamesWithoutStoppingValidPulls()
+    {
+        await using var index=await FolderIndex.OpenAsync(Database,Token); using var puller=Coordinator(index); await puller.RunPassAsync(Token);
+        const string invalid="e\u0301"; File.WriteAllBytes(Disk(invalid),Old); puller.RequestScan();
+        await puller.ReceiveIndexAsync(Peer,0,1,[Record(index,"good",1,New)],Token);
+        var result=await puller.RunPassAsync(Token); result.Applied.ShouldBe(1); result.Scans.ShouldBe(1);
+        index.LocalFiles.ReadAll().Single(r=>r.Path==invalid).Flags.HasFlag(LocalFileState.Unsyncable).ShouldBeTrue();
+        File.ReadAllBytes(Disk(invalid)).ShouldBe(Old); File.ReadAllBytes(Disk("good")).ShouldBe(New);
+    }
+
+    [Fact]
+    public async Task NativeCacheOnlyChangeInvalidatesWorkBackoffWithoutWaitingForTheOldDeadline()
+    {
+        File.WriteAllBytes(Disk("file"),Old); await using var index=await FolderIndex.OpenAsync(Database,Token); using var puller=Coordinator(index);
+        await puller.RunPassAsync(Token); await puller.ReceiveIndexAsync(Peer,0,1,[Record(index,"file",1,New)],Token);
+        var row=index.Needed.Find("file")!; byte[] root=index.Meta.Find("_root-identity")!.Value!;
+        await index.RecordPullFailureAsync("file",root,row.Work!.Fingerprint,DateTime.UtcNow.Ticks,Token);
+        File.SetCreationTimeUtc(Disk("file"),DateTime.UtcNow.AddDays(-2)); puller.RequestScan();
+        (await puller.RunPassAsync(Token)).Applied.ShouldBe(1); File.ReadAllBytes(Disk("file")).ShouldBe(New); index.ReadPullRetry("file").ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailureAfterLocalCommitRepairsNeededEvenWhenTheNextScanIsUnchanged(bool cancel)
+    {
+        File.WriteAllBytes(Disk("file"),Old); await using var index=await FolderIndex.OpenAsync(Database,Token); var clock=new MutableClock();
+        using var puller=Coordinator(index,clock:clock); await puller.RunPassAsync(Token);
+        await puller.ReceiveIndexAsync(Peer,0,1,[Record(index,"file",1,New)],Token);
+        using(var locked=File.Open(Disk("file"),FileMode.Open,FileAccess.ReadWrite,FileShare.None))
+        {
+            locked.SetLength(New.Length); locked.Write(New); locked.Flush(flushToDisk:true); puller.RequestScan();
+            (await puller.RunPassAsync(Token)).Visited.ShouldBe(0);
+            index.LocalFiles.Find("file")!.Flags.HasFlag(LocalFileState.NeedsRescan).ShouldBeTrue(); index.Needed.Count().ShouldBe(0);
+        }
+        clock.Advance(TimeSpan.FromSeconds(11)); puller.RequestScan(); using var cancelled=CancellationTokenSource.CreateLinkedTokenSource(Token);
+        if(cancel) puller.Checkpoint=stage=>{ if(stage=="after-local-scan") cancelled.Cancel(); };
+        else Sql("CREATE TRIGGER reject_needed BEFORE INSERT ON needed BEGIN SELECT RAISE(ABORT,'test'); END;");
+        if(cancel) await Should.ThrowAsync<OperationCanceledException>(()=>puller.RunPassAsync(cancelled.Token));
+        else await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(()=>puller.RunPassAsync(Token));
+        index.LocalFiles.Find("file")!.Flags.ShouldBe(LocalFileState.None); index.LocalFiles.Find("file")!.FileHash.ShouldBe(Hash(New)); index.Needed.Count().ShouldBe(0);
+        puller.Checkpoint=null; if(!cancel) Sql("DROP TRIGGER reject_needed;");
+        (await puller.RunPassAsync(Token)).Applied.ShouldBe(1); index.Needed.Count().ShouldBe(0); index.ReadApplyIntents().ShouldBeEmpty();
+        void Sql(string sql)
+        {
+            using var connection=new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource=Database,Pooling=false }.ToString()); connection.Open();
+            using var command=connection.CreateCommand(); command.CommandText=sql; command.ExecuteNonQuery();
+        }
+    }
+
     private Puller Coordinator(FolderIndex index, Func<ReadOnlyMemory<byte>,ReadOnlyMemory<byte>,int,CancellationToken,ValueTask<ReadOnlyMemory<byte>>>? fetch=null,
         FolderSettings? settings=null, TimeProvider? clock=null, DiagnosticJournal? journal=null) => new(Root,index,keys,Own,
             fetch??((_,_,_,_)=>ValueTask.FromResult<ReadOnlyMemory<byte>>(New)),settings,clock,journal);

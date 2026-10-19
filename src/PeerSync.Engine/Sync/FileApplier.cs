@@ -83,14 +83,18 @@ public sealed partial class FileApplier
         // preserves the exact old node without traversing any of its children.
         if (winner.Type > 1 || winner.Type == 1 && known is not { Deleted: false, Type: 0 }) return FileApplyOutcome.Deferred;
         var desired = VersionView.Open(decision.DesiredRecord!, keys, winner.SourceDevice.ToArray());
-        if (!desired.Deleted) FileMetadata.ValidateMtime(desired.MtimeTicks);
+        if (!desired.Deleted)
+        {
+            try { FileMetadata.ValidateMtime(desired.MtimeTicks); }
+            catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return FileApplyOutcome.Blocked; }
+        }
         using var parent = tree.Directory(ApplyState.Parent(desired.Path));
         string temporary = ""; byte[] temporaryId = [];
         bool replaceKind = known is { Deleted: false } && known.Type != desired.Type;
         using var tempHandle = !desired.Deleted && (decision.RequiresContent || replaceKind)
             ? OpenTemporary(tree, parent, desired.Path, out temporary, out temporaryId, desired.Type == 1) : null;
         var state = new ApplyState { Root = tree.Identity.ToArray(), Version = desired, Vector = decision.Vector,
-            Temporary = temporary, TemporaryId = temporaryId };
+            Temporary = temporary, TemporaryId = temporaryId, ScheduledDeletion = scheduled && desired.Deleted };
         var intent = new ApplyIntent(session, path, known?.LocalSequence, state.Encode());
         await index.ReserveApplyAsync(intent, cancellationToken).ConfigureAwait(false);
         Signal("staging", intent.Id);
@@ -154,7 +158,7 @@ public sealed partial class FileApplier
                 var history = new SnapshotHistory(index, keys, ownDevice, settings, journal, clock) { Checkpoint = Checkpoint };
                 await history.RecoverIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue;
             }
-            if (intent.Payload.Length >= 4 && BinaryPrimitives.ReadInt32LittleEndian(intent.Payload) == 3)
+            if (intent.Payload.Length >= 4 && BinaryPrimitives.ReadInt32LittleEndian(intent.Payload) is 3 or 6)
             {
                 var directories = new DirectoryApplier(rootPath, index, keys, ownDevice, settings, journal) { Checkpoint = Checkpoint };
                 await directories.RecoverIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue;
@@ -168,6 +172,8 @@ public sealed partial class FileApplier
                 await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
                 recovered++; Signal("recover-staging", intent.Id); continue;
             }
+            using var deletionBarrier = state.ScheduledDeletion
+                ? await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version!, ownDevice, true, cancellationToken).ConfigureAwait(false) : null;
             using var targetParent = tree.Directory(ApplyState.Parent(state.Path));
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
