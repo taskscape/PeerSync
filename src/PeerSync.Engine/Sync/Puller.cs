@@ -140,7 +140,20 @@ public sealed class Puller : IDisposable
             if ((Volatile.Read(ref scanRequested) != 0 || now >= nextScanTicks) && now >= scanRetryTicks)
             { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
         }
-        var work = index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
+        if (await files.PrepareCaseCopiesAsync(fetch, token).ConfigureAwait(false))
+        { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        var casePaths = await files.CompleteCaseCopiesAsync(token).ConfigureAwait(false);
+        if (casePaths.Count != 0)
+        {
+            if (neededRepairPending) { scanRetryTicks = 0; Volatile.Write(ref scanRequested, 1); }
+            try { await needed.RecomputeAsync(casePaths, token).ConfigureAwait(false); }
+            catch (CasePreservationCapacityException) { CaseBackpressure(); }
+            foreach (string path in casePaths)
+                if (index.Needed.Find(path)?.Work is { } descriptor) await index.ClearPullRetryAsync(path, descriptor.Fingerprint, token).ConfigureAwait(false);
+        }
+        using (await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false))
+            await index.CompactCompletedCaseSourcesAsync(rootId!, Now, limit: 64, cancellationToken: token).ConfigureAwait(false);
+        IReadOnlyList<NeededRow> work = neededRepairPending ? [] : index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
         foreach (var row in work)
         {
             token.ThrowIfCancellationRequested();
@@ -200,7 +213,7 @@ public sealed class Puller : IDisposable
             }
             else { nextStagingTicks = AddSeconds(Now, 3600); stagingRetryAttempt = 0; }
         }
-        long finished = Now; long? next = index.ReadNextScheduledPullTicks(rootId!, own, finished);
+        long finished = Now; long? next = NextWorkTicks(finished);
         return new(work.Count, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
     }
 
@@ -217,10 +230,12 @@ public sealed class Puller : IDisposable
         Interlocked.Exchange(ref scanRequested, 0);
         bool repairAll = rebuild || neededRepairPending;
         neededRepairPending = true;
+        bool scanned = false;
         try
         {
             ScanResult result;
             using (await FolderScanBudget.AcquireAsync(token).ConfigureAwait(false)) result = await scanner.ScanAsync(token).ConfigureAwait(false);
+            scanned = true;
             Checkpoint?.Invoke("after-local-scan");
             if (repairAll) await needed.RebuildAsync(token).ConfigureAwait(false);
             else if (result.ChangedPaths.Count != 0) await needed.RecomputeAsync(result.ChangedPaths.Where(PathRules.IsValid), token).ConfigureAwait(false);
@@ -234,7 +249,15 @@ public sealed class Puller : IDisposable
             }
             else { scanAttempt = 0; scanRetryTicks = 0; if (result.RequiresFollowupScan) Volatile.Write(ref scanRequested, 1); }
         }
+        catch (CasePreservationCapacityException) when (scanned) { CaseBackpressure(); }
         catch { Volatile.Write(ref scanRequested, 1); throw; }
+    }
+
+    private void CaseBackpressure()
+    {
+        neededRepairPending = true; Volatile.Write(ref scanRequested, 1); scanRetryTicks = AddSeconds(Now, 10);
+        journal?.TryWrite(new("puller.case_backpressure", "pull") { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Warning,
+            ItemsDeferred = index.ReadPendingCasePreservations().Count, RetryInMilliseconds = 10000 });
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -254,7 +277,7 @@ public sealed class Puller : IDisposable
                     {
                         await RunPassAsync(cancellationToken).ConfigureAwait(false); attempt = 0;
                         long now = Now; long scan = Volatile.Read(ref scanRequested) != 0 ? Math.Max(now, scanRetryTicks) : nextScanTicks;
-                        long next = Math.Min(scan, index.ReadNextScheduledPullTicks(rootId!, own, now) ?? DateTime.MaxValue.Ticks);
+                        long next = Math.Min(scan, NextWorkTicks(now) ?? DateTime.MaxValue.Ticks);
                         if (!neededRepairPending && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0) next = Math.Min(next, nextStagingTicks);
                         delay = TimeSpan.FromTicks(Math.Clamp(next - now, 0, 600 * TimeSpan.TicksPerSecond));
                     }
@@ -279,6 +302,12 @@ public sealed class Puller : IDisposable
     }
 
     private long Now => Math.Max(1, clock.GetUtcNow().UtcTicks);
+    private long? NextWorkTicks(long now)
+    {
+        long? pull = neededRepairPending ? Math.Max(now, scanRetryTicks) : index.ReadNextScheduledPullTicks(rootId!, own, now);
+        long? cases = index.ReadNextCasePreservationTicks(rootId!, now);
+        return pull is null ? cases : cases is null ? pull : Math.Min(pull.Value, cases.Value);
+    }
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);
     private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException
         || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 };

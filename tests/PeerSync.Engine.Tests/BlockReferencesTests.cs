@@ -70,6 +70,41 @@ public sealed class BlockReferencesTests : IDisposable
     }
 
     [Fact]
+    public async Task PendingCaseManifestRetainsReferencesAfterRemoteReplacementAndNeededRemoval()
+    {
+        await using var index = await PrepareAsync();
+        byte[] bytes = "case source survives replacement"u8.ToArray();
+        var original = Record("incoming", 2, bytes); var view = VersionView.Open(original, keys, Device(2));
+        var source = new CasePreservationSource(CaseConflictPolicy.SourceId(view), Device(2), view.Path, original);
+        await index.ApplyRemoteIndexAsync(Device(2), 0, 1, [new(Device(2), "INCOMING", view.Vector, original)],
+            snapshot => new(snapshot.PathKey, Device(2), 0) { CasePreservations = [source] }, Token);
+        var replacement = Record("incoming", 2, "replacement bytes"u8.ToArray()).WithLocalSequence(2);
+        var next = VersionView.Open(replacement, keys, Device(2));
+        await index.ApplyRemoteIndexAsync(Device(2), 1, 2, [new(Device(2), "INCOMING", next.Vector, replacement)], _ => null, Token);
+        index.Needed.Count().ShouldBe(0);
+        (await Builder(index).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+        index.ReadBlockReferences().Single(row => row.Hash.SequenceEqual(Hash(bytes))).Kinds.ShouldBe(BlockReferenceKind.Needed);
+        index.ReadBlockReferences().Any(row => row.Hash.SequenceEqual(Hash("replacement bytes"u8))).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidCaseSourceIdentityOrSignatureCannotReplaceActiveReferences(bool corruptSignature)
+    {
+        await using var index = await PrepareAsync(); var before = await Builder(index).RefreshAsync(Token);
+        var original = Record("incoming", 2, "private case bytes"u8.ToArray()); var view = VersionView.Open(original, keys, Device(2));
+        var source = new CasePreservationSource(corruptSignature ? CaseConflictPolicy.SourceId(view) : new byte[32], Device(2), view.Path,
+            corruptSignature ? new(original.Body, new byte[64]) : original);
+        await index.ApplyRemoteIndexAsync(Device(2), 0, 1, [new(Device(2), "INCOMING", view.Vector, original)],
+            snapshot => new(snapshot.PathKey, Device(2), 0) { CasePreservations = [source] }, Token);
+        if (corruptSignature) await Should.ThrowAsync<CryptographicException>(() => Builder(index).RefreshAsync(Token));
+        else await Should.ThrowAsync<InvalidDataException>(() => Builder(index).RefreshAsync(Token));
+        index.ReadActiveBlockReferenceSnapshot()!.Id.ShouldBe(before.SnapshotId!.Value);
+        index.ReadBlockReferences().Single().Hash.ShouldBe(Hash(Current));
+    }
+
+    [Fact]
     public async Task AuthenticatedHistoryRetainsOldChunksEvenWhenItsPhysicalArchiveUnexpectedlyDisappears()
     {
         await using var index = await PrepareAsync(); File.WriteAllText(Disk("private-name"), "new bytes");

@@ -170,15 +170,36 @@ public sealed class NeededSet
 
     internal NeededRow? ToNeededRow(FolderPathSnapshot snapshot)
     {
+        // Admission must not depend on a usable native scan cache. Otherwise a
+        // withheld local row can suppress preservation while remote rows change.
+        var originals = new List<VersionView>();
+        if (snapshot.Local?.Record is { } local) originals.Add(VersionView.Open(local, keys, ownDevice));
+        originals.AddRange(snapshot.Remote.Select(remote => VersionView.Open(remote.Record, keys, remote.DeviceId)));
+        IReadOnlyList<CasePreservationSource> cases = [];
+        if (originals.Count != 0)
+        {
+            var originalWinner = ConflictResolver.SelectWinner(originals);
+            if (!ignore.IsIgnored(originalWinner.Path, originalWinner.Type == 1)) cases = CaseConflictPolicy.SelectSources(originals);
+        }
         var decision = Decide(snapshot);
-        if (!decision.RequiresApply) return null;
+        if (!decision.RequiresApply)
+        {
+            if (cases.Count == 0) return null;
+            var source = cases[0];
+            return new(snapshot.PathKey, source.SourceDevice, 0)
+            { PreservationAdmissionOnly = true, CasePreservations = cases };
+        }
         var winner = decision.Winner!; var desired = decision.DesiredRecord!;
         using var hash = Blake3.Hasher.New(); hash.Update("PeerSync pull work v1"u8); hash.Update(desired.Body); hash.Update(desired.Signature); hash.Update(winner.SourceDevice);
         Span<byte> target = stackalloc byte[17]; target.Clear(); BinaryPrimitives.WriteInt64LittleEndian(target, snapshot.Local?.LocalSequence ?? 0);
         BinaryPrimitives.WriteInt64LittleEndian(target[8..], snapshot.Local?.ChangeFileTime ?? 0); target[16] = snapshot.Local?.ContentReady == true ? (byte)1 : (byte)0;
         hash.Update(target); if (snapshot.Local?.FileId is { } id) hash.Update(id);
         int stage = winner.Deleted ? winner.Type == 1 ? 3 : 2 : winner.Type == 1 ? 0 : 1;
-        return new(snapshot.PathKey, winner.SourceDevice.ToArray(), 0) { Work = new(stage, winner.Size, winner.MtimeTicks, hash.Finalize().AsSpan().ToArray()) };
+        return new(snapshot.PathKey, winner.SourceDevice.ToArray(), 0)
+        {
+            Work = new(stage, winner.Size, winner.MtimeTicks, hash.Finalize().AsSpan().ToArray()),
+            CasePreservations = cases
+        };
     }
 
     private static bool ActualMatches(LocalFileRow? local, VersionView winner)

@@ -522,8 +522,119 @@ schema migration; existing databases are backed up by the migration runner.
 | Directory deleted remotely, new local files inside | Delete the known children. Keep the directory and the unknown files, which then sync back. |
 | A winning directory replaces a local file | Retain the file under the ordinary archive/oversize/keep-both policy, then install a guarded empty directory. |
 | A winning file replaces a local directory | Move the entire directory, including unknown children, to a no-overwrite sync-conflict sibling before installing the file. A directory tree is not a single file archive entry. RW peers scan/publish the preserved tree; RO peers retain it as a local copy. Preserve effective DACL access/protection and creation time; Windows normalizes directory-only ACL inheritance flags on a replacement file. The retained directory keeps its original ACL. |
-| Two remote names differ only by case | Keep the first. Rename the second with a `.case-conflict` suffix, as Resilio's `.Conflict` handling does. |
+| Concurrent live names differ only by leaf case | The existing deterministic conflict winner owns the original name. Preserve every other causally maximal version with a distinct leaf spelling under a stable `.case-conflict-<source-id>` sibling before merging its vector. |
 | Name invalid on Windows | Mark the record unsyncable here and show a warning. Don't block the rest of the folder. |
+
+Case handling must retain competing signed versions before a merged vector can
+hide the original concurrency. An empty receiver with two remote case spellings
+needs both visible payloads, as does a peer that already owns one spelling.
+Archives/private block caches alone do not satisfy the `.case-conflict` rule.
+Ordinary causally ordered case renames, including an edit accompanying the
+rename, must not create spurious case-conflict copies.
+
+Begin with connected-engine regressions for both arrival orders, local-winner
+and remote-winner paths and causal rename controls. The preservation design
+must bind pending work to authenticated source envelopes and root identity,
+retain reference coverage, survive restart/source replacement and reserve
+destinations without overwriting. Incoming signed paths cannot be rewritten:
+RW publication of a preserved copy requires an ordinary new local record; RO
+copies remain local. First-name ownership and subsequent suffix allocation
+must remain consistent across gossip/restart and preserve every source
+version. The user approved deterministic original-name ownership on 2026-10-19;
+literal per-computer packet arrival does not assign ownership. Source IDs hash
+the domain `PeerSync case source v1` followed by the original signed body and
+signature, independent of forwarding device and native root. Use the existing
+bounded sibling-name rules, adding a numeric collision suffix without replacing
+unknown objects. Parent-only spelling changes do not create child case copies.
+
+Admission adds immutable source envelopes to a root-bound preservation ledger
+in the same transaction as remote rows, needed work and receive cursor. A
+pure resolver may return preservation sources with its needed row; storage
+validates path/identity bounds, freezes buffers, rejects mismatched duplicate
+IDs and applies backpressure at 1,000 pending sources. Completed markers are
+separate from that pending limit. Replacing remote rows cannot release the
+ledger's original envelope. Accepted index updates and this ledger are FULL
+durable before acknowledgement; replay and failed admission cannot partly
+advance the cursor. Recompute must discover the same obligations idempotently.
+
+Pending sources hold authenticated block references even if their remote row
+is replaced. Pending original and reserved destination paths also inhibit
+staging expiry. Normal original-path application/vector merging must wait for
+the preservation barrier, including selection, final mutation and writer commit
+checks. An arrival while an old operation is in flight must defer or safely
+recover that operation without overwriting either version.
+
+Materialization reserves a no-overwrite destination and a kind-specific FULL
+root/source/destination/FID-bound intent, assembles and verifies independent
+blocks outside the reference gate, and installs only through guarded moves.
+Recover before scanning, preserving changed or foreign occupants. RW copies
+are ordinary scanner publications, never rewritten incoming signed paths; RO
+copies remain local. Guarded visible bytes and required local publication must
+be proven before completion releases the original-path barrier. Retain stable
+completed-source accounting to suppress duplicate gossip copies, with bounded
+eventual metadata retirement. Restart, source replacement, forwarding, occupied
+destinations, cancellation and reference/expiry races require tests. Directory
+and nested subtree mapping remain mandatory before the parent task closes.
+
+The first materialization slice handles regular-file sources. Recovery kind 7
+contains the exact signed source, portable ID, root, collision/destination and
+owned GUID temporary/FID, with explicit preparation. Reserve the destination
+and intent in one FULL transaction. After guarded installation, atomically
+record destination/FID and remove the intent while leaving the source pending.
+This allows ordinary scanning without releasing the original-path barrier.
+Only a subsequent guarded byte/identity check plus the matching ready local
+publication (RW) or local observation (RO) completes that source. Unknown or
+changed destinations get another no-overwrite slot; matching content alone
+cannot grant native ownership. Incomplete recovery parks owned staging and
+keeps the obligation for a later network retry; prepared recovery installs or
+accounts only its verified object before scanning. Directory sources remain
+pending until authenticated subtree mapping is implemented.
+
+A received case copy can arrive before the original clash is resolved locally.
+Reuse it as visible evidence only when its local row is a ready authenticated
+publication at the exact portable candidate, its native file ID still matches,
+and a guarded whole-file check matches the pending source. FULL-account that
+observation against the same local sequence; it grants no deletion ownership.
+An unindexed, unsigned, changed or merely same-named occupant is a collision.
+The ordinary scanner/publication completion barrier still applies. This avoids
+duplicate suffixes from gossip without trusting a filename as ownership proof.
+
+Case retries are per portable source and root, FULL durable with failure time,
+attempt count and 10–600 second exponential deadlines. Visit at most the 1,000
+pending sources per pass, defer unsupported subtrees and inaccessible sources
+without blocking independent work, and include the earliest due case deadline
+in the coordinator timer. A backwards wall clock makes old deadlines due;
+successful installed/publication accounting clears the retry. Cancellation
+leaves recoverable owned staging and does not complete the source.
+
+After a completed source has aged at least 24 hours, bounded FULL metadata-only
+compaction may remove its large signed envelope/forwarder fields while keeping
+the root/path/portable-ID completed witness. That compact witness suppresses
+later exact authenticated gossip and conveys no native deletion permission.
+Never compact pending sources, future completion times or a foreign root.
+
+Preservation admission is separate from ordinary needed scheduling. A CPU-only
+resolution can admit sources while removing unneeded work; completed RO sources
+must not recreate an unchanged original-path task. Treat pending-cap saturation
+as recoverable backpressure. After a successful native scan, allow already
+admitted sources to install, scan and complete even if full needed recomputation
+is capacity-limited. Block ordinary application until that repair completes,
+then resume remaining batches; never spin on blocked ordinary deadlines.
+Startup/local recomputation may commit a valid prefix within each bounded
+batch when preservation capacity is reached. Use a per-path savepoint so the
+failing path retains neither partial source admission nor changed needed work;
+commit the prefix FULL before reporting recoverable saturation. This permits
+progress when unavailable older sources leave fewer than a batch's free slots.
+Remote receipt remains whole-batch atomic with its cursor. Other resolver
+failures or cancellation roll back the current entire recomputation batch.
+
+The immutable source's first forwarding device is only a routing hint. If it
+becomes unavailable, consult current authenticated remote advertisements of the
+same exact signed envelope, try another forwarding device and retain the
+successful route during that assembly. Do not change the portable source ID.
+Prepared recovery treats unclassifiable/reparse destination probes as occupied:
+preserve the occupant, park the verified temporary using its held handle and
+release the intent for another no-overwrite slot instead of blocking the folder.
 
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
 
@@ -541,6 +652,24 @@ difference for the control UI. Log transitions, session IDs and numeric offset
 seconds without peer names, identifiers, nonces, keys or file data. The UTC Hello
 and decision model are P1 foundations; actual index admission and rendered UI
 remain required parts of P1.5.5 before its checkbox can close.
+
+A valid authenticated Hello exchanges both UTC samples even if the receiver's
+clock guard already blocks index exchange. Each endpoint then evaluates its
+own signed offset (peer UTC minus local UTC); the remote endpoint's exception
+must not masquerade as the caller's local clock measurement. Index and block
+operations retain their existing guards. Hello still validates protocol,
+identity and nonce before updating clock state.
+
+The control status source reads immutable session-bound snapshots rather than
+reconstructing state from logs. Keep the authenticated peer identity and local
+session correlation ID separate from untrusted Hello fields. On disconnect,
+admission resets immediately, but a closed session's last skew/invalid reason
+and numeric offset remain available for display. A fresh valid session clears
+the corresponding closed-peer warning. Bound recent closed history to 64
+peers, bound each snapshot to 1,000 rows and signal truncation explicitly.
+Active sessions remain host-owned and must be drained. Display snapshots never
+grant admission. Typed source/lifecycle checks precede control-pipe and rendered
+UI wiring; those remain mandatory before P1.5.5c or its parent can close.
 
 An authenticated peer-bound index facade supplies the source identity from its
 transport context, never from Hello. It checks clock admission before receiving
@@ -995,6 +1124,41 @@ gRPC over the named pipe `\\.\pipe\PeerSync.Control`. The service hosts it with 
 
 The app shows a "Service not running" banner with a Start button (through an elevated helper) when the pipe is unreachable, and reconnects automatically.
 
+The clock-status slice implements GetStatus plus status-bearing WatchEvents
+before the remaining control operations. Frames carry a service-instance ID,
+monotonic sequence, explicit production-sync availability, folder/device/session
+identities, connection state, clock reason and optional signed offset ticks.
+Bound each response to 1,000 clock rows and 256 KiB, signal truncation, and bound
+concurrent event subscriptions. Slow consumers await transport backpressure;
+cancellation releases subscriptions. The source is the runtime's actual
+TransportFolder snapshots; an empty runtime must not invent peers or imply
+production sync is available.
+
+Only the server identity receives CreateNewInstance on the pipe; Administrators
+and the installed PeerSync Users group receive client read/write rights. Inspect
+the caller's identified Windows token for every RPC. The client verifies the
+pipe owner against the configured service account and the kernel-reported
+pipe-server PID against the running SCM service PID. Owner SID alone cannot
+authenticate an extra server instance sharing the pipe descriptor. Reject an
+identity mismatch before sending RPC data. Fixture endpoints may supply their
+known process/SID directly; the production app resolves them through SCM and
+exposes no arbitrary endpoint/owner override.
+
+The app initially queries status, then consumes WatchEvents and reconnects after
+disconnect. Bind updates to the current client generation and service instance,
+ignore stale sequences, and never preserve an old success after a connection
+failure. Render clock reasons and numeric minutes from typed status, including
+missing/invalid samples and disconnected failures, and clear warnings on fresh
+accepted state. Test actual local named-pipe identity, stream lifecycle and
+runtime snapshots, then render the real WPF controls and retain images for
+inspection. Service installation/configuration, full production engine hosting
+and the rest of the control API remain their required later tasks.
+
+The named-pipe configuration follows the installed .NET 10/Grpc 2.84 packages
+and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0),
+including separate server-instance and client rights. Kernel PID verification
+also protects the local client from additional-instance impersonation.
+
 ## Central rendezvous server
 
 One small ASP.NET Core service, `PeerSync.Rendezvous`, runs the tracker and the relay on the existing taskscape.com server. It is a Windows service listening on port 99, TCP and UDP, while the website keeps ports 80 and 443. It keeps only in-memory sightings ("device D, holding folder F, is reachable at these addresses"), and stores no files, keys or folder names. Without it, LAN and predefined-host sync keep working, as Resilio does with its tracker turned off.
@@ -1045,7 +1209,7 @@ One .NET 10 solution with eleven projects. References only point down the stack,
 | `PeerSync.Engine` | Class library | Scanner, watcher, hasher, puller, conflict resolver, archive, transfer scheduler |
 | `PeerSync.Net` | Class library | QUIC and TCP transports, handshake, peer sessions, LAN discovery, tracker and relay clients, NAT mapping, the in-memory transport |
 | `PeerSync.Service` | Worker Service | Windows service host, hosted services, control API server |
-| `PeerSync.Control.Contracts` | Class library | `control.proto` and the generated client, the only thing the UI references |
+| `PeerSync.Control.Contracts` | Class library | `control.proto`, generated RPC stubs, typed status mapping and shared authenticated local-pipe client/SCM endpoint resolver; the UI/CLI control dependency, with no Engine or Storage dependency |
 | `PeerSync.App` | WPF app | UI, tray icon, folder ACL grant |
 | `PeerSync.Rendezvous` | ASP.NET Core | Tracker and relay, Windows service on port 99 |
 | `PeerSync.Cli` | Console app | `psp.exe status, add, join, peers, dump-index`, probe for scripting and debugging |
@@ -1165,6 +1329,13 @@ the same update otherwise starts independent push and PR matrices, and
 per-ref concurrency cannot cancel that duplication. Keep every required job,
 the full fuzz duration, publishing and evidence. Combine related local work
 before submitting a new head, and inspect the causal failure before retrying.
+The required Server 2022 and Server 2025 security jobs each run the complete
+native Engine suite. The x64 packaging job runs the remaining unit suites,
+simulation and native probes; avoid a third duplicate Engine execution there.
+Keep all five required jobs, full 1,001-object boundary tests, strict durability
+and 15-minute limits. The canonical local runner includes Engine by default;
+an explicit CI partition switch records its omission in verification evidence.
+Collect all required jobs before treating the partitioned workflow as passing.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included

@@ -167,6 +167,8 @@ public sealed partial class FolderIndex
             var current = ReadIntent(connection, transaction, expected.Id);
             if (current is null) return false; // A completion retry cannot allocate another sequence or archive row.
             RequireSameIntent(current, expected); RequireExpectedSequence(connection, transaction, expected);
+            if (HasPendingCase(connection, transaction, expected.PathKey, includeDescendants: !(frozen.Type == 1 && !frozen.Deleted && expected.ExpectedLocalSequence is null)))
+                throw new IOException("Case preservation must complete before applying the original path.");
             LocalFiles.WriteBatch(connection, transaction, [frozen], cancellationToken);
             Archive.WriteBatch(connection, transaction, retained, cancellationToken);
             using var needed = new NeededRewrite(connection, transaction, resolver);

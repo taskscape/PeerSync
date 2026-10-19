@@ -120,7 +120,8 @@ public sealed partial class FolderIndex
     {
         if(now<row.ParkedTicks||now-row.ParkedTicks<StagingGraceTicks) return false;
         using var command=connection.CreateCommand(); command.Transaction=transaction;
-        command.CommandText="SELECT EXISTS(SELECT 1 FROM needed WHERE path_key=$path) OR EXISTS(SELECT 1 FROM apply_intents);";
+        command.CommandText="SELECT EXISTS(SELECT 1 FROM needed WHERE path_key=$path) OR EXISTS(SELECT 1 FROM apply_intents) "
+            + "OR EXISTS(SELECT 1 FROM case_preservations WHERE completed=0 AND (path_key=$path OR destination_key=$path));";
         command.Parameters.AddWithValue("$path",PathRules.Key(row.TargetPath)); return (long)command.ExecuteScalar()! == 0;
     }
     private static StagedObject? ReadStagingById(SqliteConnection connection,SqliteTransaction transaction,Guid id)
