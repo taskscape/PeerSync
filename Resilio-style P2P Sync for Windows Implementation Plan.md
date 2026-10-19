@@ -1098,7 +1098,7 @@ One .NET 10 solution with eleven projects. References only point down the stack,
 | `PeerSync.Engine` | Class library | Scanner, watcher, hasher, puller, conflict resolver, archive, transfer scheduler |
 | `PeerSync.Net` | Class library | QUIC and TCP transports, handshake, peer sessions, LAN discovery, tracker and relay clients, NAT mapping, the in-memory transport |
 | `PeerSync.Service` | Worker Service | Windows service host, hosted services, control API server |
-| `PeerSync.Control.Contracts` | Class library | `control.proto` and the generated client, the only thing the UI references |
+| `PeerSync.Control.Contracts` | Class library | `control.proto`, generated RPC stubs, typed status mapping and shared authenticated local-pipe client/SCM endpoint resolver; the UI/CLI control dependency, with no Engine or Storage dependency |
 | `PeerSync.App` | WPF app | UI, tray icon, folder ACL grant |
 | `PeerSync.Rendezvous` | ASP.NET Core | Tracker and relay, Windows service on port 99 |
 | `PeerSync.Cli` | Console app | `psp.exe status, add, join, peers, dump-index`, probe for scripting and debugging |
