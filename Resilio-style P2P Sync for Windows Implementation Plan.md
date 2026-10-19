@@ -287,7 +287,7 @@ schema migration; existing databases are backed up by the migration runner.
 | Remote vector dominates local | Apply the remote version. The old local version goes to the archive. |
 | Local vector dominates remote | Ignore. The remote peer will pull ours. |
 | Vectors concurrent, contents equal | Merge the vectors. Nothing moves. |
-| Vectors concurrent, contents differ | **Latest version wins:** newer mtime, tie broken by higher DeviceId, so every peer picks the same winner. The losing version goes to the archive on every peer that held it, and the UI shows a notice. |
+| Vectors concurrent, contents differ | **Latest version wins:** newer mtime for live entries, signed deletion time (`changed_ticks`) for tombstones, then higher DeviceId. Every peer picks the same winner. The losing version goes to the archive on every peer that held it, and the UI shows a notice. |
 | Losing version bigger than the archive limit (1,000 MB) | Kept as `name.sync-conflict-20261018-142233-ABCD.ext` instead, so it is never dropped silently. |
 | Concurrent delete and edit | The later change wins, the delete included. An edit that loses goes to the archive. |
 | Directory deleted remotely, new local files inside | Delete the known children. Keep the directory and the unknown files, which then sync back. |
@@ -295,6 +295,26 @@ schema migration; existing databases are backed up by the migration runner.
 | Name invalid on Windows | Mark the record unsyncable here and show a warning. Don't block the rest of the folder. |
 
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
+
+The source design's mtime rule takes precedence over the draft checklist's
+blanket `changed_ticks` comparison: a newly noticed old offline file must not
+beat a genuinely newer edit. Tombstones use their signed deletion timestamp
+because they have no live mtime. Causally dominated candidates are removed
+before choosing among concurrent maximal versions; merge their vectors by max,
+without incrementing a device counter for a merge alone. Equal timestamps and
+DeviceIds use the exact signed body as a final stable tie-break. Matching file
+contents still choose deterministic metadata (path case, attributes, mtime).
+Only RW peers sign a new merged envelope; RO peers retain original signatures.
+Remote index records, the sender cursor and affected needed rows commit in one
+writer transaction. Verify envelopes before submission; then compute affected
+path winners from the transaction's current local/all-remote snapshot. Replays
+do not change rows or regress cursors. Local changes can recompute only affected
+paths, with a full rebuild available after startup/settings changes. Ignored,
+unsyncable and pending-rescan paths are withheld from application. RO local
+changes remain needed but blocked until OverwriteLocalChanges is enabled; an
+exact local match can adopt the original signature without rewriting data.
+An additive remote-path index supports per-path winner queries across devices;
+the device-first primary key alone cannot serve that access pattern efficiently.
 
 ### Applying remote changes
 

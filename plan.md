@@ -72,6 +72,9 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.5.1: add migration 3 indexing remote_files(path_key), so affected-path winner queries do not scan every device's complete index. | Sync engine design: Version vectors and conflicts |
+| 2026-10-19 | P1.5.1: commit remote records, sender cursor and affected needed rows atomically; verify before submission and select from the writer transaction's current local/all-remote snapshot. Replays are idempotent. RO local changes remain blocked unless overwrite is enabled; local merged causal metadata never rewrites forwarded signatures. | Sync engine design: Version vectors and conflicts |
+| 2026-10-19 | P1.5: follow the source design's live mtime winner rule; use signed deletion time for tombstones, then full DeviceId and exact-body tie-breaks. Remove causally dominated versions before deterministic selection and max-merge vectors without a new edit counter. This corrects the draft example's blanket changed_ticks comparison. | Sync engine design: Version vectors and conflicts |
 | 2026-10-19 | P1.4.3: coalesce startup/periodic/watcher requests and use a process-wide single-folder scan budget to enforce the per-disk limit even across partitions/unknown volume mappings. Release it before 10-600 s retries. Set very-low I/O hints on scanner file handles; report rejected hints. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.4.2: bound watcher ingress and pending paths; saturation/native errors request a consumer-side full scan. Use monotonic 2 s quiet/30 s maximum debounce, include both rename paths and emit relative batches. Initially schedule full safe walks for ready batches; committed own-write metadata prevents version loops. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.4.1 benchmark exposed quadratic initial chunk indexing: add schema migration 2 with an index on chunks(path_key). Preserve v1 databases and use the existing backup/transactional migration path. | Sync engine design: Detecting local changes |
@@ -1314,13 +1317,15 @@ Our own writes need no special suppression: the puller records the new state in 
 
 ### P1.5 Sync logic
 
-- [ ] **P1.5.1 Needed-set computation** (`PeerSync.Engine/Sync/NeededSet.cs`)
+- [ ] **P1.5.1 Needed-set computation** (`PeerSync.Engine/Sync/NeededSet.cs`) [WIP @Codex 2026-10-19]
   - Done when: for each path, the winning version among local and all remote records is computed with 7.10. `needed` contains exactly the paths where the winner isn't the local version. Incremental updates on each `IndexUpdate` are covered by tests.
-- [ ] **P1.5.2 Conflict resolution: latest version wins** (`PeerSync.Engine/Sync/ConflictResolver.cs`)
-  - Done when: every row of the design doc's conflict table has a test, and every peer picks the same winner (`changed_ticks`, tie broken by the higher DeviceId).
+  - Local foundation: verified candidate selection, atomic remote/cursor/needed updates, replay/cancellation and RO-policy tests are implemented. See [verification](docs/verification/P1.5.1-2-needed-conflicts-2026-10-19.md); billing is resolved, required integration CI and merge remain pending.
+- [ ] **P1.5.2 Conflict resolution: latest version wins** (`PeerSync.Engine/Sync/ConflictResolver.cs`) [WIP @Codex 2026-10-19]
+  - Done when: every row of the design doc's conflict table has a test, and every peer picks the same winner (live `mtime_ticks`, deletion `changed_ticks`, tie broken by the higher DeviceId).
     - A loser above `ArchiveMaxFileBytes`, or with "Keep both copies" on, becomes `name.sync-conflict-YYYYMMDD-HHMMSS-XXXX.ext`.
     - Only RW peers publish the merged record. RO peers apply the same rule locally and never publish.
   - Ref: Sync engine design, Version vectors and conflicts.
+  - Local foundation: deterministic causal/concurrent selection, signed vector merges, loser fate and bounded conflict names are tested. Directory/unknown-child and case-clash filesystem preservation still require P1.5.3 integration; this task remains incomplete.
 - [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`)
   - Done when: directories are created first, then files in priority order, then deletions, deepest directory last. Files are assembled from local chunks before network chunks, verified, and swapped in with 7.11. A locked target retries with backoff (10 s up to 10 min).
 - [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`)
@@ -1329,6 +1334,11 @@ Our own writes need no special suppression: the puller records the new state in 
   - Done when: `Hello` carries UTC time. A peer more than 10 minutes off exchanges no index updates and shows "clock differs by N minutes" in the UI.
 
 ### 7.10 Code: resolving concurrent versions (P1.5.1, P1.5.2)
+
+The real resolver supersedes the timestamp comparison below: it follows the
+source design's live mtime rule and uses changed_ticks for tombstones. Maximal
+candidate selection, stable metadata ties and exact-body preservation are also
+required for multi-peer convergence.
 
 **Tricky:**
 
