@@ -76,6 +76,8 @@ public sealed class SafeFileTreeTests : IDisposable
         Directory.CreateSymbolicLink(Path.Combine(Root, "link"), outside);
         using var tree = new SafeFileTree(Root);
         Should.Throw<IOException>(() => tree.Directory("link", create: true));
+        Should.Throw<IOException>(() => tree.ProbeDirectory("link/child"));
+        Should.Throw<IOException>(() => tree.ProbeDirectory("../outside"));
         Should.Throw<IOException>(() => tree.Directory("../outside", create: true));
         Should.Throw<IOException>(() => tree.Directory(".psp", create: true));
         using var parent = tree.Directory("");
@@ -87,6 +89,31 @@ public sealed class SafeFileTreeTests : IDisposable
         Directory.Exists(Path.Combine(Root, new string('a', 255))).ShouldBeFalse();
         File.ReadAllText(Path.Combine(outside, "keep")).ShouldBe("unchanged");
         Directory.EnumerateFiles(outside).Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public void AbsenceProbePinsFileAncestorsAndNeverCreatesDirectories()
+    {
+        using var tree=new SafeFileTree(Root);
+        using(var missing=tree.ProbeDirectory("missing/child")) missing.Absent.ShouldBeTrue();
+        Directory.Exists(Path.Combine(Root,"missing")).ShouldBeFalse();
+        Directory.CreateDirectory(Path.Combine(Root,"present")); File.WriteAllText(Path.Combine(Root,"present","file"),"keep bytes");
+        using(var blocked=tree.ProbeDirectory("present/file/child"))
+        {
+            blocked.Absent.ShouldBeTrue();
+            Should.Throw<IOException>(()=>File.Delete(Path.Combine(Root,"present","file")));
+            Should.Throw<IOException>(()=>Directory.Move(Path.Combine(Root,"present"),Path.Combine(Root,"moved")));
+        }
+        File.Move(Path.Combine(Root,"present","file"),Path.Combine(Root,"present","renamed"));
+        using var present=tree.ProbeDirectory("present"); present.Absent.ShouldBeFalse(); present.Directory.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void SharingFailureIsNotAbsence()
+    {
+        File.WriteAllText(Path.Combine(Root,"locked"),"keep"); using var locked=File.Open(Path.Combine(Root,"locked"),FileMode.Open,FileAccess.Read,FileShare.None);
+        using var tree=new SafeFileTree(Root); var error=Should.Throw<Win32Exception>(()=>tree.ProbeDirectory("locked/child"));
+        (error.NativeErrorCode is 32 or 33).ShouldBeTrue();
     }
 
     public void Dispose() => Directory.Delete(fixture, recursive: true);

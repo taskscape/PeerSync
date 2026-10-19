@@ -660,6 +660,22 @@ attributes. Native metadata and ACL helpers borrow handles without closing the
 caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
 
 1. Create new directories, shallowest first.
+   Parent integration must also cover receiving nested tombstones on a fresh
+   node where the former parent is absent or is now a file. Such a descendant
+   has no physical object to remove: preserve every existing ancestor and user
+   object, retain the sender-range barrier and durable metadata rules, and
+   converge the signed deletion without attempting to create/traverse a parent
+   file. Test this through connected production folder engines, including
+   retained old child bytes and restart/concurrent parent changes.
+   Probe absence using the pinned root and no-reparse component handles. Only
+   missing components or ordinary-file ancestors establish absence; access,
+   sharing and reparse errors remain failures. Complete such tombstones through
+   the existing FULL intent/completion path without native deletion, holding
+   component guards and the range barrier. Re-probe on recovery and preserve a
+   concurrently created descendant using the ordinary changed-target path.
+   Request a fresh scan after metadata-only completion; it observes concurrent
+   creation without removing that new data. Retained originals still require
+   their existing identity/hash/accounting checks.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
 3. For each file, assemble it in an exclusively created hidden `GUID.!psp`
    sibling next to the target, from local chunks first, then network chunks.
@@ -669,6 +685,42 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    when those identities still match. Never truncate or delete unowned names.
    Verify every chunk and then the whole-file hash.
    Existing temporary bytes are also reusable only after chunk verification.
+   Parked staging uses a FULL-durable catalog tied to the live apply intent,
+   root/file identity, original target, GUID sibling name, first parked time,
+   kind, native change stamp and exact file length/hash. Capture under the
+   existing exclusive handle or a verified reopened guard. Re-parking an unchanged
+   fingerprint preserves age; newly settled bytes/native changes get a new grace period. Resume only
+   unchanged cataloged objects; changed/foreign objects are preserved. Legacy
+   unaged pointers remain compatible for verified reuse but never authorize age
+   cleanup until adopted under a verified apply/recovery context.
+   Every recovery/defer branch that already owns the temporary handle must
+   pass that handle into fingerprint/protection capture; an exclusive reopen
+   would fail sharing and must not downgrade edited prepared bytes to legacy
+   reuse. Reusing a cataloged case-alias sibling keeps its native identity and
+   catalog spelling, but records the new intent's temporary path under the
+   current target-parent spelling so the strict recovery format remains valid.
+   Expiry requires at least 24 hours, no needed work for the target and no active
+   apply. Stream verification outside the reference gate, then recheck under
+   filesystem/reference gates before a FULL deletion intent and native removal.
+   Recovery rechecks ownership and new needs. Delete only guarded exact files or
+   empty owned directories, never recursively/by filename. Protect changed or
+   foreign objects, preserve needed prefixes and bound each pass to 1,000 rows.
+   Persist a root-bound catalog cursor so needed/locked objects cannot starve
+   later entries. Scan at most 1,000 witnesses per pass, including skipped rows,
+   and request continuation when a page is full. Verify files outside the
+   reference gate while retaining native guards, then recheck age, current needs,
+   exact witness and absence of active apply in the FULL reservation. Prepared
+   retirements are recovered first. Inaccessible preparations may be canceled
+   durably without deleting bytes, retaining their witness for a later retry and
+   freeing bounded journal capacity. Confirmed absence can retire metadata only;
+   a foreign replacement is preserved. Protected/legacy objects never gain
+   deletion permission through enumeration or filename matching.
+   Cold recovery revokes any unfinished staging deletion permissions before
+   application recovery/scanning; it does not delete using a possibly stale
+   needed set. A fresh successful scan/recompute precedes expiry. Missing rows
+   are reconciled afterward. Cursor pages include all parked rows and advance
+   across ineligible entries; completed cycles wait an hour, full pages continue
+   immediately and transient deferrals retry with the coordinator's backoff.
    Local index entries are hints: reject reparse traversal, verify the actual
    bytes and try at most 64 candidates per chunk before network fallback.
    Copy transport data into an owned, bounded chunk buffer before hashing it.
@@ -864,6 +916,11 @@ Resilio's power-user list is the reference. Every setting is changed live throug
 - **Low impact:** hashing runs at below-normal priority with low I/O priority hints. Battery saver can pause hashing as an option.
 
 ### Logging, metrics and upgrades
+
+Diagnostic probes may append to a PID-named log folder after Windows reuses a
+process ID. Verification must select the exact invocation using process lifetime,
+role and run ID; historical events must neither satisfy nor fail its assertions.
+Keep earlier logs for diagnosis and retain the existing timeout/progress checks.
 
 - **Logs:** Serilog rolling files, 7 days and 100 MB total (Resilio's defaults). Warnings and errors also go to the Windows Event Log. Keys and file contents are never logged.
 - **Metrics:** `System.Diagnostics.Metrics` counters (bytes up and down, peers, queue depth, hashing rate), streamed to the UI.

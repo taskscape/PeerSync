@@ -353,6 +353,24 @@ public sealed class DirectoryApplierTests : IDisposable
         Directory.Exists(Disk("dir")).ShouldBeFalse(); index.ReadApplyIntents().ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AbsentParentDirectoryTombstoneRecoversWithoutRemovingNewChildren(bool concurrentDirectory)
+    {
+        await using var index=await PrepareAsync(); await ReceiveAsync(index,"parent/child",deleted:true);
+        var needed=new NeededSet(index,keys,own); await needed.AnnounceIndexRangeAsync(remote,1,Token);
+        var applier=Directories(index); applier.Checkpoint=stage=>{ if(stage=="prepared") throw new IOException("injected"); };
+        await Should.ThrowAsync<IOException>(()=>applier.ApplyScheduledAsync("parent/child",Token));
+        if(concurrentDirectory) { Directory.CreateDirectory(Disk("parent/child")); File.WriteAllText(Disk("parent/child/keep"),"new bytes"); }
+        await needed.AnnounceIndexRangeAsync(remote,2,Token);
+        await Should.ThrowAsync<IndexRangeRecoveryPendingException>(()=>Files(index).RecoverAsync(Token));
+        await needed.ApplyIndexUpdateAsync(remote,1,2,[],Token); (await Files(index).RecoverAsync(Token)).ShouldBe(1);
+        index.ReadApplyIntents().ShouldBeEmpty();
+        if(concurrentDirectory) File.ReadAllText(Disk("parent/child/keep")).ShouldBe("new bytes");
+        else { Directory.Exists(Disk("parent")).ShouldBeFalse(); index.LocalFiles.Find("parent/child")!.Deleted.ShouldBeTrue(); }
+    }
+
     private async Task<FolderIndex> PrepareAsync()
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

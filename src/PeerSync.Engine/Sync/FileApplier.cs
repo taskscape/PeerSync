@@ -88,11 +88,25 @@ public sealed partial class FileApplier
             try { FileMetadata.ValidateMtime(desired.MtimeTicks); }
             catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return FileApplyOutcome.Blocked; }
         }
-        using var parent = tree.Directory(ApplyState.Parent(desired.Path));
+        using var parentProbe = desired.Deleted ? tree.ProbeDirectory(ApplyState.Parent(desired.Path)) : null;
+        if (parentProbe?.Absent == true)
+        {
+            // Keep a known live version available for the scanner's immutable
+            // supersession archive before replacing its metadata.
+            if (known is { Deleted: false }) { requireScan?.Invoke(); return FileApplyOutcome.Deferred; }
+            var absentState = new ApplyState { Root = tree.Identity.ToArray(), Version = desired, Vector = decision.Vector,
+                Prepared = true, ScheduledDeletion = scheduled };
+            var absentIntent = new ApplyIntent(session, path, known?.LocalSequence, absentState.Encode());
+            await index.ReserveApplyAsync(absentIntent, cancellationToken).ConfigureAwait(false);
+            Signal("absent-parent", session); Signal("prepared", session);
+            await CompleteAsync(tree, absentState, absentIntent, null, null, cancellationToken).ConfigureAwait(false);
+            requireScan?.Invoke(); return FileApplyOutcome.Applied;
+        }
+        using var parent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(desired.Path));
         string temporary = ""; byte[] temporaryId = [];
         bool replaceKind = known is { Deleted: false } && known.Type != desired.Type;
         using var tempHandle = !desired.Deleted && (decision.RequiresContent || replaceKind)
-            ? OpenTemporary(tree, parent, desired.Path, out temporary, out temporaryId, desired.Type == 1) : null;
+            ? OpenTemporary(tree, parent, desired.Path, out temporary, out temporaryId, desired.Type == 1, session, cancellationToken) : null;
         var state = new ApplyState { Root = tree.Identity.ToArray(), Version = desired, Vector = decision.Vector,
             Temporary = temporary, TemporaryId = temporaryId, ScheduledDeletion = scheduled && desired.Deleted };
         var intent = new ApplyIntent(session, path, known?.LocalSequence, state.Encode());
@@ -111,7 +125,7 @@ public sealed partial class FileApplier
         using var original = TryOpen(oldParent, ApplyState.Name(known?.Path ?? desired.Path));
         if (!MatchesKnown(original, known, cancellationToken))
         {
-            await ParkAsync(state, cancellationToken).ConfigureAwait(false);
+            await ParkAsync(tree, state, intent, cancellationToken, tempHandle).ConfigureAwait(false);
             await index.DeferApplyAsync(intent, [], cancellationToken).ConfigureAwait(false);
             requireScan?.Invoke(); Signal("target-changed", intent.Id); return FileApplyOutcome.Deferred;
         }
@@ -168,13 +182,23 @@ public sealed partial class FileApplier
             Signal("recover-start", intent.Id);
             if (!state.Prepared)
             {
-                await ParkAsync(state, cancellationToken).ConfigureAwait(false);
+                await ParkAsync(tree, state, intent, cancellationToken).ConfigureAwait(false);
                 await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
                 recovered++; Signal("recover-staging", intent.Id); continue;
             }
             using var deletionBarrier = state.ScheduledDeletion
                 ? await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version!, ownDevice, true, cancellationToken).ConfigureAwait(false) : null;
-            using var targetParent = tree.Directory(ApplyState.Parent(state.Path));
+            using var parentProbe = state.Deleted ? tree.ProbeDirectory(ApplyState.Parent(state.Path)) : null;
+            if (parentProbe?.Absent == true)
+            {
+                if (state.Retained.Length == 0 && index.LocalFiles.Find(state.Path) is { Deleted: false })
+                    await DeferAsync(tree, state, intent, null, cancellationToken).ConfigureAwait(false);
+                else if (state.OriginalId.Length == 0 || state.Retained.Length != 0)
+                    await CompleteAsync(tree, state, intent, null, null, cancellationToken).ConfigureAwait(false);
+                else await DeferAsync(tree, state, intent, null, cancellationToken).ConfigureAwait(false);
+                recovered++; Signal("recover-complete", intent.Id); continue;
+            }
+            using var targetParent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(state.Path));
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);
@@ -194,7 +218,7 @@ public sealed partial class FileApplier
                 else
                 {
                     FileMetadata.RestoreAttributes(target, (FileAttributes)state.OriginalAttributes);
-                    await ParkAsync(state, cancellationToken).ConfigureAwait(false);
+                    await ParkAsync(tree, state, intent, cancellationToken, temporary).ConfigureAwait(false);
                     await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -212,12 +236,12 @@ public sealed partial class FileApplier
                         targetParent.MoveHere(retained.File, ApplyState.Name(state.Original));
                         FileMetadata.RestoreAttributes(retained.File, (FileAttributes)state.OriginalAttributes);
                     }
-                    await ParkAsync(state, cancellationToken).ConfigureAwait(false);
+                    await ParkAsync(tree, state, intent, cancellationToken, temporary).ConfigureAwait(false);
                     await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
                     Signal("recover-restored", intent.Id);
                 }
             }
-            else await DeferAsync(tree, state, intent, null, cancellationToken).ConfigureAwait(false);
+            else await DeferAsync(tree, state, intent, null, cancellationToken, temporary).ConfigureAwait(false);
             recovered++; Signal("recover-complete", intent.Id);
         }
         return recovered;
@@ -267,7 +291,7 @@ public sealed partial class FileApplier
                 Signal("install-ready", intent.Id);
                 try { parent.MoveHere(temporary, ApplyState.Name(state.Path)); }
                 catch (Win32Exception error) when (error.NativeErrorCode is 80 or 183)
-                { await DeferAsync(tree, state, intent, original ?? retained?.File, token).ConfigureAwait(false); return FileApplyOutcome.Deferred; }
+                { await DeferAsync(tree, state, intent, original ?? retained?.File, token, temporary).ConfigureAwait(false); return FileApplyOutcome.Deferred; }
                 Signal("installed", intent.Id);
             }
             if (temporary is null && original is not null && !state.Deleted && state.Original != state.Path)
@@ -335,11 +359,11 @@ public sealed partial class FileApplier
         Signal("committed", intent.Id);
     }
 
-    private async Task DeferAsync(SafeFileTree tree, ApplyState state, ApplyIntent intent, SafeFileHandle? heldOriginal, CancellationToken token)
+    private async Task DeferAsync(SafeFileTree tree, ApplyState state, ApplyIntent intent, SafeFileHandle? heldOriginal, CancellationToken token, SafeFileHandle? heldTemporary = null)
     {
         using var retained = Retain(tree, state, heldOriginal);
         var archives = ReadArchives(state, retained?.File, token);
-        await ParkAsync(state, token).ConfigureAwait(false);
+        await ParkAsync(tree, state, intent, token, heldTemporary).ConfigureAwait(false);
         await CommitDeferredAsync(state, intent, archives, token).ConfigureAwait(false);
         Signal("concurrent-target", intent.Id);
     }
@@ -380,36 +404,6 @@ public sealed partial class FileApplier
         if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } identity || !identity.AsSpan().SequenceEqual(tree.Identity))
             throw new IOException("Scan and bind the sync root before application.");
     }
-
-    private SafeFileHandle OpenTemporary(SafeFileTree tree, DirectoryLease parent, string path, out string temporary, out byte[] identity, bool directory = false)
-    {
-        if (index.Meta.Find(StagingKey(path, directory))?.Value is { Length: > 40 and <= 17448 } parked
-            && parked.AsSpan(0, 24).SequenceEqual(tree.Identity))
-        {
-            string candidate = new UTF8Encoding(false, true).GetString(parked.AsSpan(40));
-            if (ApplyState.Parent(candidate) == ApplyState.Parent(path) && NameIsTemporary(candidate))
-            {
-                SafeFileHandle? handle = null;
-                try
-                {
-                    handle = directory ? parent.OwnedTemporaryDirectory(ApplyState.Name(candidate), create: false) : parent.OpenOwnedTemporary(ApplyState.Name(candidate));
-                    if (HasIdentity(handle, parked.AsSpan(24, 16))) { temporary = candidate; identity = parked.AsSpan(24, 16).ToArray(); return handle; }
-                }
-                catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { }
-                handle?.Dispose();
-            }
-        }
-        string name = Guid.NewGuid().ToString("N") + ".!psp";
-        var created = directory ? parent.OwnedTemporaryDirectory(name, create: true) : parent.CreateFile(name, temporary: true);
-        temporary = ApplyState.Join(ApplyState.Parent(path), name); identity = Identity(FileSnapshot.Read(created)); return created;
-    }
-
-    private Task<int> ParkAsync(ApplyState state, CancellationToken token) => state.Temporary.Length == 0 ? Task.FromResult(0)
-        : index.Meta.UpsertAsync([new(StagingKey(state.Path, state.Type == 1), [.. state.Root, .. state.TemporaryId, .. Encoding.UTF8.GetBytes(state.Temporary)])], token);
-    private static string StagingKey(string path, bool directory = false) => "_apply-staging-" + Convert.ToHexString(Blake3.Hasher.Hash(Encoding.UTF8.GetBytes(PathRules.Key(path))).AsSpan())
-        + (directory ? "-directory" : "");
-    private static bool NameIsTemporary(string path) => ApplyState.Name(path).EndsWith(".!psp", StringComparison.Ordinal)
-        && Guid.TryParseExact(ApplyState.Name(path)[..^5], "N", out _);
 
     private static SafeFileHandle? TryOpen(DirectoryLease parent, string name, bool temporary = false)
     {

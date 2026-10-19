@@ -39,6 +39,31 @@ internal sealed class SafeFileTree : IDisposable
         catch { foreach (var handle in handles.AsEnumerable().Reverse()) handle.Dispose(); throw; }
     }
 
+    /// <summary>For metadata-only tombstones. A missing component or pinned
+    /// ordinary file means no descendant can be removed. Never classify access,
+    /// sharing or reparse errors as absence. The caller preserves concurrent
+    /// creations and scans after committing metadata.</summary>
+    internal DirectoryProbe ProbeDirectory(string path)
+    {
+        try { return new(Directory(path), []); }
+        catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3 or 267) { }
+        var handles = new List<SafeFileHandle>(); var current = root.Handle;
+        try
+        {
+            foreach (string part in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+            {
+                SafeFileHandle next;
+                try { next = Open(current, part, directory: null, access: 0x00100081, share: 3, disposition: 1); }
+                catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return new(null, handles); }
+                handles.Add(next);
+                if ((FileSnapshot.Read(next).Attributes & FileAttributes.Directory) == 0) return new(null, handles);
+                current = next;
+            }
+            return new(new DirectoryLease(current, handles), []);
+        }
+        catch { foreach (var handle in handles.AsEnumerable().Reverse()) handle.Dispose(); throw; }
+    }
+
     public void Dispose() { if (ownsRoot) root.Dispose(); }
 
     internal static bool ComponentValid(string name, bool allowTemp) => name.Length <= 255 && !name.Contains('/')
@@ -75,6 +100,17 @@ internal sealed class SafeFileTree : IDisposable
             }
             finally { if (retained) parent.DangerousRelease(); }
         }
+    }
+}
+
+internal sealed class DirectoryProbe(DirectoryLease? directory, List<SafeFileHandle> guards) : IDisposable
+{
+    internal DirectoryLease? Directory { get; } = directory;
+    internal bool Absent => Directory is null;
+    public void Dispose()
+    {
+        Directory?.Dispose();
+        foreach (var guard in guards.AsEnumerable().Reverse()) guard.Dispose();
     }
 }
 
