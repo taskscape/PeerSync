@@ -1322,6 +1322,13 @@ the same update otherwise starts independent push and PR matrices, and
 per-ref concurrency cannot cancel that duplication. Keep every required job,
 the full fuzz duration, publishing and evidence. Combine related local work
 before submitting a new head, and inspect the causal failure before retrying.
+The required Server 2022 and Server 2025 security jobs each run the complete
+native Engine suite. The x64 packaging job runs the remaining unit suites,
+simulation and native probes; avoid a third duplicate Engine execution there.
+Keep all five required jobs, full 1,001-object boundary tests, strict durability
+and 15-minute limits. The canonical local runner includes Engine by default;
+an explicit CI partition switch records its omission in verification evidence.
+Collect all required jobs before treating the partitioned workflow as passing.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included
