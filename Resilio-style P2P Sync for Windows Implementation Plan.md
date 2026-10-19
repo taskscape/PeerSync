@@ -336,6 +336,15 @@ missing-row reconciliation must retain provenance before removing their last
 metadata, and upgrades must protect older cataloged objects whose historical
 references cannot be reconstructed. The sweep must establish that protection,
 refresh references under both gates, and hold them through verified deletion.
+Preserve archive provenance transactionally at the database boundary: every
+archive insertion records its exact row and current root binding with a stable
+source identifier. Replacing metadata detaches the previous source and creates
+a new source; removing an archive row detaches its source without deleting its
+metadata. Seed existing archives during migration before any future cleanup.
+Unchanged upserts do not duplicate provenance, and transaction rollback applies
+to archive rows and provenance together. Provenance is local protection data,
+not proof of file ownership or authorization to delete bytes. Native verification,
+content manifests and explicit policy release must establish those separately.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
