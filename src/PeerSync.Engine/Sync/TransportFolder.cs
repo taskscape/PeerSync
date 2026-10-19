@@ -31,13 +31,17 @@ public sealed class TransportFolder : IAsyncDisposable
 
     public TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         FolderSettings? settings = null, TimeProvider? timeProvider = null, DiagnosticJournal? journal = null)
+        : this(rootPath, index, keys, ownDevice, settings, timeProvider, journal, directorySnapshots: false) { }
+
+    internal TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
+        FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots)
     {
         ArgumentNullException.ThrowIfNull(ownDevice);
         ArgumentNullException.ThrowIfNull(keys);
         if (ownDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(ownDevice));
         this.rootPath = rootPath; this.index = index; own = ownDevice.ToArray(); clock = timeProvider ?? TimeProvider.System;
         folderId = keys.FolderId();
-        puller = new(rootPath, index, keys, own, FetchAsync, settings, clock, journal);
+        puller = new(rootPath, index, keys, own, FetchAsync, settings, clock, journal, directorySnapshots);
     }
 
     public Task<PullPassResult> RunPassAsync(CancellationToken cancellationToken = default)

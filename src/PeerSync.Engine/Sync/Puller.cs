@@ -7,6 +7,7 @@ using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Paths;
 using PeerSync.Core.Settings;
 using PeerSync.Crypto;
+using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Scanning;
 using PeerSync.Storage.FolderDb;
 using Envelope = PeerSync.Core.Sync.SignedRecord;
@@ -30,6 +31,7 @@ public sealed class Puller : IDisposable
     private readonly FileApplier files;
     private readonly DirectoryApplier directories;
     private readonly StagingCleaner staging;
+    private readonly DirectoryPublicationWorker? publications;
     private readonly Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch;
     private readonly TimeProvider clock;
     private readonly DiagnosticJournal? journal;
@@ -48,12 +50,18 @@ public sealed class Puller : IDisposable
     public Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
         FolderSettings? settings = null, TimeProvider? timeProvider = null, DiagnosticJournal? journal = null)
+        : this(rootPath, index, keys, ownDevice, fetch, settings, timeProvider, journal, directorySnapshots: false) { }
+
+    internal Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
+        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots)
     {
         ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(fetch);
         this.index = index; this.fetch = fetch; own = ownDevice?.ToArray() ?? throw new ArgumentNullException(nameof(ownDevice));
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson()); clock = timeProvider ?? TimeProvider.System; this.journal = journal;
         needed = new(index, keys, own, this.settings, journal: journal);
-        scanner = new(rootPath, index, keys, own, timeProvider: clock, settings: this.settings, journal: journal);
+        scanner = new(rootPath, index, keys, own, timeProvider: clock, settings: this.settings, journal: journal) { StageDirectorySnapshots = directorySnapshots };
+        if (directorySnapshots) publications = new(rootPath, index, keys, own, this.settings, clock, journal);
         files = new(rootPath, index, keys, own, this.settings, journal, clock);
         directories = new(rootPath, index, keys, own, this.settings, journal);
         staging = new(rootPath, index, clock, journal);
@@ -142,6 +150,16 @@ public sealed class Puller : IDisposable
         }
         if (await files.PrepareCaseCopiesAsync(fetch, token).ConfigureAwait(false))
         { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        if (publications is not null)
+        {
+            var published = await publications.RunAsync(token: token).ConfigureAwait(false);
+            if (published.RequiresScan) RequestScan();
+            if (!neededRepairPending && published.ChangedPaths.Count != 0)
+            {
+                try { await needed.RecomputeAsync(published.ChangedPaths, token).ConfigureAwait(false); }
+                catch (CasePreservationCapacityException) { CaseBackpressure(); }
+            }
+        }
         var casePaths = await files.CompleteCaseCopiesAsync(token).ConfigureAwait(false);
         if (casePaths.Count != 0)
         {
@@ -311,7 +329,9 @@ public sealed class Puller : IDisposable
     {
         long? pull = neededRepairPending ? Math.Max(now, scanRetryTicks) : index.ReadNextScheduledPullTicks(rootId!, own, now);
         long? cases = index.ReadNextCasePreservationTicks(rootId!, now);
-        return pull is null ? cases : cases is null ? pull : Math.Min(pull.Value, cases.Value);
+        long? result = pull is null ? cases : cases is null ? pull : Math.Min(pull.Value, cases.Value);
+        long? publication = publications is null ? null : index.ReadNextDirectoryPublicationTicks(rootId!, now);
+        return result is null ? publication : publication is null ? result : Math.Min(result.Value, publication.Value);
     }
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);
     private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException

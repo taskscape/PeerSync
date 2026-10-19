@@ -19,7 +19,7 @@ public sealed partial class FileApplier
     {
         if (budget == 0) return (false, 0);
         var progress = index.ReadDirectoryCaseProgress(pending.Source.SourceId, pending.InstalledFileId!);
-        if (progress.Exhausted) { await RetryCaseAsync(pending, "case-root-publication-pending", token).ConfigureAwait(false); return (false, 0); }
+        if (progress.Exhausted) return (false, 0); // Completion owns publication/verification backoff.
         int collision = 1;
         while (collision <= 1000 && ConflictNames.CaseSourcePath(source.Path, pending.Source.SourceId, collision) != pending.DestinationPath) collision++;
         if (collision > 1000) throw new InvalidDataException("Directory case destination policy changed.");
@@ -73,7 +73,6 @@ public sealed partial class FileApplier
             if (!page.More)
             {
                 await index.MarkDirectoryCaseMembersExhaustedAsync(pending, token).ConfigureAwait(false);
-                if (!changed) await RetryCaseAsync(pending, "case-root-publication-pending", token).ConfigureAwait(false);
             }
             return (changed, processed);
         }

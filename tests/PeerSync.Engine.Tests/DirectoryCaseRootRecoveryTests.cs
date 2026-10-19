@@ -88,6 +88,7 @@ public sealed partial class DirectorySnapshotCaptureTests
         using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "case-root", debugEnabled: true);
         var applier = new FileApplier(Root, index, keys, device, journal: journal); await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
         var pending = index.ReadPendingCasePreservations().Single(); await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
+        (await applier.CompleteCaseCopiesAsync(Token)).ShouldBeEmpty(); // Completion owns scan/publication retry after installation.
         index.ReadCasePreservationRetry(pending.Source.SourceId)!.Value.NextTicks.ShouldBeGreaterThan(DateTime.UtcNow.Ticks);
         string log = File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")); journal.DroppedEvents.ShouldBe(0);
         log.ShouldContain("case-root-reserved"); log.ShouldContain("case-root-prepared"); log.ShouldContain("case-root-installed"); log.ShouldContain("case-root-accounted");

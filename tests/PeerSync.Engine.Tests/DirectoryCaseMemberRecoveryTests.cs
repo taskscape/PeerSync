@@ -38,7 +38,9 @@ public sealed partial class DirectorySnapshotCaptureTests
         using (var scanner = new Scanner(Root, index, access, device)) await scanner.ScanAsync(Token);
         var copied = index.LocalFiles.Find(pending.DestinationPath + "/nested/a")!;
         if (readOnly) copied.Record.ShouldBeNull(); else { copied.Record.ShouldNotBeNull(); copied.ContentReady.ShouldBeTrue(); }
-        index.HasPendingCasePreservation("topic").ShouldBeTrue(); (await applier.CompleteCaseCopiesAsync(Token)).ShouldBeEmpty();
+        index.HasPendingCasePreservation("topic").ShouldBeTrue(); var completed = await applier.CompleteCaseCopiesAsync(Token);
+        if (readOnly) { completed.ShouldBe(["TOPIC"]); index.HasPendingCasePreservation("topic").ShouldBeFalse(); }
+        else completed.ShouldBeEmpty(); // Legacy RW scan still lacks signed directory snapshots.
     }
     [Theory]
     [InlineData(false, "case-member-reserved")]

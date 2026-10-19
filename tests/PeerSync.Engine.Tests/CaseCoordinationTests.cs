@@ -32,12 +32,13 @@ public sealed class CaseCoordinationTests : IDisposable
         await using var ca = await c.Engine.ConnectAsync(endpoint.Connect(a.Id), Token); await using var cb = await c.Engine.ConnectAsync(endpoint.Connect(b.Id), Token);
         if (reverseArrival) { await cb.SynchronizeAsync(cancellationToken: Token); await ca.SynchronizeAsync(cancellationToken: Token); }
         else { await ca.SynchronizeAsync(cancellationToken: Token); await cb.SynchronizeAsync(cancellationToken: Token); }
-        for (int pass = 0; pass < 8; pass++) await c.Engine.RunPassAsync(Token);
+        for (int pass = 0; pass < 8; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
         var copy = Directory.GetDirectories(c.Root).SingleOrDefault(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
         copy.ShouldNotBeNull("a directory source needs its own visible subtree, not only a pending metadata proof");
         File.ReadAllText(Path.Combine(copy!, relative)).ShouldBe(First);
+        File.Exists(Path.Combine(c.Root, "TOPIC", relative)).ShouldBeTrue(CaseState(c));
         File.ReadAllText(Path.Combine(c.Root, "TOPIC", relative)).ShouldBe(Second);
-        c.Index.ReadPendingCasePreservations().ShouldBeEmpty(); c.Index.Needed.Count().ShouldBe(0);
+        c.Index.ReadPendingCasePreservations().ShouldBeEmpty(CaseState(c)); c.Index.Needed.Count().ShouldBe(0, CaseState(c));
     }
 
     [Theory]
@@ -52,7 +53,7 @@ public sealed class CaseCoordinationTests : IDisposable
         var endpoint = network.Register(c.Id, c.Engine.CreateHandler);
         await using var ca = await c.Engine.ConnectAsync(endpoint.Connect(a.Id), Token); await using var cb = await c.Engine.ConnectAsync(endpoint.Connect(b.Id), Token);
         await ca.SynchronizeAsync(cancellationToken: Token); await cb.SynchronizeAsync(cancellationToken: Token);
-        for (int pass = 0; pass < 8; pass++) await c.Engine.RunPassAsync(Token);
+        for (int pass = 0; pass < 8; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
         if (fileWins)
         {
             File.Exists(Path.Combine(c.Root, "TOPIC")).ShouldBeTrue(); File.ReadAllText(Path.Combine(c.Root, "TOPIC")).ShouldBe(Second);
@@ -64,7 +65,7 @@ public sealed class CaseCoordinationTests : IDisposable
             File.ReadAllText(Path.Combine(c.Root, "topic", "shared.txt")).ShouldBe(First);
             File.ReadAllText(Directory.GetFiles(c.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal))).ShouldBe(Second);
         }
-        c.Index.ReadPendingCasePreservations().ShouldBeEmpty(); c.Index.Needed.Count().ShouldBe(0);
+        c.Index.ReadPendingCasePreservations().ShouldBeEmpty(CaseState(c)); c.Index.Needed.Count().ShouldBe(0, CaseState(c));
     }
 
     [Fact]
@@ -180,6 +181,12 @@ public sealed class CaseCoordinationTests : IDisposable
         paths.Select(File.ReadAllText).Order(StringComparer.Ordinal).ToArray().ShouldBe(new[]{First,Second}.Order(StringComparer.Ordinal).ToArray());
         paths.Count(path=>Path.GetFileName(path).Contains(".case-conflict",StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
     }
+    private static string CaseState(Node node) => string.Join(Environment.NewLine,
+        node.Index.ReadPendingCasePreservations().Select(row => "case " + row.Source.PathKey + " -> " + row.DestinationPath + " retry=" + node.Index.ReadCasePreservationRetry(row.Source.SourceId)
+            + " progress=" + (row.InstalledFileId is null ? null : node.Index.ReadDirectoryCaseProgress(row.Source.SourceId, row.InstalledFileId)))
+        .Concat(node.Index.LocalFiles.ReadAll().Select(row => "local " + row.Path + " flags=" + row.Flags + " ready=" + row.ContentReady + " seq=" + row.LocalSequence))
+        .Concat(node.Index.Needed.ReadAll().Select(row => "needed " + row.PathKey + " work=" + row.Work))
+        .Concat(node.Index.ReadDirectoryPublicationPaths().Select(path => "publication " + path + " mode=" + node.Index.ReadDirectoryPublication(path)!.ReconstructionOnly)));
     private static async Task Publish(Node node,string path,string text,DateTime at)
     { string disk=Path.Combine(node.Root,path); File.WriteAllText(disk,text); File.SetLastWriteTimeUtc(disk,at); node.Engine.RequestScan(); await node.Engine.RunPassAsync(Token); }
     private async Task<Node> NodeAsync(ulong identity,bool readOnly=false)
@@ -187,9 +194,15 @@ public sealed class CaseCoordinationTests : IDisposable
         string directory=Path.Combine(fixture,identity.ToString(System.Globalization.CultureInfo.InvariantCulture)); string root=Path.Combine(directory,"tree"); Directory.CreateDirectory(root);
         var index=await FolderIndex.OpenAsync(Path.Combine(directory,"index.db"),Token); byte[] id=new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(id,identity);
         var access=readOnly?FolderKeys.FromText(keys.ExportReadOnlyText()):null;
-        var engine=new TransportFolder(root,index,access??keys,id); await engine.RunPassAsync(Token); return new(root,index,engine,id,access);
+        var clock = new CaseClock(); var engine=new TransportFolder(root,index,access??keys,id,settings:null,timeProvider:clock,journal:null,directorySnapshots:true); await engine.RunPassAsync(Token); return new(root,index,engine,id,access,clock);
     }
-    private sealed record Node(string Root,FolderIndex Index,TransportFolder Engine,byte[] Id,FolderKeys? Access) : IAsyncDisposable
+    private sealed record Node(string Root,FolderIndex Index,TransportFolder Engine,byte[] Id,FolderKeys? Access,CaseClock Clock) : IAsyncDisposable
     { public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); await Index.DisposeAsync(); Access?.Dispose(); } }
+    private sealed class CaseClock : TimeProvider
+    {
+        private DateTimeOffset now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => now;
+        public void AdvanceTo(long? ticks) { if (ticks > now.UtcTicks) now = new DateTimeOffset(ticks.Value, TimeSpan.Zero); }
+    }
     public void Dispose() { keys.Dispose(); if(Directory.Exists(fixture)) Directory.Delete(fixture,true); }
 }

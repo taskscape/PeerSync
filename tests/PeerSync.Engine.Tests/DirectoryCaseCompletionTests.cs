@@ -140,5 +140,22 @@ public sealed partial class DirectorySnapshotCaptureTests
     private sealed class CompletionClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+        internal void AdvanceTo(long ticks) => now = new DateTimeOffset(ticks, TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task ExhaustedPreparationCannotContinuouslyPostponeCompletionAtItsRetryDeadline()
+    {
+        WriteFiles("a"); await using var index = await FolderIndex.OpenAsync(Database, Token); await AdmitDirectoryCase(index);
+        using var access = FolderKeys.FromText(keys.ExportReadOnlyText()); var clock = new CompletionClock(DateTimeOffset.UtcNow);
+        var applier = new FileApplier(Root, index, access, device, clock: clock);
+        await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token); await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
+        var pending = index.ReadPendingCasePreservations().Single();
+        (await applier.CompleteCaseCopiesAsync(Token)).ShouldBeEmpty(); // The copy has not been scanned.
+        var retry = index.ReadCasePreservationRetry(pending.Source.SourceId)!.Value; clock.AdvanceTo(retry.NextTicks);
+        await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
+        index.ReadCasePreservationRetry(pending.Source.SourceId).ShouldBe(retry);
+        using (var scanner = new Scanner(Root, index, access, device)) await scanner.ScanAsync(Token);
+        (await applier.CompleteCaseCopiesAsync(Token)).ShouldBe(["TOPIC"]); index.ReadPendingCasePreservations().ShouldBeEmpty();
     }
 }
