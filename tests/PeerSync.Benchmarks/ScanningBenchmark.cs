@@ -1,15 +1,17 @@
+extern alias native;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using PeerSync.Crypto;
 using PeerSync.Engine.Scanning;
+using PeerSync.Engine.Hashing;
 using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Benchmarks;
 
 internal static class ScanningBenchmark
 {
-    public static async Task<int> RunAsync(string fixture, int count, bool reuseCorpus = false)
+    public static async Task<int> RunAsync(string fixture, int count, bool reuseCorpus = false, bool measureReferences = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         fixture = Path.GetFullPath(fixture);
@@ -49,7 +51,20 @@ internal static class ScanningBenchmark
             unchanged.Unchanged, sequencePreserved = sequence == finalSequence, targetSeconds = 10, correct, targetMet,
             scope = "real one-byte files in 1000-file directories, warm local SSD; initial full hashing/signing/indexing then unchanged full walk",
         }));
+        if (measureReferences)
+        {
+            var clock = Stopwatch.StartNew(); var references = await new BlockReferences(root, index, keys, new byte[32]).RefreshAsync(); clock.Stop();
+            // This corpus has 251 distinct one-byte contents and no archives or
+            // needed rows. Verify actual coverage as well as the deduplicated count.
+            var hashes = index.ReadBlockReferences().ToDictionary(r => Convert.ToHexString(r.Hash));
+            bool referencesCorrect = references.AllKnownSourcesCovered && references.References == Math.Min(251, count)
+                && Enumerable.Range(0, Math.Min(251, count)).All(i => hashes.ContainsKey(Convert.ToHexString(native::Blake3.Hasher.Hash(new[] { (byte)i }).AsSpan())))
+                && hashes.Values.All(r => r.Length == 1 && r.Kinds == BlockReferenceKind.Current);
+            Console.WriteLine(JsonSerializer.Serialize(new { target = "BlockReferences", files = count, rows, database, references.References, references.Batches,
+                seconds = clock.Elapsed.TotalSeconds, correct = referencesCorrect, scope = "authenticated production snapshot over the real scanner index; 251 distinct one-byte values" }));
+            correct &= referencesCorrect;
+        }
         // Preserve the corpus and database for inspection; never delete a caller's directory.
-        return targetMet ? 0 : 1;
+        return targetMet && correct ? 0 : 1;
     }
 }

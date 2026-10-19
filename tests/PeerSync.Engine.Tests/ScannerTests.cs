@@ -146,7 +146,7 @@ public sealed class ScannerTests : IDisposable
         using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()))
         {
             connection.Open(); using var command = connection.CreateCommand();
-            command.CommandText = "ALTER TABLE local_files DROP COLUMN change_filetime; PRAGMA user_version=8;"; command.ExecuteNonQuery();
+            command.CommandText = "DROP TABLE block_reference_archives; DROP TABLE block_references; DROP TABLE block_reference_snapshots; ALTER TABLE local_files DROP COLUMN change_filetime; PRAGMA user_version=8;"; command.ExecuteNonQuery();
         }
         await using var migrated = await FolderIndex.OpenAsync(Database, Token); migrated.LocalFiles.Find("file")!.ChangeFileTime.ShouldBeNull();
         migrated.LocalFiles.Find("file")!.ContentReady.ShouldBeTrue(); using var ro = FolderKeys.FromText(keys.ExportReadOnlyText());

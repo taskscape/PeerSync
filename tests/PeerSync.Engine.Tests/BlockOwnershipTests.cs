@@ -180,7 +180,7 @@ public sealed class BlockOwnershipTests : IDisposable
                 IndexedChunks = [new(0, first.Length, Hash(first)), new(first.Length, second.Length, Hash(second))] }], Token);
             before = index.LocalFiles.Find("file")!;
         }
-        Sql("ALTER TABLE local_files DROP COLUMN change_filetime; DROP TABLE archive_retirements; DROP TABLE block_objects; PRAGMA user_version=6;");
+        Sql("DROP TABLE block_reference_archives; DROP TABLE block_references; DROP TABLE block_reference_snapshots; ALTER TABLE local_files DROP COLUMN change_filetime; DROP TABLE archive_retirements; DROP TABLE block_objects; PRAGMA user_version=6;");
         await using var migrated = await FolderIndex.OpenAsync(Database, Token);
         migrated.ReadIndexBatch(0).Records.ShouldBeEmpty(); migrated.LocalFiles.Find("file")!.ContentReady.ShouldBeFalse();
         using var ro = FolderKeys.FromText(keys.ExportReadOnlyText());
