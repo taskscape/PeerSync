@@ -152,3 +152,16 @@ one day), independently of the 24-hour completed-case envelope compactor.
 Expiry releases metadata/reference protection only and never deletes visible
 copies. Immutable RW publication preserves verified bytes through later normal
 native edits; RO history protection covers the configured preservation window.
+
+## Obsolete copy witness retirement
+
+Use a root-bound FULL metadata-only transaction with one shared maximum of 1000
+member and progress row deletions. Refuse cleanup while any apply intent needs
+recovery. A pending source's current installed root remains protected regardless
+of witness age. Completed attempts become eligible 24 hours after completion;
+superseded-root members become eligible 24 hours after their last touch. Delete
+an eligible progress row only when no member rows remain. An empty superseded
+progress row needs no further retention because no active attempt can resume it.
+Add an age index for member retirement. Run bounded maintenance from the puller
+under its reference gate; no source/graph/reference release or native mutation
+is authorized by this cleanup.

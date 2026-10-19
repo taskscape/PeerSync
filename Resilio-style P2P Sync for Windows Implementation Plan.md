@@ -752,6 +752,13 @@ preservation for RO, and FULL-release only after complete stable coverage.
 Keep completed RO original graphs/envelopes referenced for ArchiveDays rather
 than dropping them through the generic 24-hour case compactor. Expiry authorizes
 no native deletion. See the subtree proposal for witness/reset/commit details.
+Retire obsolete directory-copy member witnesses in bounded FULL transactions,
+sharing at most 1000 member/progress deletions per call. Keep every pending
+current-root witness and all witnesses while application recovery is pending.
+Completed attempts wait 24 hours after completion; superseded-root members wait
+24 hours after their last touch. Remove a superseded or aged completed progress
+row only after its members are gone. This metadata-only cleanup never releases
+original source/graph retention or mutates visible copies.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
