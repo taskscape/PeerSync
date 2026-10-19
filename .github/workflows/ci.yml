@@ -85,6 +85,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           ./build/Run-P0.ps1
           ./build/Run-ServiceP0.ps1
+          dotnet test --project tests/PeerSync.Engine.Tests -c Release --no-build --report-trx --results-directory artifacts/tests/native-engine
+          if ($LASTEXITCODE -ne 0) { throw 'Native scanner/hasher tests failed' }
       - name: Upload service security evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -93,3 +95,4 @@ jobs:
           path: |
             artifacts/p0-services/
             artifacts/p0/
+            artifacts/tests/native-engine/

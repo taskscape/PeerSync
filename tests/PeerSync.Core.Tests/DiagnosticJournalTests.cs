@@ -42,6 +42,21 @@ public sealed class DiagnosticJournalTests : IDisposable
     }
 
     [Fact]
+    public void NumericWorkCountersRoundTripWithoutAnArbitraryPayload()
+    {
+        using (var log = new DiagnosticJournal(directory, "test"))
+            log.Write(new("scan.complete", "scan") { ItemsVisited = 100000, ItemsChanged = 5,
+                ItemsHashed = 4, ItemsSkipped = 99994, ItemsDeferred = 1 });
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "debug.jsonl")));
+        json.RootElement.GetProperty("itemsVisited").GetInt64().ShouldBe(100000);
+        json.RootElement.GetProperty("itemsChanged").GetInt64().ShouldBe(5);
+        json.RootElement.GetProperty("itemsHashed").GetInt64().ShouldBe(4);
+        json.RootElement.GetProperty("itemsSkipped").GetInt64().ShouldBe(99994);
+        json.RootElement.GetProperty("itemsDeferred").GetInt64().ShouldBe(1);
+        json.RootElement.TryGetProperty("payload", out _).ShouldBeFalse();
+    }
+
+    [Fact]
     public void RotatesAndExpiresOldFiles()
     {
         Directory.CreateDirectory(directory);

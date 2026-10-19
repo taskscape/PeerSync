@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core types, chunk hashing and SQLite plumbing complete; folder/state storage and later engine work awaiting promotion | - |
+| P1 Local sync engine | 4-8 | In progress: core types, chunk hashing and SQLite plumbing complete; folder/state storage and scanner implemented locally, CI promotion pending | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -72,6 +72,8 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.4.1 benchmark exposed quadratic initial chunk indexing: add schema migration 2 with an index on chunks(path_key). Preserve v1 databases and use the existing backup/transactional migration path. | Sync engine design: Detecting local changes |
+| 2026-10-19 | P1.4.1: use handle-based directory metadata with 128-bit IDs and root-relative no-reparse file opens; pin root identity and preserve failed subtrees. Directory child-mtime changes alone do not publish versions. RO scans track local state without signing. Correlate scan events and numeric counters without logging names/content. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.3.3: place the shared folder-key protector in Crypto, preserving fixed v1 app entropy and machine-scope DPAPI. Protect a versioned role/FolderId/material frame, verify context on unprotect and clear plaintext buffers. State writes protect internally and key reads are audited. | Security model: Secrets at rest |
 | 2026-10-19 | P1.3.2: local sequence allocation, file-row storage and supplied chunk-index replacement share the batch transaction. Unsyncable local metadata has no signed record; remote paths remain strict. Batch at 1,000 rows and preserve envelope bytes verbatim. | Sync engine design: metadata database |
 | 2026-10-19 | P1.3.1: one normalized-path writer owner and a bounded channel, transactional operations with rollback, independent read-only connections, and online SQLite backup before transactional user_version migrations. Run synchronous SQLite I/O on the writer worker; retain WAL/NORMAL/foreign_keys/busy_timeout/temp_store settings. | Sync engine design: metadata database |
@@ -1181,9 +1183,10 @@ PRAGMA user_version = 1;
 
 ### P1.4 Scanner and watcher
 
-- [ ] **P1.4.1 Scanner** (`PeerSync.Engine/Scanning/Scanner.cs`)
+- [ ] **P1.4.1 Scanner** (`PeerSync.Engine/Scanning/Scanner.cs`) [WIP @Codex 2026-10-19]
   - Done when: a full walk skips `.psp`, `*.!psp`, ignored paths and reparse points (recorded, not followed). Unchanged size, mtime, attributes and FileId mean no hashing. A rescan of 100k unchanged files takes under 10 s.
   - Code: 7.8 for the NTFS file id.
+  - Local evidence: [scanner verification and 100k-file benchmark](docs/verification/P1.4.1-scanner-2026-10-19.md). Billing is resolved; required integration CI and merge remain pending, so the task stays unchecked.
 - [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`)
   - Done when: events are coalesced per path (quiet 2 s, or 30 s maximum). A buffer overflow triggers a full scan. Our own writes don't create new versions.
   - Code: 7.9.
@@ -1191,6 +1194,10 @@ PRAGMA user_version = 1;
   - Done when: each folder rescans at start-up and every `RescanIntervalSeconds` (default 600), at most one folder hashes at a time per disk, and hashing runs at low I/O priority.
 
 ### 7.8 Code: NTFS file id (P1.4.1)
+
+Superseded by `src/PeerSync.Engine/Native/NativeRoot.cs`, which enumerates
+128-bit IDs with directory metadata and opens descendants relative to a pinned
+root without reparse traversal. This also detects same-size/mtime replacements.
 
 .NET doesn't expose the file id. Open a metadata handle only when size or mtime changed, or when looking for rename candidates.
 

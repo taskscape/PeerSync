@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
+    <ProjectReference Include="../PeerSync.Protocol/PeerSync.Protocol.csproj" />
+    <ProjectReference Include="../PeerSync.Storage/PeerSync.Storage.csproj" />
+  </ItemGroup>
 </Project>

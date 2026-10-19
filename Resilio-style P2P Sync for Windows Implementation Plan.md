@@ -249,6 +249,23 @@ sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
 
+The v1 scanner enumerates directory metadata and 128-bit file IDs together,
+using handle-based Windows directory queries. File reads open relative to a
+pinned root and reject descendant reparse traversal. A stored root identity
+prevents silently reusing an index for a replaced root. Failed/incomplete
+subtrees preserve prior metadata and never synthesize deletions. Reparse
+entries and unrepresentable names are local unsyncable metadata, not followed.
+Directories publish presence/attribute changes; child-caused directory mtime
+changes alone do not create versions. Read-only scans track actual local data
+without signing changes; the puller applies their local-change policy.
+Scan diagnostics correlate start/completion/retry/failure events by session,
+with numeric visited/changed/hashed/skipped/deferred totals and native errors.
+File paths, key material and record bodies are excluded from the journal;
+relative-path problems are returned to the engine for local UI presentation.
+The chunk lookup table also indexes `path_key`, so replacing a file's chunk
+references does not scan the entire folder's chunk table. This is an additive
+schema migration; existing databases are backed up by the migration runner.
+
 ### Version vectors and conflicts
 
 | Situation | Outcome |

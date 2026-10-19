@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using PeerSync.Core.Sync;
+using Microsoft.Data.Sqlite;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
 using Xunit;
@@ -38,6 +39,35 @@ public sealed class FolderIndexTests : IDisposable
         index.LocalFiles.Find("ŻÓŁĆ/É.TXT")!.LocalSequence.ShouldBe(2);
         (await index.LocalFiles.DeleteAsync(["Żółć/é.txt"], TestContext.Current.CancellationToken)).ShouldBe(1);
         index.LocalFiles.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task VersionOneDatabaseMigratesWithBackupAndChunkRemovalUsesThePathIndex()
+    {
+        using (var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations.0001_initial.sql")!)
+        using (var reader = new StreamReader(resource))
+        {
+            string sql = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+            await using var original = await Db.OpenAsync(DatabasePath, [new(1, sql)], TestContext.Current.CancellationToken);
+        }
+        await using (var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken))
+        {
+            await index.LocalFiles.UpsertAsync([Row("file") with { IndexedChunks = [new(0, 1, Hash)] }], TestContext.Current.CancellationToken);
+            index.FindChunks(Hash).Single().PathKey.ShouldBe("FILE");
+        }
+        Directory.GetFiles(root, "*.pre-v1-to-v2-*.bak").Length.ShouldBe(1);
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        ((long)command.ExecuteScalar()!).ShouldBe(2);
+        command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
+        command.Parameters.AddWithValue("$path", "FILE");
+        using var query = command.ExecuteReader();
+        var details = new List<string>();
+        while (query.Read()) details.Add(query.GetString(3));
+        string.Join('\n', details).ShouldContain("ix_chunks_path");
+        string.Join('\n', details).ShouldNotContain("SCAN chunks");
     }
 
     [Fact]
