@@ -669,6 +669,14 @@ Only checkpoint successful additions after owned metadata flush; a failed
 addition discards the in-memory builder. Bind the eventual durable checkpoint
 to root, parent, ordered input manifest and continuation cursor before scanner
 activation. Builder checkpoints alone are not complete subtree proofs.
+The durable capture draft binds root, original parent spelling/native identity,
+ordered envelope manifest/count and accepted prefix/cursor. Flush independent
+bytes before FULL compare-and-swap progress; recheck unstable enumeration before
+committing. Capture at most 1000 new members per advancement. Pending and
+complete-but-unpublished drafts block fresh sweeping until publication or safe
+expiry; one row per parent and bounded 24-hour retirement limit abandoned state.
+See docs/proposals/P1-directory-capture-continuation.md. Scanner publication
+must validate the native binding and atomically release the draft with its row.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
