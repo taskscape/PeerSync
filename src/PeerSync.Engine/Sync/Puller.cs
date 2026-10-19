@@ -29,6 +29,7 @@ public sealed class Puller : IDisposable
     private readonly Scanner scanner;
     private readonly FileApplier files;
     private readonly DirectoryApplier directories;
+    private readonly StagingCleaner staging;
     private readonly Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch;
     private readonly TimeProvider clock;
     private readonly DiagnosticJournal? journal;
@@ -41,8 +42,8 @@ public sealed class Puller : IDisposable
     private bool initialized;
     private bool neededRepairPending = true;
     internal Action<string>? Checkpoint { get; set; }
-    private long nextScanTicks, scanRetryTicks;
-    private int scanRequested = 1, scanAttempt, running, disposed;
+    private long nextScanTicks, scanRetryTicks, nextStagingTicks;
+    private int scanRequested = 1, scanAttempt, stagingRetryAttempt, running, disposed;
 
     public Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
@@ -55,6 +56,7 @@ public sealed class Puller : IDisposable
         scanner = new(rootPath, index, keys, own, timeProvider: clock, settings: this.settings, journal: journal);
         files = new(rootPath, index, keys, own, this.settings, journal, clock);
         directories = new(rootPath, index, keys, own, this.settings, journal);
+        staging = new(rootPath, index, clock, journal);
     }
 
     public void NotifyWorkAvailable()
@@ -112,8 +114,12 @@ public sealed class Puller : IDisposable
         bool mustScan = false;
         if (!initialized)
         {
-            if (index.Meta.Find("_root-identity")?.Value is not null) recovered += await files.RecoverAsync(token).ConfigureAwait(false);
-            else if (index.ReadApplyIntents().Any()) throw new InvalidDataException("Unbound index has recovery state.");
+            if (index.Meta.Find("_root-identity")?.Value is { } boundRoot)
+            {
+                recovered += await staging.RecoverAsync(boundRoot, token).ConfigureAwait(false);
+                recovered += await files.RecoverAsync(token).ConfigureAwait(false);
+            }
+            else if (index.ReadApplyIntents().Any() || index.HasStagingRetirements()) throw new InvalidDataException("Unbound index has recovery state.");
             await ScanAsync(rebuild: true, token).ConfigureAwait(false); scans++;
             rootId = index.Meta.Find("_root-identity")?.Value?.ToArray();
             if (rootId is not { Length: 24 }) throw new InvalidDataException("Startup scan did not bind the index.");
@@ -121,6 +127,11 @@ public sealed class Puller : IDisposable
         }
         else
         {
+            if (index.HasStagingRetirements())
+            {
+                recovered += await staging.RecoverAsync(rootId!, token).ConfigureAwait(false);
+                neededRepairPending = true; Volatile.Write(ref scanRequested, 1); scanRetryTicks = 0; nextStagingTicks = 0;
+            }
             if (index.ReadApplyIntents().Any())
             {
                 Volatile.Write(ref scanRequested, 1); recovered += await files.RecoverAsync(token).ConfigureAwait(false); scanRetryTicks = 0;
@@ -178,8 +189,19 @@ public sealed class Puller : IDisposable
             }
         }
         if (mustScan) { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        if (Now >= nextStagingTicks && !neededRepairPending && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0 && !index.ReadApplyIntents().Any())
+        {
+            bool moreStaging = await staging.RunAsync(rootId!, token).ConfigureAwait(false);
+            if (moreStaging) nextStagingTicks = Now;
+            else if (staging.RetryNeeded)
+            {
+                nextStagingTicks = AddSeconds(Now, RescanScheduler.BackoffSeconds(stagingRetryAttempt));
+                stagingRetryAttempt = Math.Min(6, stagingRetryAttempt + 1);
+            }
+            else { nextStagingTicks = AddSeconds(Now, 3600); stagingRetryAttempt = 0; }
+        }
         long finished = Now; long? next = index.ReadNextScheduledPullTicks(rootId!, own, finished);
-        return new(work.Count, applied, deferred, failed, recovered, scans, next <= finished, next);
+        return new(work.Count, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
     }
 
     private async Task RetryAsync(NeededRow row, Exception? error, CancellationToken token)
@@ -233,6 +255,7 @@ public sealed class Puller : IDisposable
                         await RunPassAsync(cancellationToken).ConfigureAwait(false); attempt = 0;
                         long now = Now; long scan = Volatile.Read(ref scanRequested) != 0 ? Math.Max(now, scanRetryTicks) : nextScanTicks;
                         long next = Math.Min(scan, index.ReadNextScheduledPullTicks(rootId!, own, now) ?? DateTime.MaxValue.Ticks);
+                        if (!neededRepairPending && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0) next = Math.Min(next, nextStagingTicks);
                         delay = TimeSpan.FromTicks(Math.Clamp(next - now, 0, 600 * TimeSpan.TicksPerSecond));
                     }
                     catch (Exception error) when (Retryable(error))
