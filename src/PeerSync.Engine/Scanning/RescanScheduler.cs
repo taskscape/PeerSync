@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading.Channels;
+using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
 
 namespace PeerSync.Engine.Scanning;
@@ -78,16 +79,27 @@ public sealed class RescanScheduler
                 using var activity = new Activity("PeerSync.ScheduledScan").SetIdFormat(ActivityIdFormat.W3C).Start();
                 try
                 {
-                    journal?.Write(new("scheduler.scan_start", "rescan") { SessionId = session });
+                    journal?.TryWrite(new("scheduler.scan_start", "rescan") { SessionId = session });
                     result = await folder.Scanner.ScanAsync(stopped.Token).ConfigureAwait(false);
                     if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed"))
                         errorCode = "scan-deferred";
                 }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception)
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception
+                    || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 })
                 {
                     errorCode = "scan-unavailable";
-                    journal?.Write(new("scheduler.scan_failed", "rescan") { SessionId = session, Level = DiagnosticLevel.Warning,
-                        ErrorCode = errorCode, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null });
+                    journal?.TryWrite(new("scheduler.scan_failed", "rescan") { SessionId = session, Level = DiagnosticLevel.Warning,
+                        ErrorCode = error is SqliteException sqlite ? sqlite.SqliteErrorCode switch
+                        {
+                            5 => "sqlite-busy", 6 => "sqlite-locked", 10 => "sqlite-io", 13 => "sqlite-full", 14 => "sqlite-open",
+                            _ => "sqlite-error",
+                        } : errorCode,
+                        HResult = error.HResult, NativeError = error switch
+                        {
+                            Win32Exception native => native.NativeErrorCode,
+                            SqliteException databaseError => databaseError.SqliteExtendedErrorCode,
+                            _ => null,
+                        } });
                 }
                 finally { ScanBudget.Release(); }
                 if (errorCode is null) attempt = 0;
@@ -95,7 +107,7 @@ public sealed class RescanScheduler
                 if (errorCode is not null) attempt = Math.Min(attempt + 1, 6);
                 outcomes.Writer.TryWrite(new(folder.Scanner, result, errorCode, retry));
                 if (retry == 0) continue;
-                journal?.Write(new("scheduler.retry", "rescan")
+                journal?.TryWrite(new("scheduler.retry", "rescan")
                 { SessionId = session, Level = DiagnosticLevel.Debug, ErrorCode = errorCode, RetryInMilliseconds = retry * 1000 });
                 await Task.Delay(TimeSpan.FromSeconds(retry), clock, stopped.Token).ConfigureAwait(false);
                 requests.Writer.TryWrite(true);
@@ -125,7 +137,7 @@ public sealed class RescanScheduler
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or ArgumentException)
                 {
-                    journal?.Write(new("scheduler.watcher_retry", "watch") { SessionId = session, Level = DiagnosticLevel.Warning,
+                    journal?.TryWrite(new("scheduler.watcher_retry", "watch") { SessionId = session, Level = DiagnosticLevel.Warning,
                         ErrorCode = "watcher-unavailable", HResult = error.HResult, RetryInMilliseconds = 10000 });
                     requests.Writer.TryWrite(true);
                     await Task.Delay(TimeSpan.FromSeconds(10), clock, stopped.Token).ConfigureAwait(false);

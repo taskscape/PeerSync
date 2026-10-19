@@ -32,6 +32,7 @@ public static class ConflictNames
         stem = Prefix(stem, budget - suffix.Length - extension.Length).TrimEnd(' ', '.');
         if (stem.Length == 0) stem = "f";
         string result = parent + stem + suffix + extension;
+        if (!PathRules.IsValid(result)) result = parent + "f" + suffix + extension;
         if (!PathRules.IsValid(result)) throw new PathTooLongException("Conflict name cannot be represented safely.");
         return result;
     }

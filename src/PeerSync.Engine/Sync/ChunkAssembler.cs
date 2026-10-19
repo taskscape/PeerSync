@@ -31,7 +31,7 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         try
         {
             using var whole = Blake3.Hasher.New();
-            journal?.Write(new("assembly.started", "assembly") { SessionId = session, Bytes = version.Size, ItemsVisited = body.Chunks.Count });
+            journal?.TryWrite(new("assembly.started", "assembly") { SessionId = session, Bytes = version.Size, ItemsVisited = body.Chunks.Count });
             foreach (var chunk in body.Chunks)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -68,7 +68,7 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
                 }
                 whole.Update(bytes.Span);
                 offset = checked(offset + length); verified++;
-                journal?.Write(new(origin, "assembly") { SessionId = session, Level = DiagnosticLevel.Debug,
+                journal?.TryWrite(new(origin, "assembly") { SessionId = session, Level = DiagnosticLevel.Debug,
                     Bytes = offset, ItemsVisited = verified, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             }
             cancellationToken.ThrowIfCancellationRequested();
@@ -77,13 +77,13 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
                 throw new CryptographicException("Whole-file hash verification failed.");
             destination.SetLength(offset);
             await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-            journal?.Write(new("assembly.complete", "assembly") { SessionId = session, Bytes = offset, ItemsHashed = verified,
+            journal?.TryWrite(new("assembly.complete", "assembly") { SessionId = session, Bytes = offset, ItemsHashed = verified,
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             return new(temporaryBytes, localBytes, remoteBytes, verified);
         }
         catch (Exception error)
         {
-            journal?.Write(new("assembly.failed", "assembly") { SessionId = session, Bytes = offset, ItemsHashed = verified,
+            journal?.TryWrite(new("assembly.failed", "assembly") { SessionId = session, Bytes = offset, ItemsHashed = verified,
                 Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;

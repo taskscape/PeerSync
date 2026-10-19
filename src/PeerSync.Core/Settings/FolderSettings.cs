@@ -50,7 +50,9 @@ public sealed record FolderSettings
     public string ToJson()
     {
         Validate();
-        return JsonSerializer.Serialize(this, Json);
+        string json = JsonSerializer.Serialize(this, Json);
+        if (json.Length > 65536) throw new ValidationException("Folder settings exceed size limit.");
+        return json;
     }
 
     public static FolderSettings FromJson(string json)

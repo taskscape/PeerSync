@@ -55,13 +55,13 @@ public sealed class NeededSet
                 rows.Add(new(sourceDevice.ToArray(), PathRules.Key(view.Path), view.Vector, record));
             }
             var result = await index.ApplyRemoteIndexAsync(sourceDevice, afterSequence, lastSequence, rows, ToNeededRow, cancellationToken).ConfigureAwait(false);
-            journal?.Write(new(result.Applied ? "index.receive_complete" : "index.replay", "index")
+            journal?.TryWrite(new(result.Applied ? "index.receive_complete" : "index.replay", "index")
             { SessionId = session, ItemsVisited = records.Count, ItemsChanged = result.AffectedPaths, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             return result;
         }
         catch (Exception error)
         {
-            journal?.Write(new("index.receive_failed", "index") { SessionId = session, Level = DiagnosticLevel.Warning,
+            journal?.TryWrite(new("index.receive_failed", "index") { SessionId = session, Level = DiagnosticLevel.Warning,
                 ErrorCode = error.GetType().Name, HResult = error.HResult, ItemsVisited = records.Count, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }
@@ -90,7 +90,9 @@ public sealed class NeededSet
             var local = VersionView.Open(localRecord, keys, ownDevice);
             if (keys.CanWrite && VersionVector.Compare(local.Vector, snapshot.Local.Vector) != VvOrder.Equal)
                 throw new InvalidDataException("RW cached vector differs from its signed version.");
-            candidates.Add(keys.CanWrite ? local : local.WithCachedVector(snapshot.Local.Vector));
+            if (!keys.CanWrite && VersionVector.Compare(snapshot.Local.Vector, local.Vector) is VvOrder.Concurrent or VvOrder.DominatedBy)
+                throw new InvalidDataException("Cached vector does not include its signed version.");
+            candidates.Add(local);
         }
         foreach (var remote in snapshot.Remote.OrderBy(r => Convert.ToHexString(r.DeviceId), StringComparer.Ordinal))
         {

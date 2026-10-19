@@ -112,6 +112,7 @@ public sealed class ConflictResolverTests : IDisposable
     [InlineData("time")]
     [InlineData("author")]
     [InlineData("type")]
+    [InlineData("attributes")]
     public void SignedButMalformedVersionMetadataIsRejected(string invalid)
     {
         var body = Body(1, 1, 1, 1, "data", false);
@@ -124,9 +125,23 @@ public sealed class ConflictResolverTests : IDisposable
             case "time": body.ChangedTicks = -1; break;
             case "author": body.ModifiedBy = ByteString.Empty; break;
             case "type": body.Type = 4; break;
+            case "attributes": body.Attributes = (uint)FileAttributes.Archive; break;
         }
         var record = SignedRecordFactory.Create(body, keys);
         Should.Throw<InvalidDataException>(() => VersionView.Open(record, keys, new byte[32]));
+    }
+
+    [Fact]
+    public void MergedVectorEntriesKeepTheirUnknownFieldsWhenCountersChange()
+    {
+        var body = Body(1, 1, 20, 20, "winner", false);
+        body.Vv[0] = VvEntry.Parser.ParseFrom([.. body.Vv[0].ToByteArray(), 0x98, 0x06, 123]);
+        var record = SignedRecordFactory.Create(body, keys); var winner = VersionView.Open(record, keys, new byte[32]);
+        var merged = ConflictResolver.MergeRecord(winner, new Dictionary<ulong, ulong> { [1] = 2, [2] = 1 }, keys);
+        var result = VersionView.Open(merged, keys, new byte[32]).ExportBody();
+        var first = result.Vv.Single(e => e.Device == 1); first.Counter.ShouldBe(2ul);
+        first.ToByteArray().TakeLast(3).ShouldBe(new byte[] { 0x98, 0x06, 123 });
+        body.Vv[0].Counter.ShouldBe(1ul);
     }
 
     [Fact]

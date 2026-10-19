@@ -7,6 +7,18 @@ namespace PeerSync.Engine.Tests;
 
 public sealed class ConflictNamesTests
 {
+    [Theory]
+    [InlineData("CONlong", 216)]
+    [InlineData("COM1long", 215)]
+    [InlineData("LPT1long", 215)]
+    public void ReservedBasenamesCreatedByTruncationUseASafeFittingStem(string stem, int extensionLength)
+    {
+        string original = stem + "." + new string('x', extensionLength); PathRules.IsValid(original).ShouldBeTrue();
+        string conflict = ConflictNames.CopyPath(original, new(2026, 10, 19, 12, 0, 0, TimeSpan.Zero), new byte[32]);
+        PathRules.IsValid(conflict).ShouldBeTrue(); conflict.Length.ShouldBeLessThanOrEqualTo(255);
+        conflict.ShouldContain(".sync-conflict-");
+    }
+
     [Fact]
     public void CopyNamesKeepDirectoryExtensionUtcTimeDeviceCodeAndCollisionSuffix()
     {

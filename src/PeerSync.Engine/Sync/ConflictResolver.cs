@@ -70,8 +70,13 @@ public static class ConflictResolver
             throw new ArgumentException("A merged vector must include the winner.", nameof(vector));
         if (!keys.CanWrite || VersionVector.Compare(vector, winner.Vector) == VvOrder.Equal) return winner.Record.WithLocalSequence(0);
         var body = winner.ExportBody();
+        var entries = body.Vv.ToDictionary(entry => entry.Device);
         body.Vv.Clear(); body.Vv.AddRange(vector.Where(v => v.Value != 0).OrderBy(v => v.Key)
-            .Select(v => new VvEntry { Device = v.Key, Counter = v.Value }));
+            .Select(v =>
+            {
+                var entry = entries.GetValueOrDefault(v.Key) ?? new VvEntry { Device = v.Key };
+                entry.Counter = v.Value; return entry;
+            }));
         return SignedRecordFactory.Create(body, keys);
     }
 

@@ -190,6 +190,39 @@ public sealed class NeededSetTests : IDisposable
         needed.Decide(Snapshot(index)).BlockedReason.ShouldBe("local-scan-pending-or-excluded");
     }
 
+    [Fact]
+    public async Task ReadOnlyCachedKnowledgeCannotMakeOldContentsDefeatTheirSignedCausalDescendant()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        var old = Record(1, 1, 30, "old A contents", 1); await index.LocalFiles.UpsertAsync([Local(old)], Token);
+        using var readOnly = FolderKeys.FromText(keys.ExportReadOnlyText());
+        var needed = new NeededSet(index, readOnly, Device(9));
+        await needed.ApplyIndexUpdateAsync(Device(2), 0, 1, [Record(2, 1, 10, "B contents", 1)], Token);
+        var merged = needed.Decide(Snapshot(index));
+        await index.LocalFiles.UpsertAsync([Local(merged.DesiredRecord!, merged.Vector)], Token); await needed.RebuildAsync(Token);
+        var descendant = Record(1, 2, 20, "restored A contents", 2);
+        await needed.ApplyIndexUpdateAsync(Device(1), 0, 2, [descendant], Token);
+        var decision = needed.Decide(Snapshot(index));
+        decision.Winner!.Record.Body.ToArray().ShouldBe(descendant.Body.ToArray()); decision.RequiresContent.ShouldBeTrue();
+        decision.Vector[1].ShouldBe(2ul); decision.Vector[2].ShouldBe(1ul);
+    }
+
+    [Fact]
+    public async Task UnavailableDiagnosticsCannotChangeCommittedReceiveOrReplaceTheOriginalFailure()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "disposed-logs"), "index"); journal.Dispose();
+        var needed = new NeededSet(index, keys, Device(9), journal: journal);
+        var record = Record(1, 1, 10, "valid", 1);
+        (await needed.ApplyIndexUpdateAsync(Device(1), 0, 1, [record], Token)).Applied.ShouldBeTrue();
+        index.Devices.Find(Device(1))!.LastSequenceReceived.ShouldBe(1);
+        await Should.ThrowAsync<CryptographicException>(() => needed.ApplyIndexUpdateAsync(Device(1), 1, 2,
+            [new Envelope(record.Body, new byte[64], 2)], Token));
+        using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(Token); cancelled.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(() => needed.ApplyIndexUpdateAsync(Device(1), 1, 2, [], cancelled.Token));
+        index.Devices.Find(Device(1))!.LastSequenceReceived.ShouldBe(1);
+    }
+
     private Envelope Record(ulong author, ulong counter, long time, string content, ulong sequence) =>
         SignedRecordFactory.Create(ConflictResolverTests.Body(author, counter, time, time, content, false), keys, sequence);
     private LocalFileRow Local(Envelope record, IReadOnlyDictionary<ulong, ulong>? vector = null)
