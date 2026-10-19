@@ -178,6 +178,8 @@ public sealed partial class FileApplier
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (DirectoryCaseRootState.IsRoot(intent))
+            { await RecoverDirectoryCaseRootAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue; }
             if (CaseCopyState.IsCase(intent))
             { await RecoverCaseIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue; }
             if (HistoryState.IsHistory(intent))
