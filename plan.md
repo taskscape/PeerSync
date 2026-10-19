@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.2.2: bound one-pass hashing to the original length and compare handle/path size, timestamps, attributes and 128-bit file identity. Detected mutation/removal/replacement retries; progress exposes counts only. This is metadata-based detection with shared writers, not an atomic snapshot. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.1.5: specify the ignore glob subset and ancestry/negation behavior, accept Windows pattern separators, and match Unicode scalars without regex backtracking. Local rule text is bounded at 64 KiB, 1,024 rules and 4,096 characters per line. Invalid paths and internal metadata remain excluded. | Sync engine design: Archive, ignore rules and special files |
 | 2026-10-19 | P1.1.3/P1.1.4: Core owns the immutable signed envelope and pure path rules; the factory lives in Protocol (references Core/Crypto) to avoid a Core-Crypto cycle. Sign and forward exact body bytes with folder/domain binding; verify before parsing. Path containment is lexical; filesystem layers must also reject reparse traversal. | Protocol specification: FileRecord; solution structure |
 | 2026-10-19 | P1.1.2: canonical version vectors omit zero counters and reject increment overflow. Compact storage is count + sorted fixed64 little-endian device IDs + unsigned LEB128 counters, rejecting noncanonical and malformed encodings. Protobuf remains the record wire representation. | Sync engine design: metadata and version vectors |
@@ -993,6 +994,10 @@ public static class FastCdc
 ```
 
 ### 7.6 Code: streaming hasher (P1.2.2)
+
+Superseded by `src/PeerSync.Engine/Hashing/FileHasher.cs`, which additionally
+bounds the pass to the original length, compares handle/path identity and
+change metadata, rejects reparse files, and reports count-only progress.
 
 ```csharp
 // src/PeerSync.Engine/Hashing/FileHasher.cs
