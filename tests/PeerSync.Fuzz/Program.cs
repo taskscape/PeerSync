@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using PeerSync.Core.Paths;
+using PeerSync.Core.Sync;
 using PeerSync.Crypto.Chunking;
 
 if (args is not ["--seconds", var duration])
 {
-    Console.Error.WriteLine("--seconds <duration>: P0 FastCDC boundary fuzz smoke. Protocol/path/key targets arrive in later phases.");
+    Console.Error.WriteLine("--seconds <duration>: FastCDC, path and version-vector fuzz smoke.");
     return 2;
 }
 int seconds = int.Parse(duration, CultureInfo.InvariantCulture);
@@ -20,6 +22,24 @@ while (clock.Elapsed < TimeSpan.FromSeconds(seconds))
     random.NextBytes(corpus);
     try
     {
+        // Mix arbitrary UTF-16 (including unpaired surrogates) with valid paths
+        // and hostile mutations, so this is not only an early-rejection target.
+        int charCount = random.Next(0, 4100);
+        char[] chars = new char[charCount];
+        for (int index = 0; index < chars.Length; index++) chars[index] = (char)random.Next(65536);
+        string arbitrary = new(chars);
+        string valid = $"folder-{seed}/é-{seed}.txt";
+        foreach (string candidate in new[] { arbitrary, valid, valid + "/../escape", ".psp/" + valid, valid + ":stream", valid + ".!psp" })
+        {
+            bool accepted = PathRules.IsValid(candidate);
+            if (candidate == valid && !accepted) throw new InvalidDataException("Valid path rejected.");
+            if (candidate != valid && candidate != arbitrary && accepted) throw new InvalidDataException("Hostile path accepted.");
+            if (accepted && !PathRules.ToLocal(@"C:\PeerSyncFuzz", candidate).StartsWith(@"C:\PeerSyncFuzz\", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Path escaped lexical root.");
+        }
+        if (VersionVector.TryDeserialize(corpus.AsSpan(0, Math.Min(corpus.Length, 256)), out var vector)
+            && !VersionVector.Serialize(vector!).AsSpan().SequenceEqual(corpus.AsSpan(0, Math.Min(corpus.Length, 256))))
+            throw new InvalidDataException("Noncanonical version vector accepted.");
         List<int>? baseline = null;
         foreach (int readSize in readSizes)
         {
@@ -39,10 +59,11 @@ while (clock.Elapsed < TimeSpan.FromSeconds(seconds))
     catch
     {
         Directory.CreateDirectory("artifacts/fuzz/crashes");
-        await File.WriteAllBytesAsync($"artifacts/fuzz/crashes/fastcdc-{seed}.bin", corpus);
+        await File.WriteAllBytesAsync($"artifacts/fuzz/crashes/boundary-path-vector-{seed}.bin", corpus);
+        await File.WriteAllTextAsync($"artifacts/fuzz/crashes/seed-{seed}.json", JsonSerializer.Serialize(new { seed, targets = "FastCDC,PathRules,VersionVector", replay = "System.Random(seed), replay corpus generation before path generation" }));
         throw;
     }
     seed++;
 }
-Console.WriteLine(JsonSerializer.Serialize(new { target = "FastCDC", seeds = seed, seconds = clock.Elapsed.TotalSeconds, crashes = 0 }));
+Console.WriteLine(JsonSerializer.Serialize(new { target = "FastCDC,PathRules,VersionVector", seeds = seed, seconds = clock.Elapsed.TotalSeconds, crashes = 0 }));
 return 0;

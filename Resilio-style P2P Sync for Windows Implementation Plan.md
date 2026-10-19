@@ -161,7 +161,7 @@ Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`.
 | `Ping` / `Pong` | Keep-alive every 30 s, RTT sample |
 | `Close {reason}` | Orderly shutdown with a reason code |
 
-**FileRecord** fields: path (relative, `/`-separated, Unicode NFC), type (file, directory, symlink), size, mtime (100 ns UTC ticks), Windows attributes (read-only, hidden), deleted flag, version vector, ordered chunk list `(length, BLAKE3 hash)`, whole-file BLAKE3 hash, modifying DeviceId, local sequence number. Records are signed with sk over their canonical Protobuf encoding, excluding the local sequence number. Peers forward other devices' records with the original signature. Receivers drop any record whose signature fails.
+**FileRecord** fields: path (relative, `/`-separated, Unicode NFC), type (file, directory, symlink), size, mtime (100 ns UTC ticks), Windows attributes (read-only, hidden), deleted flag, version vector, ordered chunk list `(length, BLAKE3 hash)`, whole-file BLAKE3 hash, modifying DeviceId, local sequence number. The originating peer serializes the body once and signs `"psp1 record" || FolderId || body`. Store and forward those exact body bytes and the original signature; only the local sequence is rewritten. Receivers verify before parsing, then validate the parsed record. Reserializing a parsed Protobuf message is not a valid way to recover the signed bytes, because field order and unknown fields may differ.
 
 ### Block transfer and swarming
 
@@ -484,6 +484,13 @@ One .NET 10 solution with eleven projects. References only point down the stack,
 | `PeerSync.Cli` | Console app | `psp.exe status, add, join, peers, dump-index`, probe for scripting and debugging |
 
 Outside `src\`: `installer\` (Inno Setup script PeerSync.iss), and `tests\` with unit, multi-node integration, fuzz (`SharpFuzz`) and benchmark (`BenchmarkDotNet`) projects.
+
+Core's signed-record envelope owns immutable copies of body/signature bytes.
+Protocol's signing factory references Crypto and Core and handles generated
+Protobuf records; Core has no Crypto/Protocol dependency. Path rules perform
+pure lexical validation and root containment. Filesystem callers must also
+reject reparse-point traversal when applying records; lexical containment
+alone cannot stop a junction from leaving the root.
 
 ### Packages
 

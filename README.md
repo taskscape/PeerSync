@@ -21,8 +21,9 @@ dotnet test --project tests/PeerSync.Crypto.Tests/PeerSync.Crypto.Tests.csproj -
 ```
 
 CI builds x64 and Arm64 on Windows. Runtime checks run on x64; Arm64 currently
-has compile/publish coverage only. P0 fuzz exercises chunk boundaries. Later
-phases add the required parser fuzz, simulations and product integrations.
+has compile/publish coverage only. Fuzz exercises chunk boundaries, hostile
+paths and compact version-vector decoding. Later phases add protocol-frame
+fuzz, simulations and product integrations.
 CI runs the full ten-minute fuzz smoke in its own required parallel job;
 build/publish jobs report `fuzzSeconds: 0` and do not substitute for that job.
 The default local `Verify.ps1` still includes fuzzing. `Run-Fuzz.ps1` runs the
