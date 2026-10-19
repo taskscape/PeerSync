@@ -546,6 +546,28 @@ the device-first primary key alone cannot serve that access pattern efficiently.
 
 ### Applying remote changes
 
+The pull coordinator consumes bounded durable work descriptors computed from
+authenticated decisions in the same transaction as needed rows. Descriptors
+cache stage, size, mtime and a version/target fingerprint, so priority queries
+do not load every signed body. Directory creation precedes files; files use
+configured size/age priority with stable path ties; file deletions precede
+deepest-first directory deletions. The applier rechecks the actual decision.
+Persist each sender's monotonically advertised target cursor before accepting
+destructive scheduled work. A received cursor must reach that target before
+its tombstones apply; missing knowledge blocks deletion. Recheck under the
+reference gate through deletion, without holding that gate across downloads.
+Index-generation reset handling belongs to the P2 transport; never silently
+lower an outstanding target for the same generation.
+Persist root/fingerprint-bound retries only while that exact needed work is
+current. Back off 10, 20, 40, 80, 160, 320 then 600 seconds, capped at 600;
+new work invalidates the old delay and removed needed rows cascade retries.
+Clock rollback must not produce an unbounded wait. Needed hashes remain
+protected while work waits. Downloads route by the source selected inside the
+applier, not a stale outer snapshot. Recover before startup scan, rescan kept
+unknown/conflict data outside mutation gates, and continue independent work
+after deferred targets. Case-clash and hierarchy coordination remain required
+parts of the complete puller, not implied by queue metadata alone.
+
 Filesystem mutation primitives open every directory component relative to a
 pinned root, reject reparse traversal and hold directory leases that disallow
 rename while the operation is active. Creates use exclusive-create semantics;
