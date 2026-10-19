@@ -427,6 +427,23 @@ or grace have changed; preserve unknown/changed/linked/locked/reparse data.
 If deletion already occurred before a new reference arrived, complete recovery
 and withhold stale local readiness for rescan/backfill. Never treat missing
 bytes as ready. Keep intent metadata bounded and recover before new sweeps.
+Incomplete capture expiry is a separate owned-temporary policy, not permission
+to discard a corrupt installed block. After at least 24 hours from its flushed
+capture proof, an unreferenced strict partial prefix may retire only after
+fully authenticated archive/history coverage and no pending application work.
+Verify the pinned root, independent proof/data objects, proof checksum and both
+native IDs. FULL-reserve an exact proof/root/data/prefix-length/prefix-hash
+retirement before deleting the guarded prefix, then remove only that verified
+proof and FULL-complete. Unknown, replaced, linked, locked, reparse, oversized
+or full-length corrupt objects remain untouched. The prefix was never a ready
+published block; its proof records creation before writing, not a completed hash.
+Ordinary capture recovery defers proofs with pending retirements. Recovery uses
+fresh references and preserves changed proof/prefix bytes: cancel a still-present
+retirement if its expected hash is needed again, or complete already missing
+data with local readiness withheld. Retain durable authority if a proof vanished
+while its owned prefix is still needed. Rebuild references after capture cleanup
+and keep normal block sweeping disabled while any unresolved capture remains.
+Share the 1,000-owned-data-operation budget across captures and completed blocks.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
