@@ -14,6 +14,7 @@ namespace PeerSync.Engine.Hashing;
 public sealed record BlockReferenceRefreshResult(Guid? SnapshotId, long References, int Batches,
     long ArchivesWithoutManifest, int CaptureDeferrals, bool WaitingForRecovery = false)
 {
+    public bool WaitingForDirectorySnapshots { get; init; }
     /// <summary>Coverage of sources known at refresh time only. This is not
     /// deletion authorization: cleanup must also establish archive/migration
     /// provenance and refresh while holding both gates through its sweep.</summary>
@@ -30,6 +31,7 @@ public sealed class BlockReferences
     private readonly byte[] device;
     private readonly DiagnosticJournal? journal;
     internal Action<string>? Checkpoint { get; init; }
+    internal int DirectoryGraphWorkLimit { get; init; } = 1000;
 
     public BlockReferences(string rootPath, FolderIndex index, FolderKeys keys, byte[] device, DiagnosticJournal? journal = null)
     {
@@ -53,6 +55,7 @@ public sealed class BlockReferences
         Guid session = Guid.NewGuid(); var watch = Stopwatch.StartNew();
         try
         {
+            if (DirectoryGraphWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory graph work limit.");
             if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } root || !root.AsSpan().SequenceEqual(tree.Identity))
                 throw new IOException("Block reference root changed or is not bound.");
             var recovery = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
@@ -64,6 +67,7 @@ public sealed class BlockReferences
             var snapshot = await index.BeginBlockReferenceSnapshotAsync(root, DateTime.UtcNow.Ticks, cancellationToken).ConfigureAwait(false);
             Checkpoint?.Invoke("begun");
             var batch = new Dictionary<string, BlockReferenceRow>(StringComparer.Ordinal); int batches = 0;
+            var graphs = new DirectorySnapshotGraph(rootPath, index, keys, device, journal); int graphBudget = DirectoryGraphWorkLimit;
             // Hints also cover unpublished/withheld/local RO rows. A stale hint
             // can conservatively retain bytes; it can never authorize deletion.
             foreach (var chunk in index.Chunks.ReadAll())
@@ -94,6 +98,8 @@ public sealed class BlockReferences
                 if (PathRules.Key(version.Path) != source.PathKey || version.Deleted || version.Type > 1
                     || !CaseConflictPolicy.SourceId(version).AsSpan().SequenceEqual(source.SourceId))
                     throw new InvalidDataException("Case reference manifest does not match its source.");
+                if (version.Type == 1 && version.ExportBody().DirectorySnapshotHash.Length == 0)
+                    throw new DirectoryGraphPending(); // Legacy metadata never proves an empty preserved subtree.
                 await AddVersionAsync(version, BlockReferenceKind.Needed).ConfigureAwait(false);
             }
             var archiveCoverage = new List<ArchiveReferenceSource>(1000);
@@ -153,10 +159,16 @@ public sealed class BlockReferences
             {
                 if (version.Deleted) return;
                 var body = version.ExportBody();
-                // Until graph coverage is wired, a new directory hash must not
-                // silently activate an incomplete snapshot and permit sweeping.
                 if (version.Type == 1 && body.DirectorySnapshotHash.Length != 0)
-                    throw new IOException("Directory snapshot reference coverage is incomplete.");
+                {
+                    var graph = await graphs.AdvanceUnderGateAsync(version.Record,
+                        (_, _, _) => throw new DirectoryGraphPending(), graphBudget, cancellationToken).ConfigureAwait(false);
+                    graphBudget -= graph.Processed;
+                    if (!graph.Complete) throw new DirectoryGraphPending();
+                    foreach (var reference in index.ReadDirectoryGraphReferences(graph.Id))
+                        await AddAsync(reference.Hash, reference.Length, kind).ConfigureAwait(false);
+                    return;
+                }
                 if (version.Type != 0) return;
                 foreach (var chunk in body.Chunks)
                     await AddAsync(chunk.Hash.ToByteArray(), checked((int)chunk.Length), kind).ConfigureAwait(false);
@@ -185,6 +197,7 @@ public sealed class BlockReferences
                 archiveCoverage.Clear(); Checkpoint?.Invoke("archive-batch");
             }
         }
+        catch (DirectoryGraphPending) { Log("block.references_wait", "directory-snapshot"); return new(null, 0, 0, 0, 0) { WaitingForDirectorySnapshots = true }; }
         catch (Exception error) { Log("block.references_failed", error.GetType().Name, error); throw; }
 
         void Log(string name, string? code = null, Exception? error = null, long? changed = null, long? deferred = null) =>
@@ -193,4 +206,5 @@ public sealed class BlockReferences
                     SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null }, ItemsChanged = changed, ItemsDeferred = deferred,
                 ElapsedMilliseconds = watch.ElapsedMilliseconds, RetryInMilliseconds = error is not null || name == "block.references_wait" ? 10000 : null });
     }
+    private sealed class DirectoryGraphPending : IOException;
 }

@@ -176,11 +176,13 @@ public sealed class DirectorySnapshotBlocksTests : IDisposable
         var before = await new BlockReferences(Root("source"), index, keys, device).RefreshAsync(Token);
         using var blocks = Store("source", index);
         var empty = await blocks.PutAsync(DirectorySnapshotNode.Entries([]), Token); await blocks.FlushAsync(Token);
-        var directory = Sign("topic", 1, empty); var view = VersionView.Open(directory, keys, device);
+        var missing = DirectorySnapshotNode.Entries([new DirectorySnapshotLink(new byte[32], 48)]);
+        var directory = Sign("topic", 1, new(missing.CalculateHash(), missing.EncodedLength)); var view = VersionView.Open(directory, keys, device);
         await index.LocalFiles.UpsertAsync([new("topic", 1, 0, view.MtimeTicks, 0, false, view.ChangedTicks, null, view.Vector, directory, null)], Token);
-        await Should.ThrowAsync<IOException>(() => new BlockReferences(Root("source"), index, keys, device).RefreshAsync(Token));
+        var pending = await new BlockReferences(Root("source"), index, keys, device).RefreshAsync(Token);
+        pending.WaitingForDirectorySnapshots.ShouldBeTrue(); pending.AllKnownSourcesCovered.ShouldBeFalse(); pending.SnapshotId.ShouldBeNull();
         index.ReadActiveBlockReferenceSnapshot()!.Id.ShouldBe(before.SnapshotId!.Value);
-        await Should.ThrowAsync<IOException>(() => new BlockRetention(Root("source"), index, keys, device) { CapacityOverride = () => 1 }.SweepAsync(Token));
+        (await new BlockRetention(Root("source"), index, keys, device) { CapacityOverride = () => 1 }.SweepAsync(Token)).WaitingForRecovery.ShouldBeTrue();
         index.ReadActiveBlockReferenceSnapshot()!.Id.ShouldBe(before.SnapshotId.Value);
         using var cache = new PublishedBlocks(Root("source"), index);
         cache.TryRead(empty.Hash, empty.EncodedLength, Token).ShouldBe(DirectorySnapshotNode.Entries([]).Encode());
