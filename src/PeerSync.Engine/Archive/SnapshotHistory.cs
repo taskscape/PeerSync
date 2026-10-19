@@ -40,7 +40,15 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
             var retained = HistoryState.Decode(new(Guid.NewGuid(), source.Path, null, marker), keys);
             if (!retained.Root.AsSpan().SequenceEqual(tree.Identity) || retained.MarkerKey != state.MarkerKey || !retained.Prepared)
                 throw new InvalidDataException("History marker does not match its source/root.");
-            if ((!publicCopy || retained.PublicCopy) && VerifyLocation(tree, retained, token)) return retained.PublicCopy;
+            if ((!publicCopy || retained.PublicCopy) && VerifyLocation(tree, retained, token)
+                && (retained.PublicCopy || index.CanRetainHistoryArchive(Protection(retained))))
+            {
+                using var parent = tree.Directory(ApplyState.Parent(retained.Destination), privatePath: !retained.PublicCopy);
+                using var file = parent.OpenFile(ApplyState.Name(retained.Destination), mutation: true); Verify(file, retained, token);
+                if (!await index.AccountExistingHistoryAsync(new(retained.MarkerKey, marker), Protection(retained), token).ConfigureAwait(false))
+                    throw new InvalidOperationException("History changed while accounting for retention.");
+                return retained.PublicCopy;
+            }
         }
         if (retainedCopy is not null && await ReuseAsync(tree, source, previous.LocalSequence, retainedCopy, publicCopy: true, token).ConfigureAwait(false)) return true;
         if (!publicCopy)
@@ -59,7 +67,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
             var state = HistoryState.Decode(intent, keys);
             if (!state.Root.AsSpan().SequenceEqual(tree.Identity)) throw new IOException("History root identity changed.");
             using var parent = tree.Directory(ApplyState.Parent(state.Destination), create: true, privatePath: !state.PublicCopy);
-            if (state.Prepared && VerifyLocation(tree, state, token))
+            if (state.Prepared && VerifyLocation(tree, state, token) && CanRetain(state))
             {
                 using var installed = parent.OpenFile(ApplyState.Name(state.Destination), mutation: true);
                 Verify(installed, state, token); await CompleteAsync(state, intent, installed, flushData: false, token).ConfigureAwait(false); return;
@@ -165,7 +173,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
         ArchiveRow? archive = state.PublicCopy || state.ExistingDestination.Length != 0 ? null
             : new(0, state.Source.Path, state.Destination, state.ArchivedTicks, state.Source.Size, state.Source.FileHash.ToArray());
         Signal("before-commit", intent.Id);
-        await index.CommitHistoryAsync(intent, new(state.MarkerKey, state.Encode()), archive, token).ConfigureAwait(false);
+        await index.CommitProtectedHistoryAsync(intent, new(state.MarkerKey, state.Encode()), archive, Protection(state), token).ConfigureAwait(false);
         Signal("committed", intent.Id);
     }
 
@@ -179,6 +187,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
                 ArchivedTicks = (clock ?? TimeProvider.System).GetUtcNow().UtcTicks, ExistingDestination = destination,
                 Prepared = true, TemporaryId = Identity(file), Temporary = ApplyState.Join(ApplyState.Parent(destination), Guid.NewGuid().ToString("N") + ".!psp") };
             if (!Matches(file, state, token)) return false;
+            if (!CanRetain(state)) return false;
             var intent = new ApplyIntent(Guid.NewGuid(), source.Path, sequence, state.Encode());
             await index.ReserveApplyAsync(intent, token).ConfigureAwait(false); Signal("reserved", intent.Id);
             await CompleteAsync(state, intent, file, flushData: false, token).ConfigureAwait(false); return true;
@@ -198,6 +207,9 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
         }
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return false; }
     }
+    private bool CanRetain(HistoryState state) => state.PublicCopy || state.ExistingDestination.Length == 0 || index.CanRetainHistoryArchive(Protection(state));
+    private static HistoryArchiveProtection Protection(HistoryState state) => new(state.Root, state.TemporaryId, state.Source.Path,
+        state.Destination, state.Source.Size, state.Source.FileHash.ToArray(), state.ArchivedTicks, state.PublicCopy);
     private static void Verify(SafeFileHandle file, HistoryState state, CancellationToken token)
     {
         if (!Identity(file).AsSpan().SequenceEqual(state.TemporaryId) || !Matches(file, state, token))

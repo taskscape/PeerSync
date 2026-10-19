@@ -26,7 +26,9 @@ public sealed partial class FolderIndex
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "INSERT INTO archive_retirements(id,archive_id,original_path,archive_path,archived_ticks,size,file_hash,root_id,file_id,reason,prepared_ticks) "
                 + "VALUES($id,$archive,$original,$path,$archived,$size,$hash,$root,$file,$reason,$prepared);";
-            BindRetirement(command, frozen); command.ExecuteNonQuery(); return true;
+            BindRetirement(command, frozen); command.ExecuteNonQuery();
+            command.CommandText = "INSERT INTO archive_retirement_sources(retirement_id,source_id) SELECT $id,source_id FROM archive_provenance WHERE archive_id=$archive AND (root_id IS NULL OR root_id=$root);";
+            if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("Archive policy source is missing."); return true;
         }, cancellationToken);
     }
 
