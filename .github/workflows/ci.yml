@@ -72,7 +72,9 @@ jobs:
       matrix:
         os: [windows-2022, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # Native flush/restart tests plus setup and evidence/runner cleanup exceeded
+    # ten minutes on Server 2025 even though every test/step passed.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
