@@ -40,6 +40,33 @@ work retires in bounded transactions after its protection window, never by
 removing visible copies. Final queue schema/capacity/ownership transitions must
 be specified with the implementation before activation.
 
+Schema 32 stores a maximum of 4096 outstanding envelopes per bound folder.
+This admits one 1000-record index page with old local, selected original/merged
+roots and the existing at-most-1000 case sources, while retaining whole-update
+backpressure when older work occupies capacity. Needed rewrite admits local,
+selected original/desired and case directory sources atomically. Source IDs bind
+exact original body/signature; snapshot/path/hint fields are immutable bindings
+apart from a successful routing-hint update. Legacy absent snapshot pairs do not
+enter this queue. References and bounded saved-history discovery reconcile older
+protected sources. Capacity leaves the enclosing index cursor/rows unchanged.
+
+Queue ordering uses a durable monotonic run ordinal, independent of frozen or
+rolled-back UTC. Read at most 32 sources/8 MiB per worker pass (one oversized
+legal envelope may progress), share 1000 graph units, and charge empty/completed
+graphs a scheduling unit. Persist 10-to-600-second retries and route failover.
+The graph verifier still owns flush-before-progress and canonical/signature
+checks. Completed graphs release their queue entries atomically after root/source
+proof; reference construction protects their graph references before release.
+
+Requested-source retention is separate from attempt ordering. Metadata-only
+queue entries expire in bounded batches after 24 hours without a new protected
+source request. Expiry never removes signed current/needed/case/history owners,
+native data or graph references. A still-required incomplete graph remains a GC
+barrier and its owner re-admits metadata work during reconciliation. New history
+roots are retained through the ordinary pre-replacement source admission;
+root-bound, cursor/byte-limited history pages recover pre-schema-32 markers.
+The public cache-fetch path may run without enabling snapshot publication.
+
 Required checks include source replacement/restart, atomic admission rollback,
 bounded continuation and starvation, incomplete-history/current/RO graphs,
 malformed/corrupt metadata, cancellation after fetch/flush, disconnect/fallback,

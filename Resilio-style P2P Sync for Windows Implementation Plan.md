@@ -786,6 +786,13 @@ with persistent retry and source fairness. Do not fetch over the network while
 holding the reference gate or weaken GC coverage to hide missing graph metadata.
 Queue admission/retirement and known-source coverage follow the metadata-fetch
 proposal; visible copies and signed records remain independent of this cache.
+Schema 32 bounds source envelopes at 4096 per folder and admits old local,
+selected original/desired and case roots with needed/index updates. Use durable
+run ordinals for fair 32-source/8-MiB/1000-graph-unit passes, persistent retry and
+24-hour unrequested metadata-work expiry. Signed source owners remain separate;
+required missing graphs continue to block GC and re-admit work. Recover older
+history through bounded rooted pages, and release completed queue entries only
+against the exact complete non-retiring graph. See the proposal for transitions.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
