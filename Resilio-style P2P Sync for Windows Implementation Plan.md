@@ -641,6 +641,12 @@ the earlier metadata-only publication rule without signing incidental native
 mtime changes. Require convergence/crash tests before enabling mutations.
 The bounded canonical node/envelope encoding, migration limits and staged
 acceptance are specified in docs/proposals/P1-directory-snapshot-protocol.md.
+Snapshot builders consume strictly increasing canonical immediate-child keys,
+form groups of 128 records, and sort only the bounded links inside each page.
+Carry full pages into bounded 128-link Branch buffers at successive levels;
+finalize partial tails bottom-up. This fixes deterministic grouping without
+retaining or globally sorting an entire directory in RAM. Per-pass persistent
+capture/traversal continuation remains required before production activation.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

@@ -50,8 +50,14 @@ All hashes cover the complete encoded child node using unkeyed BLAKE3.
 | 4 Blob | Zero links; payload length 1–1,048,576 followed by exactly those bytes. |
 
 Entries and Branch links are strictly increasing by unsigned hash bytes; duplicate
-hashes are invalid. Builders sort hashes, group by 128 and repeat until one root
-remains. A Record node preserves ordered envelope fragments; repeated chunk
+hashes are invalid. Builders consume strictly increasing canonical immediate-child
+keys and group Record links by 128, sorting hashes only within each bounded page.
+Carry full pages into 128-link Branch buffers at successive levels, then finalize
+partial tails bottom-up. Return a sole page directly; no redundant single-child
+root is added. Empty input yields the canonical empty Entries page. This keeps
+deterministic grouping without a whole-directory hash sort or RAM collection.
+Per-pass persistent continuation is still required before production activation.
+A Record node preserves ordered envelope fragments; repeated chunk
 hashes are allowed. Every fragment except the last contains exactly 1 MiB;
 the last has the remaining bytes. Child lengths include their 12-byte headers.
 
