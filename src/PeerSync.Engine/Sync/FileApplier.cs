@@ -299,7 +299,8 @@ public sealed partial class FileApplier
         var row = new LocalFileRow(version.Path, version.Type, version.Size, version.MtimeTicks,
             actual is null ? body.Attributes : (uint)actual.Value.Attributes, version.Deleted, version.ChangedTicks,
             version.Deleted || version.Type == 1 ? null : version.FileHash.ToArray(), state.Vector, version.Record,
-            actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks, ContentReady = !version.Deleted && version.Type == 0 };
+            actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks, ContentReady = !version.Deleted && version.Type == 0,
+                ChangeFileTime = actual?.Changed };
         Signal("before-commit", intent.Id);
         if (state.OriginalIsDirectory && state.Retained.Length != 0)
             await index.CommitMovedDirectoryApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);

@@ -149,6 +149,7 @@ public sealed class Scanner : IDisposable
                 && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes))
                 .GroupBy(r => Convert.ToHexString(r.FileId!), StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+            var cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             try
             {
             await Parallel.ForEachAsync(entries.Values, new ParallelOptions
@@ -173,6 +174,7 @@ public sealed class Scanner : IDisposable
                     return;
                 }
                 if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry)
+                    && (entry.Native.IsDirectory || old.ChangeFileTime == entry.Native.ChangeFileTime)
                     && (!keys.CanWrite && old.Record is null || old.Record is not null && (old.Type != 0 || old.ContentReady)))
                 { Interlocked.Increment(ref unchanged); return; }
                 try
@@ -197,7 +199,8 @@ public sealed class Scanner : IDisposable
                             { chunks.Add(new(offset, checked((int)chunk.Length), chunk.Hash.ToByteArray())); offset += chunk.Length; }
                             if (offset == entry.Native.Length && body.FileHash.Length == 32)
                             {
-                                using var current = root.OpenFile(entry.Path);
+                                using var currentParent = historyTree.Directory(ApplyState.Parent(entry.Path));
+                                using var current = currentParent.OpenReadGuard(ApplyState.Name(entry.Path));
                                 var snapshot = FileSnapshot.Read(current);
                                 if (snapshot.Length != entry.Native.Length || snapshot.LastWrite != entry.Native.LastWriteFileTime
                                     || snapshot.Changed != entry.Native.ChangeFileTime || snapshot.Attributes != entry.Native.Attributes
@@ -205,10 +208,18 @@ public sealed class Scanner : IDisposable
                                     || snapshot.IdLow != BinaryPrimitives.ReadUInt64LittleEndian(entry.Native.FileId)
                                     || snapshot.IdHigh != BinaryPrimitives.ReadUInt64LittleEndian(entry.Native.FileId.AsSpan(8)))
                                 { Defer(entry.Path, old, "changed-during-read", null); return; }
-                                var reuse = new FileHash(entry.Native.Length, new DateTime(entry.Native.MtimeTicks, DateTimeKind.Utc),
-                                    body.ChunkClass, chunks.AsReadOnly(), body.FileHash.ToByteArray());
-                                updates.Add(CreateVersion(entry, old, reuse, vector));
-                                Interlocked.Increment(ref renamed); return;
+                                // Rename itself changes the native stamp, so
+                                // identity/mtime cannot distinguish a renamed
+                                // edit. Reuse the old partition only after
+                                // checking stable bytes under the read guard.
+                                if (GuardedFile.Hash(current, token).AsSpan().SequenceEqual(body.FileHash.Span))
+                                {
+                                    if (FileSnapshot.Read(current) != snapshot) { Defer(entry.Path, old, "changed-during-read", null); return; }
+                                    var reuse = new FileHash(entry.Native.Length, new DateTime(entry.Native.MtimeTicks, DateTimeKind.Utc),
+                                        body.ChunkClass, chunks.AsReadOnly(), body.FileHash.ToByteArray());
+                                    updates.Add(CreateVersion(entry, old, reuse, vector));
+                                    Interlocked.Increment(ref renamed); return;
+                                }
                             }
                         }
                     }
@@ -216,12 +227,13 @@ public sealed class Scanner : IDisposable
                         capture: keys.CanWrite ? (bytes, hash) => blocks.Put(bytes, hash, token) : null).ConfigureAwait(false);
                     Interlocked.Increment(ref hashed);
                     if (result is null || result.Length != entry.Native.Length || result.MtimeUtc.Ticks != entry.Native.MtimeTicks
+                        || result.ChangeFileTime != entry.Native.ChangeFileTime
                         || result.Attributes != entry.Native.Attributes || result.Volume != root.Volume
                         || !entry.Native.FileId.AsSpan().SequenceEqual(result.FileId))
                     { Defer(entry.Path, old, "changed-during-read", null); return; }
                     // Legacy readiness backfill is not a new user edit. Preserve
                     // exact signed bytes/vector while allocating a fresh publication sequence.
-                    if (old is { Flags: LocalFileState.None, Record: not null, ContentReady: false, FileHash: not null }
+                    if (old is { Flags: LocalFileState.None, Record: not null, FileHash: not null }
                         && MetadataEqual(old, entry) && old.FileHash.AsSpan().SequenceEqual(result.WholeHash))
                     {
                         // Preserve the authenticated original partition as well
@@ -231,13 +243,15 @@ public sealed class Scanner : IDisposable
                         using var parent = historyTree.Directory(ApplyState.Parent(entry.Path));
                         using var file = parent.OpenReadGuard(ApplyState.Name(entry.Path));
                         var snapshot = FileSnapshot.Read(file);
-                        if (snapshot.Length != result.Length || !BlockCaptureProof.Identity(file).AsSpan().SequenceEqual(result.FileId)
+                        if (snapshot.Length != result.Length || snapshot.Changed != result.ChangeFileTime || snapshot.Attributes != result.Attributes
+                            || snapshot.LastWrite != entry.Native.LastWriteFileTime || !BlockCaptureProof.Identity(file).AsSpan().SequenceEqual(result.FileId)
                             || !GuardedFile.Hash(file, token).AsSpan().SequenceEqual(version.FileHash))
                         { Defer(entry.Path, old, "changed-during-read", null); return; }
-                        blocks.CaptureFile(file, version, token);
+                        if (!old.ContentReady) blocks.CaptureFile(file, version, token);
                         var chunks = new List<LocalChunk>(); long offset = 0;
                         foreach (var chunk in version.ExportBody().Chunks) { chunks.Add(new(offset, checked((int)chunk.Length), chunk.Hash.ToByteArray())); offset += chunk.Length; }
-                        updates.Add(old with { ContentReady = true, IndexedChunks = chunks });
+                        if (old.ContentReady) cacheUpdates.Add(new(old.Path, old.LocalSequence, old.FileId!, snapshot.Changed));
+                        else updates.Add(old with { ContentReady = true, IndexedChunks = chunks, ChangeFileTime = snapshot.Changed });
                     }
                     else updates.Add(CreateVersion(entry, old, result));
                 }
@@ -307,6 +321,8 @@ public sealed class Scanner : IDisposable
             // before committing the newly collected local records.
             using (var currentRoot = new NativeRoot(rootPath))
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity)) throw new IOException("Sync root changed during history retention.");
+            foreach (var cacheBatch in cacheUpdates.Chunk(1000))
+                await index.UpdateNativeChangeTimesAsync(cacheBatch, cancellationToken).ConfigureAwait(false);
             int written = await index.LocalFiles.UpsertAsync(ordered, cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
@@ -350,7 +366,7 @@ public sealed class Scanner : IDisposable
     private LocalFileRow Metadata(WalkEntry entry, LocalFileRow? old, LocalFileState flags) =>
         new(entry.Path, entry.Unsyncable ? 2u : entry.Native.IsDirectory ? 1u : 0u, entry.Native.Length,
             entry.Native.MtimeTicks, (uint)entry.Native.Attributes, false, clock.GetUtcNow().UtcTicks,
-            null, old?.Vector ?? EmptyVector, null, entry.Native.FileId, Flags: flags);
+            null, old?.Vector ?? EmptyVector, null, entry.Native.FileId, Flags: flags) { ChangeFileTime = entry.Native.ChangeFileTime };
 
     private Core.Sync.SignedRecord Sign(LocalFileRow row, uint chunkClass, IReadOnlyList<ChunkInfo> chunks)
     {

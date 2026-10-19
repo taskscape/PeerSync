@@ -15,6 +15,7 @@ public sealed record FileHash(long Length, DateTime MtimeUtc, uint ChunkClass,
     public FileAttributes Attributes { get; init; }
     public byte[]? FileId { get; init; }
     public ulong Volume { get; init; }
+    public long ChangeFileTime { get; init; }
 }
 public readonly record struct FileHashProgress(long BytesHashed, long ExpectedLength, int ChunksHashed);
 
@@ -88,7 +89,7 @@ public static class FileHasher
         BinaryPrimitives.WriteUInt64LittleEndian(identity.AsSpan(8), before.IdHigh);
         return new(total, DateTime.FromFileTimeUtc(before.LastWrite), chunkClass,
             chunks.AsReadOnly(), finalDigest.AsSpan().ToArray())
-        { Attributes = before.Attributes, FileId = identity, Volume = before.Volume };
+        { Attributes = before.Attributes, FileId = identity, Volume = before.Volume, ChangeFileTime = before.Changed };
     }
 
     // Never chase a continuously growing file to EOF. The underlying FileStream

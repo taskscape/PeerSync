@@ -1248,6 +1248,7 @@ PRAGMA user_version = 1;
 
 - [ ] **P1.4.4 Detect edits with restored mtime** (`PeerSync.Engine/Scanning/`, `PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
   - Done when: a same-length edit which keeps file identity, attributes and original last-write time is detected and preserves the previously published snapshot. Native change metadata participates in the unchanged fast path, including restart/upgrade and own-write completion, without creating versions for directory child changes or metadata-only cache refresh. Native regression, signed RW/RO backfill, migration, applied-file no-loop checks and the real unchanged 100k-file benchmark pass.
+  - Implemented locally with [verification](docs/verification/P1.4.4-native-change-stamp-2026-10-19.md): the prior implementation fails the exact native regression; five native and one Storage additions pass with all 602 canonical cases plus native/probe/publishing in 109.45 s, exit 0 (separate CI fuzz skipped locally). The unchanged 100k-file walk passes in 0.87 s. CI/merge pending while GitHub billing rejects job startup; task stays open.
 
 ### 7.8 Code: NTFS file id (P1.4.1)
 

@@ -94,6 +94,70 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task SameIdentityAndLengthEditWithRestoredMtimeStillPublishesChangedBytesAndRetainsPriorVersion()
+    {
+        await Write("file", "first"); await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device); await scanner.ScanAsync(Token);
+        var before = index.LocalFiles.Find("file")!; string path = Path.Combine(Root, "file");
+        File.WriteAllText(path, "other"); File.SetLastWriteTimeUtc(path, new(before.MtimeTicks, DateTimeKind.Utc));
+        File.SetAttributes(path, (FileAttributes)before.Attributes);
+        var result = await scanner.ScanAsync(Token); result.Hashed.ShouldBe(1); result.Updated.ShouldBe(1);
+        var after = index.LocalFiles.Find("file")!; after.FileId.ShouldBe(before.FileId); after.FileHash.ShouldNotBe(before.FileHash);
+        after.MtimeTicks.ShouldBe(before.MtimeTicks); after.Vector.Values.Single().ShouldBe(2UL);
+        var archive = index.Archive.ReadAll().Single(); File.ReadAllText(Path.Combine(Root, archive.ArchivePath)).ShouldBe("first");
+        (await scanner.ScanAsync(Token)).Hashed.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task RenameAfterAnEditWithRestoredMtimeCannotReuseStalePublishedChunks()
+    {
+        await Write("before", "first"); await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device); await scanner.ScanAsync(Token); var before = index.LocalFiles.Find("before")!;
+        string source = Path.Combine(Root, "before"), target = Path.Combine(Root, "after");
+        File.WriteAllText(source, "other"); File.SetLastWriteTimeUtc(source, new(before.MtimeTicks, DateTimeKind.Utc));
+        File.SetAttributes(source, (FileAttributes)before.Attributes); File.Move(source, target);
+        var result = await scanner.ScanAsync(Token); result.Hashed.ShouldBe(1); result.Renamed.ShouldBe(0); result.Deleted.ShouldBe(1);
+        index.LocalFiles.Find("after")!.FileHash.ShouldBe(Blake3.Hasher.Hash("other"u8).AsSpan().ToArray());
+        File.ReadAllText(Path.Combine(Root, index.Archive.ReadAll().Single().ArchivePath)).ShouldBe("first");
+    }
+
+    [Fact]
+    public async Task UnsynchronizedCreationTimeChangeRefreshesCacheWithoutPublishingAnotherVersion()
+    {
+        await Write("file", "same bytes"); await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device); await scanner.ScanAsync(Token); var before = index.LocalFiles.Find("file")!;
+        string path = Path.Combine(Root, "file"); File.SetCreationTimeUtc(path, DateTime.UtcNow.AddDays(-1));
+        var result = await scanner.ScanAsync(Token); result.Hashed.ShouldBe(1); result.Updated.ShouldBe(0);
+        var after = index.LocalFiles.Find("file")!; after.ChangeFileTime.ShouldNotBe(before.ChangeFileTime); after.LocalSequence.ShouldBe(before.LocalSequence);
+        after.Record!.Body.ToArray().ShouldBe(before.Record!.Body.ToArray()); after.Record.Signature.ToArray().ShouldBe(before.Record.Signature.ToArray());
+        after.Vector.ShouldBe(before.Vector); index.Archive.Count().ShouldBe(0); (await scanner.ScanAsync(Token)).Hashed.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VersionEightUpgradeRefreshesSignedRwAndRoCachesWithoutNewPublication(bool readOnly)
+    {
+        await Write("file", "upgrade cache bytes"); LocalFileRow before;
+        await using (var index = await FolderIndex.OpenAsync(Database, Token))
+        {
+            using var scanner = new Scanner(Root, index, keys, Device); await scanner.ScanAsync(Token); before = index.LocalFiles.Find("file")!;
+        }
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()))
+        {
+            connection.Open(); using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE local_files DROP COLUMN change_filetime; PRAGMA user_version=8;"; command.ExecuteNonQuery();
+        }
+        await using var migrated = await FolderIndex.OpenAsync(Database, Token); migrated.LocalFiles.Find("file")!.ChangeFileTime.ShouldBeNull();
+        migrated.LocalFiles.Find("file")!.ContentReady.ShouldBeTrue(); using var ro = FolderKeys.FromText(keys.ExportReadOnlyText());
+        using var upgradedScanner = new Scanner(Root, migrated, readOnly ? ro : keys, Device); var result = await upgradedScanner.ScanAsync(Token);
+        result.Hashed.ShouldBe(1); result.Updated.ShouldBe(0); result.Problems.ShouldBeEmpty();
+        var after = migrated.LocalFiles.Find("file")!; after.ChangeFileTime.ShouldNotBeNull(); after.LocalSequence.ShouldBe(before.LocalSequence);
+        after.Record!.Body.ToArray().ShouldBe(before.Record!.Body.ToArray()); after.Record.Signature.ToArray().ShouldBe(before.Record.Signature.ToArray());
+        after.Vector.ShouldBe(before.Vector); (await upgradedScanner.ScanAsync(Token)).Hashed.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task InternalAndIgnoredTreesArePrunedAndReparsePointsAreRecordedWithoutFollowing()
     {
         await Write(".psp/private", "private"); await Write("file.!psp", "temporary");

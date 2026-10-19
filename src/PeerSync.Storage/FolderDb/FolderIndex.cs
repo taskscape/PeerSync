@@ -34,7 +34,7 @@ public sealed partial class FolderIndex : IAsyncDisposable
     public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         var migrations = new List<DbMigration>();
-        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql", "0005_content_ready.sql", "0006_archive_version.sql", "0007_block_objects.sql", "0008_archive_retirements.sql" })
+        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql", "0005_content_ready.sql", "0006_archive_version.sql", "0007_block_objects.sql", "0008_archive_retirements.sql", "0009_native_change_time.sql" })
         {
             using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations." + file)
                 ?? throw new InvalidOperationException("Missing folder schema resource.");
