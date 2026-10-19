@@ -241,7 +241,7 @@ public sealed partial class FileApplier
                     Signal("recover-restored", intent.Id);
                 }
             }
-            else await DeferAsync(tree, state, intent, null, cancellationToken).ConfigureAwait(false);
+            else await DeferAsync(tree, state, intent, null, cancellationToken, temporary).ConfigureAwait(false);
             recovered++; Signal("recover-complete", intent.Id);
         }
         return recovered;

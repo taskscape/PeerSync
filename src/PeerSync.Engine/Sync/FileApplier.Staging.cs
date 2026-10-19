@@ -24,7 +24,13 @@ public sealed partial class FileApplier
                 bool matches = HasIdentity(handle, row.FileId) && ((snapshot.Attributes & FileAttributes.Directory) != 0) == directory
                     && snapshot.Length == row.Length && snapshot.Changed == row.ChangeFileTime
                     && (directory || PublishedBlocks.IsIndependent(handle) && GuardedFile.Hash(handle, cancellationToken).AsSpan().SequenceEqual(row.ContentHash));
-                if (matches) { temporary = row.TemporaryPath; identity = row.FileId.ToArray(); transferred = true; return handle; }
+                if (matches)
+                {
+                    // The catalog retains its original spelling/age. A new
+                    // strict intent must use the current target parent spelling.
+                    temporary = ApplyState.Join(ApplyState.Parent(path), ApplyState.Name(row.TemporaryPath));
+                    identity = row.FileId.ToArray(); transferred = true; return handle;
+                }
                 Signal("staging-reuse-rejected", session);
             }
             catch (Exception error) when (error is IOException or Win32Exception) { StagingProbeFailed("staging-reuse-skipped", session, error); }
