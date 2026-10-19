@@ -23,6 +23,31 @@ public sealed class DirectorySnapshotGraphTests : IDisposable
     private readonly byte[] device = [1, .. new byte[31]];
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PendingAndCompletedUnpublishedCaptureDraftsBlockSweepingUntilSafeExpiry(bool completed)
+    {
+        await using var index = await Bind("source"); using var blocks = Store("source", index);
+        var builder = new BlockReferences(Root("source"), index, keys, device); var before = await builder.RefreshAsync(Token);
+        var root = await blocks.CaptureDirectoryAsync("topic", [], Token);
+        byte[] physical = index.Meta.Find("_root-identity")!.Value!;
+        byte[] initial = new DirectorySnapshotBuilder(static (_, _) => throw new InvalidOperationException()).ExportCheckpoint();
+        var draft = await index.BeginDirectoryCaptureAsync("topic", physical, new byte[16], new byte[32], 0, initial, Token);
+        if (completed) await index.AdvanceDirectoryCaptureAsync(draft, 0, null, null, root.Hash, root.EncodedLength, Token);
+        var pending = await builder.RefreshAsync(Token); pending.WaitingForDirectorySnapshots.ShouldBeTrue(); pending.AllKnownSourcesCovered.ShouldBeFalse();
+        index.ReadActiveBlockReferenceSnapshot()!.Id.ShouldBe(before.SnapshotId!.Value);
+        (await new BlockRetention(Root("source"), index, keys, device) { CapacityOverride = () => 1 }.SweepAsync(Token)).WaitingForRecovery.ShouldBeTrue();
+        index.HasDirectoryCaptures().ShouldBeTrue(); index.ReadBlockDeletionIntents().ShouldBeEmpty();
+        using var cache = new PublishedBlocks(Root("source"), index); cache.TryRead(root.Hash, root.EncodedLength, Token).ShouldNotBeNull();
+        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database("source"), Pooling = false }.ToString()))
+        {
+            connection.Open(); using var command = connection.CreateCommand(); command.CommandText = "UPDATE directory_captures SET last_used_ticks=1;"; command.ExecuteNonQuery();
+        }
+        (await builder.RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue(); index.HasDirectoryCaptures().ShouldBeFalse();
+        cache.TryRead(root.Hash, root.EncodedLength, Token).ShouldNotBeNull("draft expiry only retires metadata");
+    }
+
     [Fact]
     public async Task DiagnosticsExposeProgressAndFailureWithoutPrivatePathsHashesOrSignedBodies()
     {
