@@ -759,6 +759,14 @@ Completed attempts wait 24 hours after completion; superseded-root members wait
 24 hours after their last touch. Remove a superseded or aged completed progress
 row only after its members are gone. This metadata-only cleanup never releases
 original source/graph retention or mutates visible copies.
+Reconstruct received signed directory roots through explicitly tagged private
+work. Such work retains the exact received template and can only release it
+unchanged after the bounded captured root matches; it never signs an absent
+child set. Reconstruction holds GC and parent snapshot publication but permits
+ordinary incoming mutations so missing children can arrive. Scanner observations
+refresh its native child-key inventory and changed input epochs wake its retry.
+Keep ordinary publication barriers and final case completion guards intact.
+Enable production staging only after incoming/subtree convergence tests pass.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
