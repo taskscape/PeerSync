@@ -437,6 +437,13 @@ retirement before deleting the guarded prefix, then remove only that verified
 proof and FULL-complete. Unknown, replaced, linked, locked, reparse, oversized
 or full-length corrupt objects remain untouched. The prefix was never a ready
 published block; its proof records creation before writing, not a completed hash.
+An expected hash may remain referenced when a duplicate complete block already
+exists. Permit prefix retirement in that case only with an independently
+verified, durably cataloged root/hash/length/file-ID replacement held under a
+read guard through FULL completion. Bind its ID in the retirement. Revalidate
+it on restart; a lost replacement cancels present-prefix retirement, or
+withholds readiness if prefix deletion already occurred. Do not let obsolete
+duplicate prefixes block all later maintenance indefinitely.
 Ordinary capture recovery defers proofs with pending retirements. Recovery uses
 fresh references and preserves changed proof/prefix bytes: cancel a still-present
 retirement if its expected hash is needed again, or complete already missing
