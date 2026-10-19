@@ -559,6 +559,24 @@ seconds without peer names, identifiers, nonces, keys or file data. The UTC Hell
 and decision model are P1 foundations; actual index admission and rendered UI
 remain required parts of P1.5.5 before its checkbox can close.
 
+A valid authenticated Hello exchanges both UTC samples even if the receiver's
+clock guard already blocks index exchange. Each endpoint then evaluates its
+own signed offset (peer UTC minus local UTC); the remote endpoint's exception
+must not masquerade as the caller's local clock measurement. Index and block
+operations retain their existing guards. Hello still validates protocol,
+identity and nonce before updating clock state.
+
+The control status source reads immutable session-bound snapshots rather than
+reconstructing state from logs. Keep the authenticated peer identity and local
+session correlation ID separate from untrusted Hello fields. On disconnect,
+admission resets immediately, but a closed session's last skew/invalid reason
+and numeric offset remain available for display. A fresh valid session clears
+the corresponding closed-peer warning. Bound recent closed history to 64
+peers, bound each snapshot to 1,000 rows and signal truncation explicitly.
+Active sessions remain host-owned and must be drained. Display snapshots never
+grant admission. Typed source/lifecycle checks precede control-pipe and rendered
+UI wiring; those remain mandatory before P1.5.5c or its parent can close.
+
 An authenticated peer-bound index facade supplies the source identity from its
 transport context, never from Hello. It checks clock admission before receiving
 data, after acquiring the reference gate, and in the writer transaction both
@@ -710,6 +728,12 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    unchanged cataloged objects; changed/foreign objects are preserved. Legacy
    unaged pointers remain compatible for verified reuse but never authorize age
    cleanup until adopted under a verified apply/recovery context.
+   Every recovery/defer branch that already owns the temporary handle must
+   pass that handle into fingerprint/protection capture; an exclusive reopen
+   would fail sharing and must not downgrade edited prepared bytes to legacy
+   reuse. Reusing a cataloged case-alias sibling keeps its native identity and
+   catalog spelling, but records the new intent's temporary path under the
+   current target-parent spelling so the strict recovery format remains valid.
    Expiry requires at least 24 hours, no needed work for the target and no active
    apply. Stream verification outside the reference gate, then recheck under
    filesystem/reference gates before a FULL deletion intent and native removal.
@@ -1006,6 +1030,41 @@ gRPC over the named pipe `\\.\pipe\PeerSync.Control`. The service hosts it with 
 
 The app shows a "Service not running" banner with a Start button (through an elevated helper) when the pipe is unreachable, and reconnects automatically.
 
+The clock-status slice implements GetStatus plus status-bearing WatchEvents
+before the remaining control operations. Frames carry a service-instance ID,
+monotonic sequence, explicit production-sync availability, folder/device/session
+identities, connection state, clock reason and optional signed offset ticks.
+Bound each response to 1,000 clock rows and 256 KiB, signal truncation, and bound
+concurrent event subscriptions. Slow consumers await transport backpressure;
+cancellation releases subscriptions. The source is the runtime's actual
+TransportFolder snapshots; an empty runtime must not invent peers or imply
+production sync is available.
+
+Only the server identity receives CreateNewInstance on the pipe; Administrators
+and the installed PeerSync Users group receive client read/write rights. Inspect
+the caller's identified Windows token for every RPC. The client verifies the
+pipe owner against the configured service account and the kernel-reported
+pipe-server PID against the running SCM service PID. Owner SID alone cannot
+authenticate an extra server instance sharing the pipe descriptor. Reject an
+identity mismatch before sending RPC data. Fixture endpoints may supply their
+known process/SID directly; the production app resolves them through SCM and
+exposes no arbitrary endpoint/owner override.
+
+The app initially queries status, then consumes WatchEvents and reconnects after
+disconnect. Bind updates to the current client generation and service instance,
+ignore stale sequences, and never preserve an old success after a connection
+failure. Render clock reasons and numeric minutes from typed status, including
+missing/invalid samples and disconnected failures, and clear warnings on fresh
+accepted state. Test actual local named-pipe identity, stream lifecycle and
+runtime snapshots, then render the real WPF controls and retain images for
+inspection. Service installation/configuration, full production engine hosting
+and the rest of the control API remain their required later tasks.
+
+The named-pipe configuration follows the installed .NET 10/Grpc 2.84 packages
+and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0),
+including separate server-instance and client rights. Kernel PID verification
+also protects the local client from additional-instance impersonation.
+
 ## Central rendezvous server
 
 One small ASP.NET Core service, `PeerSync.Rendezvous`, runs the tracker and the relay on the existing taskscape.com server. It is a Windows service listening on port 99, TCP and UDP, while the website keeps ports 80 and 443. It keeps only in-memory sightings ("device D, holding folder F, is reachable at these addresses"), and stores no files, keys or folder names. Without it, LAN and predefined-host sync keep working, as Resilio does with its tracker turned off.
@@ -1056,7 +1115,7 @@ One .NET 10 solution with eleven projects. References only point down the stack,
 | `PeerSync.Engine` | Class library | Scanner, watcher, hasher, puller, conflict resolver, archive, transfer scheduler |
 | `PeerSync.Net` | Class library | QUIC and TCP transports, handshake, peer sessions, LAN discovery, tracker and relay clients, NAT mapping, the in-memory transport |
 | `PeerSync.Service` | Worker Service | Windows service host, hosted services, control API server |
-| `PeerSync.Control.Contracts` | Class library | `control.proto` and the generated client, the only thing the UI references |
+| `PeerSync.Control.Contracts` | Class library | `control.proto`, generated RPC stubs, typed status mapping and shared authenticated local-pipe client/SCM endpoint resolver; the UI/CLI control dependency, with no Engine or Storage dependency |
 | `PeerSync.App` | WPF app | UI, tray icon, folder ACL grant |
 | `PeerSync.Rendezvous` | ASP.NET Core | Tracker and relay, Windows service on port 99 |
 | `PeerSync.Cli` | Console app | `psp.exe status, add, join, peers, dump-index`, probe for scripting and debugging |

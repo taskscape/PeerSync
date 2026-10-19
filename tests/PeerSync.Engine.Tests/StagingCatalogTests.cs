@@ -146,6 +146,70 @@ public sealed class StagingCatalogTests : IDisposable
         index.Archive.ReadAll().Any(row=>File.ReadAllText(Disk(row.ArchivePath))=="concurrent target").ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentTargetRecoveryProtectsEditedPreparedStagingThroughItsHeldHandle(bool directory)
+    {
+        if(directory) File.WriteAllBytes(Disk("file"),Old);
+        await using var index=await Prepare();
+        if(directory)
+        {
+            long now=DateTime.UtcNow.AddMinutes(1).Ticks;
+            var body=new FileRecordBody { Path="file",Type=1,MtimeTicks=now,ChangedTicks=now,ModifiedBy=ByteString.CopyFrom(Peer) };
+            foreach(var pair in index.LocalFiles.Find("file")!.Vector) body.Vv.Add(new VvEntry { Device=pair.Key,Counter=pair.Value });
+            body.Vv.Add(new VvEntry { Device=2,Counter=1 });
+            await new NeededSet(index,keys,Own).ApplyIndexUpdateAsync(Peer,0,1,[SignedRecordFactory.Create(body,keys,1)],Token);
+        }
+        else await Receive(index);
+        string interruption=directory?"archived":"prepared";
+        var interrupted=new FileApplier(Root,index,keys,Own) { Checkpoint=stage=>{ if(stage==interruption) throw new IOException("injected"); } };
+        await Should.ThrowAsync<IOException>(()=>interrupted.ApplyAsync("file",Fetch,Token));
+        var state=ApplyState.Decode(index.ReadApplyIntents().Single(),keys);
+        if(directory) File.WriteAllText(Path.Combine(Disk(state.Temporary),"child"),"edited prepared directory");
+        else WriteTemporary(state.Temporary,Old);
+        File.WriteAllText(Disk("file"),"concurrent target");
+        await new FileApplier(Root,index,keys,Own).RecoverAsync(Token);
+        index.ReadApplyIntents().ShouldBeEmpty();
+        index.IsCatalogedStaging(state.Root,state.TemporaryId,state.Temporary).ShouldBeTrue();
+        index.ReadReusableStaging(state.Root,"file",directory).ShouldBeEmpty();
+        File.ReadAllText(Disk("file")).ShouldBe("concurrent target");
+        using(var scanner=new Scanner(Root,index,keys,Own)) await scanner.ScanAsync(Token);
+        (await new FileApplier(Root,index,keys,Own).ApplyAsync("file",Fetch,Token)).ShouldBe(FileApplyOutcome.Applied);
+        if(directory) File.ReadAllText(Path.Combine(Disk(state.Temporary),"child")).ShouldBe("edited prepared directory");
+        else File.ReadAllBytes(Disk(state.Temporary)).ShouldBe(Old);
+    }
+
+    [Fact]
+    public async Task InterruptedCatalogReuseUnderParentCaseAliasHasDecodableIntentAndPreservesAge()
+    {
+        Directory.CreateDirectory(Disk("folder")); await using var index=await Prepare(); var clock=new StageClock();
+        await ReceiveAlias("folder/file",1); using var cancel=CancellationTokenSource.CreateLinkedTokenSource(Token);
+        await Should.ThrowAsync<OperationCanceledException>(()=>new FileApplier(Root,index,keys,Own,clock:clock).ApplyAsync("folder/file",(_,_,_)=>
+        { cancel.Cancel(); return ValueTask.FromResult<ReadOnlyMemory<byte>>(New); },cancel.Token));
+        var original=ApplyState.Decode(index.ReadApplyIntents().Single(),keys); WriteTemporary(original.Temporary,New);
+        await new FileApplier(Root,index,keys,Own,clock:clock).RecoverAsync(Token);
+        var proof=index.ReadReusableStaging(original.Root,"folder/file",false).Single(); clock.Advance(TimeSpan.FromHours(2));
+        await ReceiveAlias("FOLDER/file",2);
+        var interrupted=new FileApplier(Root,index,keys,Own,clock:clock) { Checkpoint=stage=>{ if(stage=="staging") throw new IOException("injected"); } };
+        await Should.ThrowAsync<IOException>(()=>interrupted.ApplyAsync("FOLDER/file",(_,_,_)=>throw new InvalidOperationException("Use staging"),Token));
+        var intent=ApplyState.Decode(index.ReadApplyIntents().Single(),keys); intent.TemporaryId.ShouldBe(proof.FileId);
+        ApplyState.Parent(intent.Temporary).ShouldBe("FOLDER");
+        await new FileApplier(Root,index,keys,Own,clock:clock).RecoverAsync(Token);
+        var after=index.ReadReusableStaging(original.Root,"FOLDER/file",false).Single(); after.Id.ShouldBe(proof.Id); after.ParkedTicks.ShouldBe(proof.ParkedTicks);
+        after.TemporaryPath.ShouldBe(proof.TemporaryPath);
+        (await new FileApplier(Root,index,keys,Own,clock:clock).ApplyAsync("FOLDER/file",(_,_,_)=>throw new InvalidOperationException("Use staging"),Token)).ShouldBe(FileApplyOutcome.Applied);
+        File.ReadAllBytes(Disk("folder/file")).ShouldBe(New);
+
+        async Task ReceiveAlias(string path,ulong sequence)
+        {
+            long now=DateTime.UtcNow.AddMinutes(1).Ticks;
+            var body=new FileRecordBody { Path=path,Size=(ulong)New.Length,MtimeTicks=now,ChangedTicks=now,ModifiedBy=ByteString.CopyFrom(Peer),FileHash=ByteString.CopyFrom(Hash(New)) };
+            body.Vv.Add(new VvEntry { Device=2,Counter=sequence }); body.Chunks.Add(new Chunk { Hash=body.FileHash,Length=(uint)New.Length });
+            await new NeededSet(index,keys,Own).ApplyIndexUpdateAsync(Peer,(long)sequence-1,(long)sequence,[SignedRecordFactory.Create(body,keys,sequence)],Token);
+        }
+    }
+
     private async Task<FolderIndex> Prepare()
     {
         var index=await FolderIndex.OpenAsync(Database,Token); using var scanner=new Scanner(Root,index,keys,Own); await scanner.ScanAsync(Token); return index;

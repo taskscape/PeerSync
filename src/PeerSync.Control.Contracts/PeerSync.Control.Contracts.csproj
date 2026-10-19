@@ -1,1 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
+    <Protobuf Include="control.proto" GrpcServices="Both" />
+  </ItemGroup>
+</Project>

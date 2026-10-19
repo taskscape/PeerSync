@@ -1,0 +1,39 @@
+syntax = "proto3";
+package peersync.control.v1;
+option csharp_namespace = "PeerSync.Control.Contracts.V1";
+
+service PeerSyncControl {
+  rpc GetStatus(StatusRequest) returns (ServiceStatus);
+  rpc WatchEvents(StatusRequest) returns (stream ControlEvent);
+}
+
+message StatusRequest {}
+message ControlEvent { ServiceStatus status = 1; }
+
+message ServiceStatus {
+  // Canonical Guid N format. Sequence is scoped to this service instance.
+  string instance_id = 1;
+  uint64 sequence = 2;
+  bool production_sync_available = 3;
+  repeated PeerSessionClockStatus clocks = 4;
+  bool clock_status_truncated = 5;
+}
+
+enum ClockState {
+  CLOCK_STATE_UNSPECIFIED = 0;
+  CLOCK_STATE_AWAITING_HELLO = 1;
+  CLOCK_STATE_ACCEPTED = 2;
+  CLOCK_STATE_SKEWED = 3;
+  CLOCK_STATE_INVALID_TIMESTAMP = 4;
+  CLOCK_STATE_INVALID_ELAPSED = 5;
+}
+
+message PeerSessionClockStatus {
+  bytes folder_id = 1;
+  bytes device_id = 2;
+  string session_id = 3;
+  ClockState state = 4;
+  // Present for an evaluated accepted/skewed sample, including exact zero.
+  optional sint64 offset_ticks = 5;
+  bool is_connected = 6;
+}
