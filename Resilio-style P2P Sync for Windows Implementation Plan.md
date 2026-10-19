@@ -1048,6 +1048,15 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    whole directory objects without recursive traversal/deletion. In the durable
    completion transaction, withhold stale live descendant metadata and remove
    descendant needed work beneath a moved directory until a normal rescan.
+   A currently installed, signed live regular-file ancestor also suspends live
+   descendant pull work, including late index pages. Retain remote envelopes and
+   case obligations; never manufacture descendant tombstones from the parent.
+   Resolve the nearest such ancestor in the same needed-rewrite transaction and
+   authenticate it in the engine. Fresh file completion withdraws live descendant
+   work atomically, retaining deletion stages. When application changes an absent
+   or regular-file parent into a live directory, rebuild needed work after the
+   required scan so retained child versions can resume normal conflict selection.
+   Incoming snapshot equality/rebase requirements remain independent.
 
 ### Archive, ignore rules and special files
 
