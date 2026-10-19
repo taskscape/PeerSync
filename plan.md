@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | Begin reproducible real-engine property scenarios on 3–7 NTFS roots over the injected in-memory fabric. Record published payloads, heal and compare visible bytes, and require every version in current/archive/conflict bytes rather than private cache alone. Save replay cases/traces. Initial flat-path smoke is separate from full scenario coverage, 1,000 CI cases and five-day/100k-file gate evidence. | Testing strategy: property harness |
 | 2026-10-19 | Start transport-backed engine simulation: per-connection identity-bound handlers, frozen bounded messages, independently scheduled requests and deterministic directional delay/drop/partition delivery. Drain cancellation before handler disposal. Route connected index/chunk exchanges through IPeerTransport and retain symmetric clock admission; trusted fabric identity does not prove real TLS/folder authentication. | Testing strategy: in-memory transport |
 | 2026-10-19 | Ordered pull scheduling: transactionally cache authenticated work descriptors/fingerprints, persist monotonic sender-range targets and exact-work root-bound backoff, and query bounded priority work without loading every envelope. Guard destructive range rechecks, route downloads from the applier's actual winner, recover before scans and rescan preserved data outside mutation gates. Case/hierarchy coordination and production simulations remain required parent integration. | Applying remote changes |
 | 2026-10-19 | Bounded historical metadata cleanup: FULL retiring-manifest state hides partial drains and resumes in batches of at most 1,000 mutations under fresh covered references/both gates. Reused history copies durably recapture exact signed chunks before renewed holds. Preserve attached/pending/foreign sources; drain detached released metadata and only aged unlinked completed witnesses. Do not change byte references, orphan clocks, needed work or deletion journals; report backlog for retries. | Detecting local changes: published block ownership |
@@ -1611,8 +1612,10 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
   - [ ] **P1.6.1b Connected engine integration** [WIP @codex 2026-10-19]
     - Done when: real folder indexes, Hello clocks, bounded range/page synchronization and verified chunk serving/pulling use IPeerTransport, with actual file transfer, partition/reconnect and skew-blocking tests. No raw remote callback bypass in this connected path. Parent remains open until all connected engine integration is proven.
   - Local implementation and 955-case canonical verification pass; no merge/CI claim yet. See `docs/verification/P1.6.1-in-memory-engine-transport-2026-10-19.md`. Actual TLS/folder authentication, rendered clock UI and the separate multi-node property gate remain open.
-- [ ] **P1.6.2 Multi-node property tests** (`tests/PeerSync.Simulation`)
+- [ ] **P1.6.2 Multi-node property tests** (`tests/PeerSync.Simulation`) [WIP @codex 2026-10-19]
   - Done when: `CsCheck` generates random edits, renames, deletes, partitions and heals on 3 to 7 nodes, each with a temp folder. After the network heals, all trees are identical. Every overwritten version exists in some node's archive or as a conflict copy. 1,000 seeds run in CI, and failing seeds are saved as regression tests.
+  - [ ] **P1.6.2a Reproducible real-engine scenarios and loss oracle** [WIP @codex 2026-10-19]
+    - Done when: generated/replayed operation traces use actual engine folders, heal to byte-identical visible trees and verify preservation from current/archive/conflict files. Save failure evidence and promote found regressions. Initial bounded smoke does not close the parent or phase gate.
 
 ### Gate P1
 

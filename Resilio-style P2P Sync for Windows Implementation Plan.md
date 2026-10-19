@@ -1066,6 +1066,18 @@ checked by both engine endpoints, including immediately before index commits
 and block/page handoff. Existing callback-based appliers remain local primitives;
 the connected engine path routes remote bytes through the transport interface.
 
+The first property harness uses three to seven actual NTFS roots, SQLite
+indexes, scanners, signature validation, recoverable appliers and published
+blocks. Reproducible generated cases edit, rename and delete files while links
+partition, drop deliveries and heal. It records every locally published payload,
+then checks byte-identical visible trees after healing and searches current,
+archive and conflict bytes for every recorded version. Private block caches
+alone do not count as preserved user versions. Save failing cases and operation
+traces for direct replay and promotion to checked-in regression fixtures. Keep
+bounded smoke sampling separate from the mandatory 1,000-case CI and five-day
+gate evidence, and keep case/hierarchy/stale-temp work visible while the initial
+flat-path scenario is expanded.
+
 | Layer | What it proves | How |
 | --- | --- | --- |
 | Unit | Key chain and checksums, version-vector comparison, ignore matcher, path rules, FastCDC boundaries, conflict naming | `xunit.v3` with fixed test vectors |
