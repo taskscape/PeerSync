@@ -576,6 +576,20 @@ eventual metadata retirement. Restart, source replacement, forwarding, occupied
 destinations, cancellation and reference/expiry races require tests. Directory
 and nested subtree mapping remain mandatory before the parent task closes.
 
+The first materialization slice handles regular-file sources. Recovery kind 7
+contains the exact signed source, portable ID, root, collision/destination and
+owned GUID temporary/FID, with explicit preparation. Reserve the destination
+and intent in one FULL transaction. After guarded installation, atomically
+record destination/FID and remove the intent while leaving the source pending.
+This allows ordinary scanning without releasing the original-path barrier.
+Only a subsequent guarded byte/identity check plus the matching ready local
+publication (RW) or local observation (RO) completes that source. Unknown or
+changed destinations get another no-overwrite slot; matching content alone
+cannot grant native ownership. Incomplete recovery parks owned staging and
+keeps the obligation for a later network retry; prepared recovery installs or
+accounts only its verified object before scanning. Directory sources remain
+pending until authenticated subtree mapping is implemented.
+
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
 
 Each authenticated peer session retains a frozen Hello UTC sample and the local
