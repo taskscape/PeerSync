@@ -76,8 +76,10 @@ public sealed partial class FileApplier
     private void CaptureOriginal(ApplyState state, SafeFileHandle original, string path, LocalFileRow? known, CancellationToken token)
     {
         var snapshot = FileSnapshot.Read(original);
-        state.Original = path; state.OriginalId = Identity(snapshot); state.OriginalHash = Hash(original, token);
-        bool tracked = known?.FileHash is { } hash && hash.AsSpan().SequenceEqual(state.OriginalHash);
+        bool directory = (snapshot.Attributes & FileAttributes.Directory) != 0;
+        state.Original = path; state.OriginalId = Identity(snapshot); state.OriginalHash = directory ? [] : Hash(original, token);
+        bool tracked = directory ? known is { Type: 1, FileId: not null } && known.FileId.AsSpan().SequenceEqual(state.OriginalId)
+            : known?.FileHash is { } hash && hash.AsSpan().SequenceEqual(state.OriginalHash);
         state.OriginalDevice = tracked && known!.Record is { } record
             ? VersionView.Open(record, keys, ownDevice).ModifiedBy.ToArray() : ownDevice.ToArray();
         state.OriginalSize = snapshot.Length; state.OriginalMtime = DateTime.FromFileTimeUtc(snapshot.LastWrite).Ticks;

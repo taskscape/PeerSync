@@ -185,6 +185,50 @@ public sealed class ApplyJournalTests : IDisposable
         index.LocalFiles.Find("file")!.LocalSequence.ShouldBe(1); index.ReadApplyIntents().Count().ShouldBe(1); index.Archive.Count().ShouldBe(0);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MovedDirectoryCompletionWithholdsOnlyLiveDescendantsAndRemovesOnlyTheirNeededRows(bool defer)
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        string root = "a_%";
+        await index.LocalFiles.UpsertAsync([Row(OldHash) with { Path = root }, Row(OldHash) with { Path = root + "/child" },
+            Row(OldHash) with { Path = root + "/deep/nested" }, Row(OldHash) with { Path = root + "0/sibling" },
+            Row(OldHash) with { Path = "abc/child" }, Row(OldHash) with { Path = root + "/deleted", Deleted = true, IndexedChunks = [] }], Token);
+        await index.Needed.UpsertAsync([new(root + "/child", OldHash, 1), new(root + "/unknown", OldHash, 1),
+            new(root + "0/sibling", OldHash, 1), new("abc/child", OldHash, 1)], Token);
+        var before = index.LocalFiles.Find(root)!;
+        var intent = new ApplyIntent(Guid.NewGuid(), root, before.LocalSequence, [1]); await index.ReserveApplyAsync(intent, Token);
+        if (defer) (await index.DeferMovedDirectoryApplyAsync(intent, [], Token)).ShouldBeTrue();
+        else (await index.CommitMovedDirectoryApplyAsync(intent, Row(NewHash) with { Path = root }, [], _ => null, Token)).ShouldBeTrue();
+        index.LocalFiles.Find(root + "/child")!.Flags.ShouldBe(LocalFileState.NeedsRescan);
+        index.LocalFiles.Find(root + "/deep/nested")!.Flags.ShouldBe(LocalFileState.NeedsRescan);
+        index.LocalFiles.Find(root + "/deleted")!.Flags.ShouldBe(LocalFileState.None);
+        index.LocalFiles.Find(root + "0/sibling")!.Flags.ShouldBe(LocalFileState.None);
+        index.LocalFiles.Find("abc/child")!.Flags.ShouldBe(LocalFileState.None);
+        index.Needed.Find(root + "/child").ShouldBeNull(); index.Needed.Find(root + "/unknown").ShouldBeNull();
+        index.Needed.Find(root + "0/sibling").ShouldNotBeNull(); index.Needed.Find("abc/child").ShouldNotBeNull();
+        index.LocalFiles.Find(root + "/child")!.LocalSequence.ShouldBe(2); index.ReadApplyIntents().ShouldBeEmpty();
+        if (defer) (await index.DeferMovedDirectoryApplyAsync(intent, [], Token)).ShouldBeFalse();
+        else (await index.CommitMovedDirectoryApplyAsync(intent, Row(NewHash) with { Path = root }, [], _ => null, Token)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task MovedDirectoryCompletionCancellationRollsBackDescendantSuppressionAndNeededRemoval()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        await index.LocalFiles.UpsertAsync([Row(OldHash), Row(OldHash) with { Path = "file/child" }], Token);
+        await index.Needed.UpsertAsync([new("file/child", OldHash, 1)], Token);
+        var intent = new ApplyIntent(Guid.NewGuid(), "file", 1, [1]); await index.ReserveApplyAsync(intent, Token);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        await Should.ThrowAsync<OperationCanceledException>(() => index.CommitMovedDirectoryApplyAsync(intent, Row(NewHash), [], _ =>
+        { cancellation.Cancel(); return null; }, cancellation.Token));
+        index.LocalFiles.Find("file/child")!.Flags.ShouldBe(LocalFileState.None); index.Needed.Find("file/child").ShouldNotBeNull();
+        index.LocalFiles.Find("file")!.FileHash.ShouldBe(OldHash); index.ReadApplyIntents().Count().ShouldBe(1);
+        (await index.CommitMovedDirectoryApplyAsync(intent, Row(NewHash), [], _ => null, Token)).ShouldBeTrue();
+        index.LocalFiles.Find("file/child")!.Flags.ShouldBe(LocalFileState.NeedsRescan); index.Needed.Find("file/child").ShouldBeNull();
+    }
+
     private static LocalFileRow Row(byte[] hash) => new("file", 0, 3, 0, 0, false, 0, hash, new Dictionary<ulong, ulong> { [1] = 1 },
         new(hash, new byte[64]), new byte[16]) { IndexedChunks = [new(0, 3, hash)] };
     private static ArchiveRow Archive() => new(0, "file", ".psp/archive/file~20261019-120000", DateTime.UtcNow.Ticks, 3, OldHash);

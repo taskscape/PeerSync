@@ -99,9 +99,9 @@ internal sealed class DirectoryLease : IDisposable
 
     // Generic classification guard. Only mutate directories through it: file
     // content replacement still requires OpenFile's no-write-sharing guard.
-    internal SafeFileHandle OpenNode(string name)
+    internal SafeFileHandle OpenNode(string name, bool temporary = false)
     {
-        Check(name, temporary: false);
+        Check(name, temporary);
         return SafeFileTree.Open(parent, name, null, 0x00130181, 3, 1);
     }
 
@@ -109,6 +109,13 @@ internal sealed class DirectoryLease : IDisposable
     {
         Check(name, temporary: false);
         return SafeFileTree.Open(parent, name, true, 0x00130181, 3, 2, 0x10);
+    }
+
+    internal SafeFileHandle OwnedTemporaryDirectory(string name, bool create)
+    {
+        Check(name, temporary: true);
+        // Exclusive owned staging directory, including WRITE_DAC for metadata preparation.
+        return SafeFileTree.Open(parent, name, true, 0x00170181, 0, create ? 2u : 1u, 0x12);
     }
 
     // Only call after reading a persisted ownership identity; verify that identity

@@ -16,6 +16,8 @@ internal sealed class ApplyState
     internal LocalRestoreData? Restore { get; init; }
     internal required IReadOnlyDictionary<ulong, ulong> Vector { get; init; }
     internal bool IsRestore => Restore is not null;
+    internal uint Type => Version?.Type ?? 0;
+    internal bool OriginalIsDirectory => (OriginalAttributes & (uint)FileAttributes.Directory) != 0;
     internal string Path => Version?.Path ?? Restore!.Path;
     internal long Size => Version?.Size ?? Restore!.Size;
     internal long MtimeTicks => Version?.MtimeTicks ?? Restore!.MtimeTicks;
@@ -81,7 +83,7 @@ internal sealed class ApplyState
             Retained = Text(), ArchivedTicks = reader.ReadInt64(),
         };
         if (stream.Position != stream.Length || root.Length != 24 || PathRules.Key(result.Path) != intent.PathKey
-            || version is not null && (version.Type != 0 || VersionVector.Compare(vector, version.Vector) is VvOrder.Concurrent or VvOrder.DominatedBy
+            || version is not null && (version.Type > 1 || VersionVector.Compare(vector, version.Vector) is VvOrder.Concurrent or VvOrder.DominatedBy
                 || keys.CanWrite && VersionVector.Compare(vector, version.Vector) != VvOrder.Equal))
             throw new InvalidDataException("Invalid apply identity or vector.");
         if (result.Temporary.Length != 0)
@@ -95,7 +97,8 @@ internal sealed class ApplyState
         if (result.IsRestore && result.Temporary.Length == 0) throw new InvalidDataException("Restore state has no staging ownership.");
         if (result.OriginalId.Length != 0)
         {
-            if (result.OriginalId.Length != 16 || result.OriginalHash.Length != 32 || result.OriginalDevice.Length != 32 || result.OriginalSize < 0
+            if (result.OriginalId.Length != 16 || result.OriginalHash.Length != (result.OriginalIsDirectory ? 0 : 32)
+                || result.OriginalIsDirectory && result.OriginalSize != 0 || result.OriginalDevice.Length != 32 || result.OriginalSize < 0
                 || !PathRules.IsValid(result.Original) || PathRules.Key(result.Original) != intent.PathKey
                 || result.OriginalMtime < 0 || result.OriginalMtime > DateTime.MaxValue.Ticks)
                 throw new InvalidDataException("Invalid original ownership.");
@@ -106,14 +109,14 @@ internal sealed class ApplyState
         {
             bool archive = result.Retained.StartsWith(".psp/archive/", StringComparison.Ordinal);
             string relative = archive ? result.Retained[13..] : result.Retained;
-            if (!PathRules.IsValid(relative) || !archive && Parent(relative) != Parent(result.Original)
+            if (archive && result.OriginalIsDirectory || !PathRules.IsValid(relative) || !archive && Parent(relative) != Parent(result.Original)
                 || PathRules.Key(relative) == intent.PathKey || result.ArchivedTicks <= 0 || result.ArchivedTicks > DateTime.MaxValue.Ticks)
                 throw new InvalidDataException("Invalid retained version path.");
         }
         if (prepared && !result.Deleted && result.Temporary.Length == 0 && result.OriginalId.Length == 0)
             throw new InvalidDataException("Prepared live file has no owned data.");
         if (prepared && !result.Deleted && result.Temporary.Length == 0
-            && (result.OriginalSize != result.Size || !result.OriginalHash.AsSpan().SequenceEqual(result.FileHash)))
+            && (result.OriginalIsDirectory != (result.Type == 1) || result.OriginalSize != result.Size || !result.OriginalHash.AsSpan().SequenceEqual(result.FileHash)))
             throw new InvalidDataException("Metadata-only state changes file content.");
         return result;
 

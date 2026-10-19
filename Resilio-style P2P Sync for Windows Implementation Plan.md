@@ -315,7 +315,7 @@ schema migration; existing databases are backed up by the migration runner.
 | Concurrent delete and edit | The later change wins, the delete included. An edit that loses goes to the archive. |
 | Directory deleted remotely, new local files inside | Delete the known children. Keep the directory and the unknown files, which then sync back. |
 | A winning directory replaces a local file | Retain the file under the ordinary archive/oversize/keep-both policy, then install a guarded empty directory. |
-| A winning file replaces a local directory | Move the entire directory, including unknown children, to a no-overwrite sync-conflict sibling before installing the file. A directory tree is not a single file archive entry. RW peers scan/publish the preserved tree; RO peers retain it as a local copy. |
+| A winning file replaces a local directory | Move the entire directory, including unknown children, to a no-overwrite sync-conflict sibling before installing the file. A directory tree is not a single file archive entry. RW peers scan/publish the preserved tree; RO peers retain it as a local copy. Preserve effective DACL access/protection and creation time; Windows normalizes directory-only ACL inheritance flags on a replacement file. The retained directory keeps its original ACL. |
 | Two remote names differ only by case | Keep the first. Rename the second with a `.case-conflict` suffix, as Resilio's `.Conflict` handling does. |
 | Name invalid on Windows | Mark the record unsyncable here and show a warning. Don't block the rest of the folder. |
 
