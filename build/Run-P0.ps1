@@ -1,10 +1,11 @@
 [CmdletBinding()]
-param([int]$WatcherOperations = 100000, [long]$TransferBytes = 1073741824)
+param([int]$WatcherOperations = 100000, [long]$TransferBytes = 1073741824, [switch]$SkipWatcher)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $root 'artifacts/p0'
 New-Item -ItemType Directory -Force $out | Out-Null
 $tfm = 'net10.0-windows10.0.20348.0'
+. "$PSScriptRoot/ProbeReadiness.ps1"
 
 function Get-Spike([string]$Name) {
     Join-Path $root "spikes/$Name/bin/Release/$tfm/$Name.exe"
@@ -102,8 +103,9 @@ try {
     }
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $pipe = 'PeerSync.Spike.' + [Guid]::NewGuid().ToString('N')
-    $server = Start-Probe 'ControlPipe' @('server',$pipe,$sid) 'pipe-server'
-    Start-Sleep -Milliseconds 1000
+    $readyFile = Join-Path $out ('pipe-ready-' + [Guid]::NewGuid().ToString('N') + '.json')
+    $server = Start-Probe 'ControlPipe' @('server',$pipe,$sid,$readyFile) 'pipe-server'
+    Wait-ProbeReadyFile $server $readyFile
     Finish-Probe (Start-Probe 'ControlPipe' @('client',$pipe,$sid) 'pipe-client') 20
     Finish-Probe (Start-Probe 'ControlPipe' @('client',$pipe,'S-1-5-19') 'pipe-wrong-owner') 20 -ExpectFailure
     Stop-Probe $server
@@ -123,8 +125,9 @@ try {
     if ($unreachable.mutualTls -or $unreachable.hResult -ge 0 -or $unreachable.nativeError -ne 10061) {
         throw 'Unreachable HTTP/2 probe did not distinguish HRESULT from native WSAECONNREFUSED'
     }
-    Finish-Probe (Start-Probe 'WatcherStress' @("$WatcherOperations") 'watcher') 180
-    @{status='local-probes-completed';finishedUtc=[DateTime]::UtcNow.ToString('O');transferBytes=$TransferBytes;watcherOperations=$WatcherOperations;scope='single-host native Windows; no NAT or second physical PC';gateP0Passed=$false} | ConvertTo-Json | Set-Content (Join-Path $out 'summary.json')
+    if (-not $SkipWatcher) { Finish-Probe (Start-Probe 'WatcherStress' @("$WatcherOperations") 'watcher') 180 }
+    $watcherCount = if ($SkipWatcher) { 0 } else { $WatcherOperations }
+    @{status='local-probes-completed';finishedUtc=[DateTime]::UtcNow.ToString('O');transferBytes=$TransferBytes;watcherOperations=$watcherCount;watcherRuntimeChecks=(-not $SkipWatcher);scope='single-host native Windows; no NAT or second physical PC';gateP0Passed=$false} | ConvertTo-Json | Set-Content (Join-Path $out 'summary.json')
 }
 catch {
     @{status='failed';finishedUtc=[DateTime]::UtcNow.ToString('O');error=$_.Exception.Message} | ConvertTo-Json | Set-Content (Join-Path $out 'summary.json')

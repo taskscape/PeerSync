@@ -27,12 +27,14 @@ try {
     $engineProcess = [Diagnostics.Process]::Start($start)
     $engineOutput = $engineProcess.StandardOutput.ReadToEndAsync()
     $engineError = $engineProcess.StandardError.ReadToEndAsync()
-    & "$PSScriptRoot/Run-P0.ps1"
+    # The required x64 canonical job owns the full 100,000-operation watcher
+    # stress. Duplicating it here competes with Engine flush tests for disk I/O.
+    & "$PSScriptRoot/Run-P0.ps1" -SkipWatcher
     & "$PSScriptRoot/Run-ServiceP0.ps1"
     $remaining = [Math]::Max(0, 660000 - [int]$engineClock.ElapsedMilliseconds)
     if (-not $engineProcess.WaitForExit($remaining)) { throw 'Complete native Engine suite exceeded its eleven-minute deadline' }
     if ($engineProcess.ExitCode -ne 0) { throw "Complete native Engine suite failed ($($engineProcess.ExitCode)); see engine stdout/stderr and TRX" }
-    @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;serviceAccountChecks=$true;secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;gateP1Passed=$false} |
+    @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;serviceAccountChecks=$true;watcherRuntimeChecks=$false;watcherCoverage='required x64 canonical job';secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;gateP1Passed=$false} |
         ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
 }
 catch {

@@ -1408,6 +1408,17 @@ stdout/stderr/TRX and both exit results, bound waits, and terminate the owned
 test process on failure/cancellation. Keep all checks, 600-second fuzz and
 15-minute limits. This avoids exhausting the budget on serial setup/probes
 before native Engine tests start; do not blindly rerun timed-out old heads.
+Native probe clients must wait for actual server readiness rather than fixed
+startup sleeps. Bind a fresh readiness file to the server PID and retain strict
+connection/RPC deadlines and identity checks. A deliberately delayed real pipe
+server must reproduce the old race and pass the readiness-based path. Record
+bounded sanitized RPC/native causes so a later failure is diagnosable.
+Keep the complete 100,000-operation watcher stress check in the required x64
+canonical job. Server security jobs omit only that duplicate disk stress while
+retaining their complete Engine suites and all other native/cross-account
+probes. Their evidence explicitly records the watcher omission. Running the
+same stress concurrently with flush-heavy Engine fixtures exhausted its own
+deadline on Server 2022; do not increase deadlines or drop workflow coverage.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included

@@ -11,12 +11,17 @@ using PeerSync.Spikes;
 
 if (args.Length < 3 || args[0] is not ("server" or "client"))
 {
-    Console.Error.WriteLine("server <pipeName> <allowedSID> [readiness-file] | client <pipeName> <expectedOwnerSID>");
+    Console.Error.WriteLine("server <pipeName> <allowedSID> [readiness-file] [startup-delay-ms] | client <pipeName> <expectedOwnerSID>");
     return 2;
 }
 string pipeName = args[1];
 if (args[0] == "server")
 {
+    if (args.Length > 4)
+    {
+        if (!int.TryParse(args[4], NumberStyles.None, CultureInfo.InvariantCulture, out int delay) || delay is < 0 or > 10000) return 2;
+        await Task.Delay(delay);
+    }
     var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
     builder.Logging.ClearProviders();
     builder.Services.AddWindowsService(o => o.ServiceName = "PeerSyncControlSpike");
@@ -34,7 +39,7 @@ if (args[0] == "server")
     await using var app = builder.Build();
     app.MapGrpcService<ProbeService>();
     await app.StartAsync();
-    if (args.Length > 3) await File.WriteAllTextAsync(args[3], "ready");
+    if (args.Length > 3) await File.WriteAllTextAsync(args[3], JsonSerializer.Serialize(new { processId = Environment.ProcessId, readyUtc = DateTime.UtcNow }));
     Console.WriteLine("READY");
     Console.Out.Flush();
     await app.WaitForShutdownAsync();
@@ -45,6 +50,8 @@ using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 var expectedOwner = new SecurityIdentifier(args[2]);
 using var handler = new SocketsHttpHandler
 {
+    UseProxy = false,
+    AllowAutoRedirect = false,
     ConnectCallback = async (_, ct) =>
     {
         var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
@@ -70,6 +77,14 @@ try
 }
 catch (Exception ex) when (ex is Grpc.Core.RpcException or HttpRequestException or OperationCanceledException)
 {
-    Console.Error.WriteLine(string.Create(CultureInfo.InvariantCulture, $"FAILED {ex.GetType().Name} 0x{ex.HResult:X8}"));
+    var causes = new List<object>(); Exception? cause = ex;
+    for (int depth = 0; depth < 8 && cause is not null; depth++)
+    {
+        causes.Add(new { type = cause.GetType().Name, hResult = cause.HResult,
+            nativeError = (cause as System.ComponentModel.Win32Exception)?.NativeErrorCode });
+        cause = cause.InnerException ?? (cause as Grpc.Core.RpcException)?.Status.DebugException;
+    }
+    Console.Error.WriteLine("FAILED " + JsonSerializer.Serialize(new { processId = Environment.ProcessId, stage = "identity", error = ex.GetType().Name,
+        hResult = ex.HResult, rpcStatus = (ex as Grpc.Core.RpcException)?.StatusCode.ToString(), causes }));
     return 1;
 }
