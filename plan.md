@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | Billing investigation found 49 commits with duplicate feature-push/PR CI runs. Run the full unchanged matrix on PR updates, main pushes and manual dispatch only; batch related pending work for a single tested head. Preserve native checks, both builds, publishing and 600-second fuzz. | Testing strategy: CI |
 | 2026-10-19 | P1.2.4b2b1 baseline exposed a download deadlock when index receive took the filesystem gate. Use a separate per-index reference/index gate: maintenance acquires filesystem then index gate, receive/recompute takes only index gate and never waits for filesystem work. This preserves the existing newer-index-during-assembly behavior while excluding mutation during reference enumeration/sweep. | Detecting local changes: published block ownership |
 | 2026-10-19 | P1.2.4b2b1: stage bounded persistent current/needed/history reference batches and FULL-activate only after root/authentication validation under the shared folder gate. Serialize index receive/recompute as reference-changing paths. Preserve the prior snapshot on failure/cancellation; unmanifested archives block future sweeping. Archive capture/policy release and verified eviction remain mandatory follow-up work. | Detecting local changes: published block ownership |
 | 2026-10-19 | P1.4.4: reproduced a missed same-identity/length edit after restoring last-write time. Persist native change time for unchanged-file checks; hash on missing/different stamps, preserve signed versions/partitions on cache-only refresh, cache final apply stamps and verify rename bytes before partition reuse. Directory child timestamps remain excluded. | Detecting local changes: unchanged-file cache |
@@ -187,6 +188,7 @@ Package versions live in `Directory.Packages.props` (central package management)
   - `dotnet publish`
   - ISCC for both installers (from P3)
   - signing (once a certificate exists)
+- Trigger the full workflow on PR updates, pushes to `main` and manual dispatch. Feature-branch pushes use the PR run; do not launch an additional duplicate matrix. Batch related local work before submitting a new head.
 - **Definition of done, for every task:**
   - Code and tests are merged, with no new analyzer warnings.
   - Logs contain no key material and no file contents.
@@ -600,8 +602,10 @@ Goal: a building, testing repo, plus answers to every question that could change
   - Done when: all 11 projects and the test projects from 3.1 exist, `Directory.Build.props` and `Directory.Packages.props` are in place, and `dotnet build` passes with warnings as errors.
   - Ref: Solution structure and tech stack.
 - [x] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) (#1, #4)
-  - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
+  - Done when: every main push and PR update builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes. Feature-branch push duplication is excluded by the documented CI decision.
   - Repaired and merged in (#4): the unchanged required 600-second fuzz smoke runs in its own parallel job, with no check removed. [Green CI](https://github.com/taskscape/PeerSync/actions/runs/39144766855) completed in 11m32s, including uploads/cleanup; both architectures and Server variants passed.
+  - [ ] **P0.1.2a Avoid duplicate feature-branch CI** (`.github/workflows/ci.yml`) [WIP @Codex 2026-10-19]
+    - Done when: only main pushes, PR updates and manual dispatch start the full unchanged five-job workflow; a submitted feature head starts one PR run, with all checks green and merge audited. Record billing attribution and preserve evidence.
 - [x] **P0.1.3 Code-signing setup** (`build/sign.ps1`) (#5)
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
   - Local update (2026-10-18): user-created development certificate signed the self-contained QuicBasics EXE with a SHA-256 RFC3161 timestamp. SignTool verification and PowerShell Authenticode status passed. SDK tool discovery is repaired locally; CI signing is still pending, so this task remains unchecked. Publicly trusted release signing remains separate.

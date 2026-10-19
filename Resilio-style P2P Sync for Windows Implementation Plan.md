@@ -842,6 +842,13 @@ P0.2.4 local measurement (2026-10-18): a sequential 10 GiB file pass performing 
 
 **CI:** GitHub Actions on `windows-latest` builds, runs unit and loopback integration tests, a 10-minute fuzz smoke test, and builds the signed x64 and Arm64 installers with ISCC on every main-branch commit.
 
+Run the complete required workflow on pull-request updates, pushes to `main`
+and explicit manual dispatch. Do not also run it for feature-branch pushes:
+the same update otherwise starts independent push and PR matrices, and
+per-ref concurrency cannot cancel that duplication. Keep every required job,
+the full fuzz duration, publishing and evidence. Combine related local work
+before submitting a new head, and inspect the causal failure before retrying.
+
 ## Packaging and deployment
 
 One signed Inno Setup 7 installer per architecture (`PeerSync-Setup-<version>-x64.exe` and `-arm64.exe`) installs the service and the app for all users. It needs administrator rights once, and none for daily use after that. Inno Setup has no built-in service support, so the script drives `sc.exe`, `netsh` and `icacls` itself, and stops the service before replacing files.
