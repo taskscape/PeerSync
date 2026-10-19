@@ -134,6 +134,7 @@ public sealed partial class FolderIndex
             FolderMaps.Needed.Validate(row);
             if (PathRules.Key(row.PathKey) != path) throw new InvalidOperationException("Needed resolver returned another path.");
             AdmitCaseSources(connection, transaction, path, row.CasePreservations);
+            if (row.PreservationAdmissionOnly) { remove.Parameters[0].Value = path; remove.ExecuteNonQuery(); return; }
             store.Parameters[0].Value = path; store.Parameters[1].Value = row.SourceDevice; store.Parameters[2].Value = row.Priority;
             store.Parameters[3].Value = (object?)row.Work?.Stage ?? DBNull.Value; store.Parameters[4].Value = (object?)row.Work?.Size ?? DBNull.Value;
             store.Parameters[5].Value = (object?)row.Work?.MtimeTicks ?? DBNull.Value; store.Parameters[6].Value = (object?)row.Work?.Fingerprint ?? DBNull.Value;

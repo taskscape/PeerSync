@@ -613,6 +613,22 @@ the root/path/portable-ID completed witness. That compact witness suppresses
 later exact authenticated gossip and conveys no native deletion permission.
 Never compact pending sources, future completion times or a foreign root.
 
+Preservation admission is separate from ordinary needed scheduling. A CPU-only
+resolution can admit sources while removing unneeded work; completed RO sources
+must not recreate an unchanged original-path task. Treat pending-cap saturation
+as recoverable backpressure. After a successful native scan, allow already
+admitted sources to install, scan and complete even if full needed recomputation
+is capacity-limited. Block ordinary application until that repair completes,
+then resume remaining batches; never spin on blocked ordinary deadlines.
+
+The immutable source's first forwarding device is only a routing hint. If it
+becomes unavailable, consult current authenticated remote advertisements of the
+same exact signed envelope, try another forwarding device and retain the
+successful route during that assembly. Do not change the portable source ID.
+Prepared recovery treats unclassifiable/reparse destination probes as occupied:
+preserve the occupant, park the verified temporary using its held handle and
+release the intent for another no-overwrite slot instead of blocking the folder.
+
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
 
 Each authenticated peer session retains a frozen Hello UTC sample and the local

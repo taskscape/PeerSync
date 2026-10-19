@@ -4,6 +4,13 @@ using PeerSync.Core.Sync;
 
 namespace PeerSync.Storage.FolderDb;
 
+public sealed class CasePreservationCapacityException : IOException
+{
+    public CasePreservationCapacityException() : base("Case preservation pending capacity exceeded.") { }
+    public CasePreservationCapacityException(string? message) : base(message) { }
+    public CasePreservationCapacityException(string? message, Exception? innerException) : base(message, innerException) { }
+}
+
 /// <summary>Immutable authenticated source supplied by the engine. Storage
 /// does not authenticate signatures. Never serialize this value to diagnostics.</summary>
 public sealed class CasePreservationSource
@@ -195,7 +202,7 @@ public sealed partial class FolderIndex
     {
         ArgumentNullException.ThrowIfNull(sources);
         if (sources.Count == 0) return;
-        if (sources.Count > MaximumPendingCaseSources) throw new InvalidOperationException("Case preservation pending capacity exceeded.");
+        if (sources.Count > MaximumPendingCaseSources) throw new CasePreservationCapacityException();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT value FROM meta WHERE key='_root-identity';";
         if (command.ExecuteScalar() is not byte[] { Length: 24 } root) throw new InvalidOperationException("Case preservation requires a bound root.");
@@ -220,7 +227,7 @@ public sealed partial class FolderIndex
             }
             if (exists) continue;
             command.CommandText = "SELECT COUNT(*) FROM case_preservations WHERE completed=0;";
-            if ((long)command.ExecuteScalar()! >= MaximumPendingCaseSources) throw new InvalidOperationException("Case preservation pending capacity exceeded.");
+            if ((long)command.ExecuteScalar()! >= MaximumPendingCaseSources) throw new CasePreservationCapacityException();
             command.CommandText = "INSERT INTO case_preservations(source_id,root_id,path_key,source_device,record_body,signature) VALUES($id,$root,$path,$device,$body,$signature);";
             command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$path", path);
             command.Parameters.AddWithValue("$device", source.SourceDevice); command.Parameters.AddWithValue("$body", source.Record.Body.ToArray());

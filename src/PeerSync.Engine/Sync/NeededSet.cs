@@ -185,9 +185,9 @@ public sealed class NeededSet
         if (!decision.RequiresApply)
         {
             if (cases.Count == 0) return null;
-            var source = cases[0]; var version = VersionView.Open(source.Record, keys, source.SourceDevice);
+            var source = cases[0];
             return new(snapshot.PathKey, source.SourceDevice, 0)
-            { Work = new(version.Type == 1 ? 0 : 1, version.Size, version.MtimeTicks, source.SourceId), CasePreservations = cases };
+            { PreservationAdmissionOnly = true, CasePreservations = cases };
         }
         var winner = decision.Winner!; var desired = decision.DesiredRecord!;
         using var hash = Blake3.Hasher.New(); hash.Update("PeerSync pull work v1"u8); hash.Update(desired.Body); hash.Update(desired.Signature); hash.Update(winner.SourceDevice);

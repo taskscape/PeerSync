@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Security.Cryptography;
+using System.Net.Sockets;
 using Microsoft.Win32.SafeHandles;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Paths;
@@ -54,11 +55,32 @@ public sealed partial class FileApplier
                 Signal("case-reserved", session);
                 try
                 {
+                    byte[] preferred = pending.Source.SourceDevice;
+                    async ValueTask<ReadOnlyMemory<byte>> FetchCaseChunk(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
+                    {
+                        try { return await fetch(preferred, hash, length, cancellation).ConfigureAwait(false); }
+                        catch (Exception error) when (CaseSourceUnavailable(error, cancellation))
+                        {
+                            var alternatives = index.RemotesForPath(pending.Source.PathKey)
+                                .Where(row => !row.DeviceId.AsSpan().SequenceEqual(preferred) && row.Record.Body.SequenceEqual(pending.Source.Record.Body)
+                                    && row.Record.Signature.SequenceEqual(pending.Source.Record.Signature)).ToArray();
+                            foreach (var alternative in alternatives)
+                            {
+                                try
+                                {
+                                    var bytes = await fetch(alternative.DeviceId, hash, length, cancellation).ConfigureAwait(false);
+                                    preferred = alternative.DeviceId.ToArray(); Signal("case-source-failover", session); return bytes;
+                                }
+                                catch (Exception nextError) when (CaseSourceUnavailable(nextError, cancellation)) { }
+                            }
+                            throw new IOException("No current authenticated case source is available.", error);
+                        }
+                    }
                     using (var borrowed = new SafeFileHandle(file.DangerousGetHandle(), ownsHandle: false))
                     using (var stream = new FileStream(borrowed, FileAccess.ReadWrite, 0, isAsync: false))
                     {
                         await new ChunkAssembler(tree, index, journal).AssembleAsync(source, stream,
-                            (hash, length, cancellation) => fetch(pending.Source.SourceDevice, hash, length, cancellation), token).ConfigureAwait(false);
+                            FetchCaseChunk, token).ConfigureAwait(false);
                         stream.Flush(flushToDisk: true);
                     }
                     FileMetadata.PrepareNewFile(parent, file); FileMetadata.SetMtime(file, source.MtimeTicks); RandomAccess.FlushToDisk(file);
@@ -131,7 +153,10 @@ public sealed partial class FileApplier
         if (!state.Root.AsSpan().SequenceEqual(tree.Identity) || !source.Record.Body.SequenceEqual(state.Source.Record.Body)
             || pending.DestinationPath != state.Destination) throw new InvalidDataException("Case recovery binding changed.");
         using var parent = tree.Directory(ApplyState.Parent(state.Destination));
-        using var installed = TryOpen(parent, ApplyState.Name(state.Destination));
+        SafeFileHandle? destination = null; bool occupied = false;
+        try { destination = TryOpen(parent, ApplyState.Name(state.Destination)); }
+        catch (Exception error) when (error is IOException or Win32Exception or UnauthorizedAccessException) { occupied = true; }
+        using var installed = destination;
         if (state.Prepared && installed is not null && CaseMatches(installed, state.TemporaryId, source, token))
         {
             using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
@@ -140,6 +165,11 @@ public sealed partial class FileApplier
             Signal("case-recovered-installed", intent.Id); return;
         }
         using var temporary = TryOpen(parent, ApplyState.Name(state.Temporary), temporary: true);
+        if (occupied)
+        {
+            await ParkAsync(tree, state.StagingState(), intent, token, temporary).ConfigureAwait(false);
+            await index.AbandonApplyAsync(intent, token).ConfigureAwait(false); Signal("case-recovered-collision", intent.Id); return;
+        }
         if (state.Prepared && temporary is not null && CaseMatches(temporary, state.TemporaryId, source, token))
         { await InstallCaseCopyAsync(tree, pending, state, intent, parent, temporary, token).ConfigureAwait(false); return; }
         await ParkAsync(tree, state.StagingState(), intent, token, temporary).ConfigureAwait(false);
@@ -174,6 +204,8 @@ public sealed partial class FileApplier
     }
 
     private long CaseNow => Math.Max(1, clock.GetUtcNow().UtcTicks);
+    private static bool CaseSourceUnavailable(Exception error, CancellationToken token) => !token.IsCancellationRequested
+        && error is IOException or InvalidDataException or SocketException or ObjectDisposedException or OperationCanceledException;
     private async Task RetryCaseAsync(PendingCasePreservation pending, string code, CancellationToken token)
     {
         using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);

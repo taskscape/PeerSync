@@ -68,6 +68,39 @@ public sealed class CaseCoordinationTests : IDisposable
         Directory.EnumerateFiles(receiver.Root).Where(path=>Path.GetFileName(path).Contains(".case-conflict",StringComparison.OrdinalIgnoreCase)).ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task SettledReadOnlyCaseWorkAndDeadlinesDrainAcrossRepeatedPasses()
+    {
+        await using var a=await NodeAsync(1); await using var b=await NodeAsync(2); await using var c=await NodeAsync(3,readOnly:true);
+        await Publish(a,"file.txt",First,early); await Publish(b,"FILE.txt",Second,early.AddMinutes(1));
+        var network=new InMemoryNetwork(); network.Register(a.Id,a.Engine.CreateHandler); network.Register(b.Id,b.Engine.CreateHandler);
+        var receiver=network.Register(c.Id,c.Engine.CreateHandler);
+        await using var ca=await c.Engine.ConnectAsync(receiver.Connect(a.Id),Token); await using var cb=await c.Engine.ConnectAsync(receiver.Connect(b.Id),Token);
+        await ca.SynchronizeAsync(cancellationToken:Token); await cb.SynchronizeAsync(cancellationToken:Token);
+        await c.Engine.RunPassAsync(Token); RequireVisibleVersions(c); c.Index.ReadPendingCasePreservations().ShouldBeEmpty();
+        c.Index.Needed.Count().ShouldBe(0);
+        for(int pass=0;pass<4;pass++)
+        {
+            var result=await c.Engine.RunPassAsync(Token); result.Visited.ShouldBe(0); result.MoreWork.ShouldBeFalse(); result.NextAttemptTicks.ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task AnotherAuthenticatedForwarderServesTheExactSourceAfterFirstHintDisconnects()
+    {
+        await using var a=await NodeAsync(1); await using var forwarder=await NodeAsync(2); await using var c=await NodeAsync(3); await using var winner=await NodeAsync(4);
+        await Publish(a,"file.txt",First,early); await Publish(winner,"FILE.txt",Second,early.AddMinutes(1));
+        var network=new InMemoryNetwork(); network.Register(a.Id,a.Engine.CreateHandler); network.Register(winner.Id,winner.Engine.CreateHandler);
+        var forwarding=network.Register(forwarder.Id,forwarder.Engine.CreateHandler); var receiver=network.Register(c.Id,c.Engine.CreateHandler);
+        await using var fa=await forwarder.Engine.ConnectAsync(forwarding.Connect(a.Id),Token);
+        await fa.SynchronizeAsync(cancellationToken:Token); await forwarder.Engine.RunPassAsync(Token);
+        await using var ca=await c.Engine.ConnectAsync(receiver.Connect(a.Id),Token); await using var cw=await c.Engine.ConnectAsync(receiver.Connect(winner.Id),Token);
+        await ca.SynchronizeAsync(cancellationToken:Token); await cw.SynchronizeAsync(cancellationToken:Token);
+        c.Index.ReadPendingCasePreservations().Single().Source.SourceDevice.ShouldBe(a.Id); await ca.DisposeAsync();
+        await using var cb=await c.Engine.ConnectAsync(receiver.Connect(forwarder.Id),Token); await cb.SynchronizeAsync(cancellationToken:Token);
+        await c.Engine.RunPassAsync(Token); RequireVisibleVersions(c); c.Index.ReadPendingCasePreservations().ShouldBeEmpty(); c.Index.Needed.Count().ShouldBe(0);
+    }
+
     private static void RequireVisibleVersions(Node node)
     {
         string[] paths=Directory.GetFiles(node.Root).Where(path=>PathRules.IsValid(Path.GetFileName(path))).ToArray();
@@ -77,13 +110,14 @@ public sealed class CaseCoordinationTests : IDisposable
     }
     private static async Task Publish(Node node,string path,string text,DateTime at)
     { string disk=Path.Combine(node.Root,path); File.WriteAllText(disk,text); File.SetLastWriteTimeUtc(disk,at); node.Engine.RequestScan(); await node.Engine.RunPassAsync(Token); }
-    private async Task<Node> NodeAsync(ulong identity)
+    private async Task<Node> NodeAsync(ulong identity,bool readOnly=false)
     {
         string directory=Path.Combine(fixture,identity.ToString(System.Globalization.CultureInfo.InvariantCulture)); string root=Path.Combine(directory,"tree"); Directory.CreateDirectory(root);
         var index=await FolderIndex.OpenAsync(Path.Combine(directory,"index.db"),Token); byte[] id=new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(id,identity);
-        var engine=new TransportFolder(root,index,keys,id); await engine.RunPassAsync(Token); return new(root,index,engine,id);
+        var access=readOnly?FolderKeys.FromText(keys.ExportReadOnlyText()):null;
+        var engine=new TransportFolder(root,index,access??keys,id); await engine.RunPassAsync(Token); return new(root,index,engine,id,access);
     }
-    private sealed record Node(string Root,FolderIndex Index,TransportFolder Engine,byte[] Id) : IAsyncDisposable
-    { public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); await Index.DisposeAsync(); } }
+    private sealed record Node(string Root,FolderIndex Index,TransportFolder Engine,byte[] Id,FolderKeys? Access) : IAsyncDisposable
+    { public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); await Index.DisposeAsync(); Access?.Dispose(); } }
     public void Dispose() { keys.Dispose(); if(Directory.Exists(fixture)) Directory.Delete(fixture,true); }
 }

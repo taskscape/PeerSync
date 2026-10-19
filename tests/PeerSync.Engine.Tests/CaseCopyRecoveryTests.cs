@@ -83,6 +83,47 @@ public sealed class CaseCopyRecoveryTests : IDisposable
     }
 
     [Fact]
+    public async Task PreparedReparseDestinationReleasesRecoveryAndAllowsAnotherSafeSlot()
+    {
+        await using var index = await Prepare();
+        var first = new FileApplier(Root, index, keys, Device(1)) { Checkpoint = stage => { if (stage == "case-prepared") throw new Stop(); } };
+        await Should.ThrowAsync<Stop>(() => first.PrepareCaseCopiesAsync(Fetch, Token));
+        var state = CaseCopyState.Decode(index.ReadApplyIntents().Single(), keys);
+        string outside = Path.Combine(fixture, "outside-recovery"); Directory.CreateDirectory(outside); File.WriteAllText(Path.Combine(outside, "user.txt"), "outside recovery bytes");
+        string link = Disk(state.Destination); Directory.CreateSymbolicLink(link, outside); links.Add(link);
+        var recovered = new FileApplier(Root, index, keys, Device(1)); await recovered.RecoverAsync(Token);
+        index.ReadApplyIntents().ShouldBeEmpty(); await Finish(index, recovered, keys); RequireVersions(First, Second);
+        Directory.GetFiles(outside).Length.ShouldBe(1); File.ReadAllText(Path.Combine(outside, "user.txt")).ShouldBe("outside recovery bytes");
+    }
+
+    [Fact]
+    public async Task StartupCapacityBackpressureDrainsAdmittedSourcesBeforeRepairingTheRest()
+    {
+        const int count = 1001; await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using (var scanner = new Scanner(Root, index, keys, Device(1))) await scanner.ScanAsync(Token);
+        var rows = new List<RemoteFileRow>(count * 2); SignedRecord? lastWinner = null;
+        for(int i=0;i<count;i++)
+        {
+            string path="file"+i.ToString("D4",System.Globalization.CultureInfo.InvariantCulture)+".txt";
+            var a=Record(path,2,1,10,First,1); var b=Record(path.ToUpperInvariant(),3,1,20,Second,1);
+            lastWinner=b;
+            rows.Add(new(Device(2),path,VersionView.Open(a,keys,Device(2)).Vector,a)); rows.Add(new(Device(3),path,VersionView.Open(b,keys,Device(3)).Vector,b));
+        }
+        // Existing authenticated remote rows require startup reconstruction of needed work.
+        await index.RemoteFiles.UpsertAsync(rows,Token);
+        var legacy=VersionView.Open(lastWinner!,keys,Device(3));
+        await index.Needed.UpsertAsync([new(legacy.Path,Device(3),1) { Work=new(1,legacy.Size,legacy.MtimeTicks,new byte[32]) }],Token);
+        using var puller=new Puller(Root,index,keys,Device(1),Fetch);
+        var initial=await puller.RunPassAsync(Token); initial.Visited.ShouldBe(0,"unrepaired high-priority legacy work must not merge away an unadmitted case source");
+        File.Exists(Disk(legacy.Path)).ShouldBeFalse();
+        Directory.GetFiles(Root).Any(path=>Path.GetFileName(path).Contains(".case-conflict",StringComparison.Ordinal)).ShouldBeTrue();
+        for(int pass=0;pass<6;pass++) await puller.RunPassAsync(Token);
+        index.ReadPendingCasePreservations().ShouldBeEmpty(); index.Needed.Count().ShouldBe(0); index.ReadApplyIntents().ShouldBeEmpty();
+        Directory.GetFiles(Root).Count(path=>Path.GetFileName(path).Contains(".case-conflict",StringComparison.Ordinal)).ShouldBe(count);
+        for(int i=0;i<count;i++) File.ReadAllText(Disk("FILE"+i.ToString("D4",System.Globalization.CultureInfo.InvariantCulture)+".TXT")).ShouldBe(Second);
+    }
+
+    [Fact]
     public async Task UnknownReparseCollisionCannotRedirectTheCopyOrStrandOriginalResolution()
     {
         await using var index = await Prepare(); var pending = index.ReadPendingCasePreservations().Single();
