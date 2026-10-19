@@ -72,6 +72,10 @@ Keep at most two preferred hints plus six known-device routes per attempt.
 Persist a source-specific device-ID cursor with attempt accounting and wrap at
 the end of the rooted device catalog. UTC backoff and global fair run ordering
 must not repeatedly select the same first route page or exclude later forwarders.
+Give each route a one-second linked deadline within the ten-second source
+attempt. A stalled preferred hint must leave time for the other bounded routes;
+route timeout advances failover, while caller/source cancellation stops the
+attempt. Transport fetches must honor their cancellation token.
 
 Required checks include source replacement/restart, atomic admission rollback,
 bounded continuation and starvation, incomplete-history/current/RO graphs,

@@ -797,6 +797,9 @@ against the exact complete non-retiring graph. See the proposal for transitions.
 Metadata route fallback uses two preferred hints plus six paged known devices,
 with a source-specific durable cursor and wraparound, independent of retry UTC
 and source run ordinals. Later authenticated forwarders must remain reachable.
+Each route has a one-second linked deadline inside the ten-second source
+attempt, so a stalled preferred hint leaves time for fallback. Source/caller
+cancellation still stops work; transport fetches must honor their token.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

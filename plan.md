@@ -68,6 +68,8 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 ## 2. Decision log
 
+| 2026-10-20 | Bound each metadata route to one second inside the source's ten-second deadline so stalled preferred hints cannot starve fallback; caller/source cancellation still stops work. | Directory metadata fetching |
+
 Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
