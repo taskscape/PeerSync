@@ -8,7 +8,7 @@ using Xunit;
 
 namespace PeerSync.Storage.Tests;
 
-public sealed class DirectoryChildrenTests : IDisposable
+public sealed partial class DirectoryChildrenTests : IDisposable
 {
     private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-DirectoryChildrenDb-" + Guid.NewGuid().ToString("N"));
     private string Database => Path.Combine(fixture, "index.db");
