@@ -4,20 +4,23 @@ namespace PeerSync.Engine.Hashing;
 
 // Streaming page construction only. Callers supply authenticated immediate
 // children in canonical key order and retain/flush every emitted node.
-internal sealed class DirectorySnapshotBuilder(Func<DirectorySnapshotNode, CancellationToken, Task<DirectorySnapshotLink>> write)
+internal sealed partial class DirectorySnapshotBuilder(Func<DirectorySnapshotNode, CancellationToken, Task<DirectorySnapshotLink>> write)
 {
     private readonly List<DirectorySnapshotLink> records = new(DirectorySnapshotNode.MaximumLinks);
     private readonly List<List<DirectorySnapshotLink>> levels = [];
     private bool completed;
+    private long accepted;
     internal async Task AddAsync(DirectorySnapshotLink record, CancellationToken token)
     {
         ObjectDisposedException.ThrowIf(completed, this); ArgumentNullException.ThrowIfNull(record); token.ThrowIfCancellationRequested();
+        long next = checked(accepted + 1);
         records.Add(record);
         if (records.Count == DirectorySnapshotNode.MaximumLinks)
         {
             var page = await write(DirectorySnapshotNode.Entries(records), token).ConfigureAwait(false); records.Clear();
             await CarryAsync(page, 0, token).ConfigureAwait(false);
         }
+        accepted = next;
     }
     internal async Task<DirectorySnapshotLink> CompleteAsync(CancellationToken token)
     {
