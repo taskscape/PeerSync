@@ -694,7 +694,7 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
 - [ ] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`) [WIP @Codex 2026-10-19]
   - Done when: all hostile cases in 7.4 are rejected, valid Unicode names pass, and a fuzz target exists.
   - Ref: Security model, hostile paths.
-- [ ] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`)
+- [ ] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`) [WIP @Codex 2026-10-19]
   - Done when: it supports gitignore-style `*`, `?`, `**`, `#` comments, a leading `/` to anchor at the root, a trailing `/` for directories only, and case-insensitive matching. Default rules are included. Resilio's IgnoreList examples pass as tests.
 
 ### 7.1 Code: key chain (P1.1.1)
