@@ -222,6 +222,17 @@ SQLite's online backup API (including committed WAL data), then apply SQL and
 Microsoft.Data.Sqlite's async ADO.NET calls execute synchronously, the writer
 runs on a worker task rather than blocking the service caller.
 
+Destructive filesystem application requires a durable intent first. Add an
+`apply_intents` journal keyed by operation ID and unique path key, with the
+expected local sequence and a bounded versioned engine recovery payload.
+Use the same serialized writer with synchronous=FULL for intent reservation,
+recovery updates and final application commits, restoring NORMAL outside the
+transaction. Final commit writes the local file/chunk index and sequence,
+archive rows and latest needed-set recomputation, then removes the intent in
+one transaction. A changed local sequence or failed/cancelled callback rolls
+back the entire commit and retains recovery intent. Schema migration 4 follows
+the existing backup-before-each-step policy. Ordinary scan batches retain NORMAL.
+
 Folder repositories commit up to 1,000 rows per transaction. Allocate local
 sequence numbers and persist their records in that same transaction, so an
 index cursor cannot pass an unpublished earlier sequence. Rewriting a local
