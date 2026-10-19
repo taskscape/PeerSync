@@ -689,6 +689,9 @@ before progress/publication; reject counter overflow rather than wrapping.
 Pending-publication dependencies/barriers and bounded coordinator continuation
 are detailed in docs/proposals/P1-directory-scanner-publication.md; they must
 prevent mtime/vector feedback and pass convergence before activation.
+Retain authenticated signed child membership when local readiness is cleared;
+availability changes are not signed deletions. Metadata capture does not set
+file readiness or claim available bytes; materialization verifies each chunk.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

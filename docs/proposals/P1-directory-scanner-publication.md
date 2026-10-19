@@ -11,6 +11,10 @@ publish child file versions first, then directory versions from deepest paths
 upward. A parent waits for pending supported child-directory publications.
 Ignored/unsupported entries remain outside the logical published tree; retain
 the last independently captured signed version of a temporarily withheld child.
+This includes signed rows whose local content readiness has been cleared:
+readiness is availability, not a signed deletion. Snapshot metadata retains
+their authenticated version/chunk identities; it neither sets readiness nor
+asserts the bytes are currently available. Copying still verifies every chunk.
 Never infer an empty tree from an absent legacy nested root or incomplete walk.
 
 Directory child enumeration needs an indexed parent key and bounded row/byte
