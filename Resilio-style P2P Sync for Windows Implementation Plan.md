@@ -848,7 +848,10 @@ validation tools; engine paths use TryWrite and expose a dropped-event count.
 Cross-machine diagnostic refinement (2026-10-18): retain managed HRESULT,
 native socket error and QUIC transport/application error numbers as separate
 metadata. Failed probes report the operation stage and transferred bytes;
-progress is emitted at bounded intervals. Collection must reject a bundle
+the first completed data unit emits progress immediately, followed by bounded
+five-second intervals while data advances. Stream setup can consume part of a
+short authenticated transfer deadline, so initial progress must not require five
+payload seconds. Collection must reject a bundle
 with no recent valid debug events and report file/event counts. The P0 QUIC
 probe gives connection establishment and the transfer independent deadlines,
 so waiting for the second operator does not consume the transfer budget.
