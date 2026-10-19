@@ -28,6 +28,13 @@ public sealed class PeerIndexSession
     public PeerClockStatus ClockStatus => clock.GetStatus();
     public PeerClockStatus ObserveHello(Hello hello) => clock.ObserveHello(hello);
     public void Disconnect() => clock.Reset();
+    internal void RequireClock() => clock.RequireIndexExchangeAllowed();
+
+    public long ReadIndexTarget()
+    {
+        clock.RequireIndexExchangeAllowed(); long target = index.ReadIndexHighWater();
+        clock.RequireIndexExchangeAllowed(); return target;
+    }
 
     public async Task<RemoteIndexResult> ReceiveAsync(PeerIndexPage page, CancellationToken cancellationToken = default)
     {

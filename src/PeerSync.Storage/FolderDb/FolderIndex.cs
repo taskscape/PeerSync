@@ -48,6 +48,13 @@ public sealed partial class FolderIndex : IAsyncDisposable
     }
 
     /// <summary>Read records and the cursor in one snapshot, including safe advancement over unpublished sequence gaps.</summary>
+    public long ReadIndexHighWater()
+    {
+        using var connection = database.OpenReader();
+        using var transaction = connection.BeginTransaction(deferred: true);
+        long result = ReadSequence(connection, transaction); transaction.Commit(); return result;
+    }
+
     public IndexBatch ReadIndexBatch(long afterSequence, int limit = 1000)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(afterSequence);

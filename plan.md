@@ -1610,6 +1610,7 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
     - Done when: connection-scoped handlers, isolated identity/message ownership, independent bounded requests, directional latency/drop/partition injection and cancel/drain/disconnect behavior have executable tests and canonical CI coverage.
   - [ ] **P1.6.1b Connected engine integration** [WIP @codex 2026-10-19]
     - Done when: real folder indexes, Hello clocks, bounded range/page synchronization and verified chunk serving/pulling use IPeerTransport, with actual file transfer, partition/reconnect and skew-blocking tests. No raw remote callback bypass in this connected path. Parent remains open until all connected engine integration is proven.
+  - Local implementation and 955-case canonical verification pass; no merge/CI claim yet. See `docs/verification/P1.6.1-in-memory-engine-transport-2026-10-19.md`. Actual TLS/folder authentication, rendered clock UI and the separate multi-node property gate remain open.
 - [ ] **P1.6.2 Multi-node property tests** (`tests/PeerSync.Simulation`)
   - Done when: `CsCheck` generates random edits, renames, deletes, partitions and heals on 3 to 7 nodes, each with a temp folder. After the network heals, all trees are identical. Every overwritten version exists in some node's archive or as a conflict copy. 1,000 seeds run in CI, and failing seeds are saved as regression tests.
 

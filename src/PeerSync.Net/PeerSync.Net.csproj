@@ -1,1 +1,6 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
+    <ProjectReference Include="../PeerSync.Protocol/PeerSync.Protocol.csproj" />
+  </ItemGroup>
+</Project>

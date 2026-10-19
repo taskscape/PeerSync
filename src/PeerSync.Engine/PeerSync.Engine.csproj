@@ -4,5 +4,6 @@
     <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
     <ProjectReference Include="../PeerSync.Protocol/PeerSync.Protocol.csproj" />
     <ProjectReference Include="../PeerSync.Storage/PeerSync.Storage.csproj" />
+    <ProjectReference Include="../PeerSync.Net/PeerSync.Net.csproj" />
   </ItemGroup>
 </Project>
