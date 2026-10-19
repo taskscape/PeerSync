@@ -5,7 +5,12 @@ Current phase: P1; P1.1.1 folder keys/text completed through
 [CI jobs green](https://github.com/taskscape/PeerSync/actions/runs/39181190139).
 Nineteen Core/Crypto cases passed; fuzz completed 153,215 seeds over 600 seconds
 without crashes. The merged tree equals the tested head. Core records, paths
-and ignore rules are next. P0 gate passed on
+and ignore rules are completed through
+[PR #7](https://github.com/taskscape/PeerSync/pull/7), with all five
+[CI jobs green](https://github.com/taskscape/PeerSync/actions/runs/39182383820)
+in 13m03s. Local verification passed 121 cases and 70,000 generated property
+examples; full fuzz passed 127,929 seeds over 600 seconds without crashes.
+Chunk hashing and SQLite storage are underway. P0 gate passed on
 2026-10-19 under the user's approved external-test deferrals. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
 Ten tasks and the performance/certificate subchecks are verified. The CI

@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: folder keys complete; core records, paths and ignore rules underway | - |
+| P1 Local sync engine | 4-8 | In progress: core types complete; chunk hashing and storage underway | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -688,15 +688,16 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
   - Done when: RW, RO and F keys round-trip through text. The checksum rejects any single-character typo. RO and F keys derived from an RW key match fixed test vectors. Keys are never printed by `ToString()`.
   - Ref: Protocol specification, Keys and identifiers.
   - Evidence: [key verification](docs/verification/P1.1.1-folder-keys-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39181190139). Merged tree equals the tested head.
-- [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`) (#7)
   - Done when: compare, merge and increment are covered by property tests (compare is antisymmetric, merge is commutative and idempotent). Compact binary serialization is sorted by device.
-- [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`) (#7)
   - Done when: records are signed over the exact body bytes (see 7.3). Tampering with any byte fails verification. A forwarded record keeps its original signature.
-- [ ] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`) (#7)
   - Done when: all hostile cases in 7.4 are rejected, valid Unicode names pass, and a fuzz target exists.
   - Ref: Security model, hostile paths.
-- [ ] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`) (#7)
   - Done when: it supports gitignore-style `*`, `?`, `**`, `#` comments, a leading `/` to anchor at the root, a trailing `/` for directories only, and case-insensitive matching. Default rules are included. Resilio's IgnoreList examples pass as tests.
+  - P1.1.2–P1.1.5 evidence: [vectors](docs/verification/P1.1.2-version-vectors-2026-10-19.md), [records/paths](docs/verification/P1.1.3-4-records-paths-2026-10-19.md), [ignore rules](docs/verification/P1.1.5-ignore-rules-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39182383820). Merged tree equals the tested head.
 
 ### 7.1 Code: key chain (P1.1.1)
 
