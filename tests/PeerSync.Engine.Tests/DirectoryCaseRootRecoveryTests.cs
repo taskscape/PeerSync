@@ -33,7 +33,7 @@ public sealed partial class DirectorySnapshotCaptureTests
             index.HasPendingCasePreservation("topic").ShouldBeTrue(); index.LocalFiles.Find(destination).ShouldBeNull();
         }
         await using var reopened = await FolderIndex.OpenAsync(Database, Token); var recovered = new FileApplier(Root, reopened, keys, device);
-        await recovered.RecoverAsync(Token); await recovered.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
+        await recovered.RecoverAsync(Token); await recovered.PrepareCaseCopiesAsync(FetchRootMetadata, Token); await recovered.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
         reopened.ReadApplyIntents().ShouldBeEmpty(); var row = reopened.ReadPendingCasePreservations().Single();
         row.DestinationPath.ShouldBe(destination); row.InstalledFileId.ShouldNotBeNull(); Directory.Exists(Path.Combine(Root, destination)).ShouldBeTrue();
         using (var scanner = new Scanner(Root, reopened, keys, device)) await scanner.ScanAsync(Token);
@@ -114,6 +114,7 @@ public sealed partial class DirectorySnapshotCaptureTests
             await using var index = await FolderIndex.OpenAsync(Database, Token); await AdmitDirectoryCase(index);
             using var access = FolderKeys.FromText(readOnly ? keys.ExportReadOnlyText() : keys.ExportText());
             var applier = new FileApplier(Root, index, access, device); (await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token)).ShouldBeTrue();
+            await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token); // Establish empty-member coverage before RW advertisement.
             copy = Path.Combine(Root, index.ReadPendingCasePreservations().Single().DestinationPath!);
             (File.GetAttributes(copy) & (FileAttributes.ReadOnly | FileAttributes.Hidden)).ShouldBe(FileAttributes.ReadOnly | FileAttributes.Hidden);
             using (var scanner = new Scanner(Root, index, access, device)) await scanner.ScanAsync(Token);

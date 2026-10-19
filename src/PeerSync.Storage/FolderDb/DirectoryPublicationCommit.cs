@@ -27,6 +27,7 @@ public sealed partial class FolderIndex
         return database.WriteDurableAsync((connection, transaction) =>
         {
             var actual = RequirePublicationExpected(connection, transaction, queued); RequireCaptureExpected(connection, transaction, draft);
+            if (HasIncompleteDirectoryCaseCopy(connection, transaction, PathRules.Key(queued.Path))) throw new InvalidOperationException("Directory case members are not installed.");
             RequireDirectoryCaptureEpoch(connection, transaction, draft.InputEpoch.Value);
             if (actual.Paused || actual.KeysEpoch != draft.InputEpoch) throw new InvalidOperationException("Directory publication is paused or its key proof changed.");
             string key = PathRules.Key(queued.Path);

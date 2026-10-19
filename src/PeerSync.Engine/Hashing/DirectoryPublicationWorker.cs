@@ -35,6 +35,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
             var queued = initial;
             try
             {
+                if (index.HasIncompleteDirectoryCaseCopy(queued.Path)) { stage = "case-copy-members"; await Retry(null).ConfigureAwait(false); continue; }
                 if (index.HasPendingChildDirectoryPublication(queued.Path)) { await Retry(null).ConfigureAwait(false); continue; }
                 stage = "membership"; long epoch = index.ReadDirectoryCaptureEpoch();
                 if (queued.KeysEpoch != epoch)

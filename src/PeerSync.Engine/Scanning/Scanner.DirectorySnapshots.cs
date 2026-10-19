@@ -30,7 +30,7 @@ public sealed partial class Scanner
             foreach (string path in paths)
             {
                 token.ThrowIfCancellationRequested(); var queued = index.ReadDirectoryPublication(path)!;
-                bool unknown = uncertain.Contains("") || uncertain.Contains(path) || Under(path, protectedPrefixes);
+                bool unknown = uncertain.Contains("") || uncertain.Contains(path) || Under(path, protectedPrefixes) || index.HasIncompleteDirectoryCaseCopy(path);
                 if (unknown) { await index.PauseDirectoryPublicationAsync(queued, true, now, token).ConfigureAwait(false); Log("queue_paused", queued.Version, "incomplete-walk"); continue; }
                 if (!keys.CanWrite || (index.LocalFiles.Find(path)?.LocalSequence ?? 0) != queued.ExpectedLocalSequence
                     || Under(path, ignoredPrefixes) || !entries.TryGetValue(path, out var found) || found.Unsyncable || !found.Native.IsDirectory)
@@ -47,6 +47,7 @@ public sealed partial class Scanner
         foreach (var pair in entries.Where(pair => pair.Value.Native.IsDirectory && !pair.Value.Unsyncable).OrderByDescending(pair => pair.Key.Count(value => value == '/')))
         {
             token.ThrowIfCancellationRequested(); string key = pair.Key; var entry = pair.Value;
+            if (index.HasIncompleteDirectoryCaseCopy(entry.Path)) { Log("case_copy_publication_held", scanSession, "members-pending"); continue; }
             if (uncertain.Contains("") || uncertain.Contains(key) || Under(key, protectedPrefixes)) continue;
             var old = index.LocalFiles.Find(entry.Path);
             bool sameNative = old is { Type: 1, Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry);

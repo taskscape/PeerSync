@@ -107,6 +107,7 @@ public sealed partial class FolderIndex
         {
             RequireCaptureExpected(connection, transaction, prior);
             if (prior.InputEpoch is { } epoch) RequireDirectoryCaptureEpoch(connection, transaction, epoch);
+            if (HasIncompleteDirectoryCaseCopy(connection, transaction, PathRules.Key(prior.ParentPath))) throw new InvalidOperationException("Directory case members are not installed.");
             string key = PathRules.Key(prior.ParentPath);
             using var query = connection.CreateCommand(); query.Transaction = transaction;
             query.CommandText = "SELECT local_seq FROM local_files WHERE path_key=$key;"; query.Parameters.AddWithValue("$key", key);

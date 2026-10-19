@@ -178,7 +178,7 @@ public sealed partial class Scanner : IDisposable
                     catch (EncoderFallbackException) { /* Cannot represent this local name in SQLite UTF-8. */ }
                     return;
                 }
-                if (StageDirectorySnapshots && keys.CanWrite && entry.Native.IsDirectory) return;
+                if (keys.CanWrite && entry.Native.IsDirectory && (StageDirectorySnapshots || index.HasIncompleteDirectoryCaseCopy(entry.Path))) return;
                 if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry)
                     && (entry.Native.IsDirectory || old.ChangeFileTime == entry.Native.ChangeFileTime)
                     && (!keys.CanWrite && old.Record is null || old.Record is not null && (old.Type != 0 || old.ContentReady)))

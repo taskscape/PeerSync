@@ -83,7 +83,11 @@ public sealed partial class FolderIndex
     private static bool HasPendingCase(SqliteConnection connection, SqliteTransaction? transaction, string key, bool includeDescendants = true)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM case_preservations WHERE completed=0 AND (path_key=$path OR $descendants=1 AND path_key >= $low AND path_key < $high));";
+        command.CommandText = "WITH RECURSIVE ancestors(key) AS (VALUES($path) UNION ALL SELECT rtrim(rtrim(key,replace(key,'/','')),'/') FROM ancestors WHERE instr(key,'/')>0) "
+            + "SELECT EXISTS(SELECT 1 FROM ancestors a JOIN case_preservations c ON c.path_key=a.key WHERE c.completed=0 UNION ALL "
+            + "SELECT 1 FROM ancestors a JOIN case_preservations c ON c.destination_key=a.key WHERE c.completed=0 UNION ALL "
+            + "SELECT 1 FROM case_preservations WHERE completed=0 AND $descendants=1 AND path_key >= $low AND path_key < $high UNION ALL "
+            + "SELECT 1 FROM case_preservations WHERE completed=0 AND $descendants=1 AND destination_key >= $low AND destination_key < $high);";
         command.Parameters.AddWithValue("$descendants", includeDescendants ? 1 : 0);
         command.Parameters.AddWithValue("$path", key); command.Parameters.AddWithValue("$low", key + "/"); command.Parameters.AddWithValue("$high", key + "0");
         return (long)command.ExecuteScalar()! != 0;
