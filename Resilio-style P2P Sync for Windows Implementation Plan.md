@@ -136,7 +136,7 @@ key strings, which cannot be reliably erased from managed memory.
 
 1. **Dial in parallel**, happy-eyeballs style, 250 ms apart: LAN addresses, then public addresses, then a coordinated hole punch, then relay. The first authenticated connection wins and the rest are cancelled.
 2. **TLS 1.3 over QUIC.** Each device presents a self-signed ECDSA P-256 certificate created at install. Both sides accept any certificate but record its SPKI hash as the DeviceId.
-3. **Hello** on stream 0: protocol version, DeviceId, device name, client version, capability flags, 32-byte random nonce.
+3. **Hello** on stream 0: protocol version, DeviceId, device name, client version, capability flags, 32-byte random nonce and UTC DateTime ticks. UTC ticks are required and validated in the inclusive range 1..DateTime.MaxValue.Ticks; absent/default or invalid values block index exchange. Identity still comes from the TLS certificate.
 4. **FolderAuth** for each folder both sides announce: `HMAC(K_auth, "psp1 auth" ‖ sender DeviceId ‖ receiver DeviceId ‖ sender nonce ‖ receiver nonce ‖ FolderId)`.
    1. A read-only or RW peer adds the same MAC under K\_ro\_auth, proving it may receive plaintext.
    2. An RW peer adds an Ed25519 signature over the transcript with sk.
@@ -526,6 +526,21 @@ schema migration; existing databases are backed up by the migration runner.
 | Name invalid on Windows | Mark the record unsyncable here and show a warning. Don't block the rest of the folder. |
 
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
+
+Each authenticated peer session retains a frozen Hello UTC sample and the local
+monotonic receipt timestamp. Before sending/receiving index data, estimate the
+peer's advancing UTC from monotonic elapsed time and compare current local UTC.
+Exactly ten minutes is permitted; a larger absolute offset blocks index exchange.
+A missing/invalid sample, backwards elapsed time or unrepresentable estimated
+UTC blocks exchange as well. This also detects local wall-clock jumps during a
+session. The remote implementation enforces its own side; Hello is a clock
+sanity check, not a defense against a malicious authorized folder writer.
+Disconnect resets admission; a fresh authenticated Hello can restore it.
+Expose signed offset ticks and a status reason with the human-readable clock
+difference for the control UI. Log transitions, session IDs and numeric offset
+seconds without peer names, identifiers, nonces, keys or file data. The UTC Hello
+and decision model are P1 foundations; actual index admission and rendered UI
+remain required parts of P1.5.5 before its checkbox can close.
 
 The source design's mtime rule takes precedence over the draft checklist's
 blanket `changed_ticks` comparison: a newly noticed old offline file must not
