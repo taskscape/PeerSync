@@ -1186,10 +1186,10 @@ PRAGMA user_version = 1;
   - Done when: a full walk skips `.psp`, `*.!psp`, ignored paths and reparse points (recorded, not followed). Unchanged size, mtime, attributes and FileId mean no hashing. A rescan of 100k unchanged files takes under 10 s.
   - Code: 7.8 for the NTFS file id.
   - Local evidence: [scanner verification and 100k-file benchmark](docs/verification/P1.4.1-scanner-2026-10-19.md). Required CI remains blocked by issue #10; task stays unchecked.
-- [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`)
+- [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`) [WIP @Codex 2026-10-19]
   - Done when: events are coalesced per path (quiet 2 s, or 30 s maximum). A buffer overflow triggers a full scan. Our own writes don't create new versions.
   - Code: 7.9.
-- [ ] **P1.4.3 Rescan scheduler** (`PeerSync.Engine/Scanning/RescanScheduler.cs`)
+- [ ] **P1.4.3 Rescan scheduler** (`PeerSync.Engine/Scanning/RescanScheduler.cs`) [WIP @Codex 2026-10-19]
   - Done when: each folder rescans at start-up and every `RescanIntervalSeconds` (default 600), at most one folder hashes at a time per disk, and hashing runs at low I/O priority.
 
 ### 7.8 Code: NTFS file id (P1.4.1)
