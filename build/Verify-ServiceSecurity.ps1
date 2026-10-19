@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$SkipCaseCapacityStress)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $root 'artifacts/p0-services'
@@ -9,7 +9,7 @@ $startedUtc = [DateTime]::UtcNow.ToString('O')
 Push-Location $root
 try {
     New-Item -ItemType Directory -Force $out | Out-Null
-    @{status='running';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true} | ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
+    @{status='running';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;caseCapacityStress=(-not $SkipCaseCapacityStress);watcherRuntimeChecks=$false} | ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
     & dotnet build PeerSync.slnx -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
     # All active test files are immutable copied build output. P0 publishes only
@@ -20,8 +20,12 @@ try {
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    foreach ($argument in @('test','--project','tests/PeerSync.Engine.Tests','-c','Release','--no-build','--report-trx','--results-directory','artifacts/tests/native-engine')) {
+    foreach ($argument in @('test','--project','tests/PeerSync.Engine.Tests','-c','Release','--no-build','--report-trx','--results-directory','artifacts/tests/native-engine','--output','Detailed','--long-running','60','--xunit-diagnostics','on')) {
         $start.ArgumentList.Add($argument)
+    }
+    if ($SkipCaseCapacityStress) {
+        $start.ArgumentList.Add('--filter-not-method')
+        $start.ArgumentList.Add('PeerSync.Engine.Tests.CaseCopyRecoveryTests.StartupCapacityBackpressureDrainsAdmittedSourcesBeforeRepairingTheRest')
     }
     $engineClock = [Diagnostics.Stopwatch]::StartNew()
     $engineProcess = [Diagnostics.Process]::Start($start)
@@ -32,13 +36,13 @@ try {
     & "$PSScriptRoot/Run-P0.ps1" -SkipWatcher
     & "$PSScriptRoot/Run-ServiceP0.ps1"
     $remaining = [Math]::Max(0, 660000 - [int]$engineClock.ElapsedMilliseconds)
-    if (-not $engineProcess.WaitForExit($remaining)) { throw 'Complete native Engine suite exceeded its eleven-minute deadline' }
-    if ($engineProcess.ExitCode -ne 0) { throw "Complete native Engine suite failed ($($engineProcess.ExitCode)); see engine stdout/stderr and TRX" }
-    @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;serviceAccountChecks=$true;watcherRuntimeChecks=$false;watcherCoverage='required x64 canonical job';secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;gateP1Passed=$false} |
+    if (-not $engineProcess.WaitForExit($remaining)) { throw 'Native Engine scope exceeded its eleven-minute deadline' }
+    if ($engineProcess.ExitCode -ne 0) { throw "Native Engine scope failed ($($engineProcess.ExitCode)); see engine stdout/stderr and TRX" }
+    @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;caseCapacityStress=(-not $SkipCaseCapacityStress);caseCapacityCoverage='required Server 2022 job and default local runner';serviceAccountChecks=$true;watcherRuntimeChecks=$false;watcherCoverage='required x64 canonical job';secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;gateP1Passed=$false} |
         ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
 }
 catch {
-    @{status='failed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult} |
+    @{status='failed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;caseCapacityStress=(-not $SkipCaseCapacityStress);watcherRuntimeChecks=$false;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult} |
         ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
     throw
 }

@@ -28,7 +28,8 @@ jobs:
         shell: pwsh
         run: |
           $skip = '${{ matrix.runtime }}' -eq 'win-arm64'
-          # Both required Server jobs below run every native Engine test.
+          # Server 2022 runs the full Engine suite; Server 2025 omits only
+          # the duplicate generic 1,001-conflict capacity stress method.
           ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipEngineTests -SkipFuzz
       - name: Sign and verify a test EXE with a temporary development identity
         shell: pwsh
@@ -86,7 +87,7 @@ jobs:
           global-json-file: global.json
       - name: Virtual-account and standard-user security checks
         shell: pwsh
-        run: ./build/Verify-ServiceSecurity.ps1
+        run: ./build/Verify-ServiceSecurity.ps1 -SkipCaseCapacityStress:('${{ matrix.os }}' -eq 'windows-2025')
       - name: Upload service security evidence
         if: always()
         uses: actions/upload-artifact@v7

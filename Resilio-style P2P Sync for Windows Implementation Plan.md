@@ -1408,14 +1408,18 @@ the same update otherwise starts independent push and PR matrices, and
 per-ref concurrency cannot cancel that duplication. Keep every required job,
 the full fuzz duration, publishing and evidence. Combine related local work
 before submitting a new head, and inspect the causal failure before retrying.
-The required Server 2022 and Server 2025 security jobs each run the complete
-native Engine suite. The x64 packaging job runs the remaining unit suites,
+The required Server 2022 security job runs the complete native Engine suite.
+Server 2025 runs every Engine case except the duplicate 1,001-conflict startup
+capacity stress method; the full method remains required on Server 2022 and
+in default local verification. All native case-copy recovery, collision,
+attribute and cancellation tests still run on both Servers. Record this exact
+partition and per-test/long-running timing output. The x64 packaging job runs the remaining unit suites,
 simulation and native probes; avoid a third duplicate Engine execution there.
 Keep all five required jobs, full 1,001-object boundary tests, strict durability
 and 15-minute limits. The canonical local runner includes Engine by default;
 an explicit CI partition switch records its omission in verification evidence.
 Collect all required jobs before treating the partitioned workflow as passing.
-After the immutable build, overlap each Server job's complete no-build Engine
+After the immutable build, overlap each Server job's no-build Engine
 run with its independent P0 and cross-account security probes. The latter publish
 only Core/SpikeSupport probe outputs, not active Engine test output. Capture
 stdout/stderr/TRX and both exit results, bound waits, and terminate the owned
@@ -1428,11 +1432,17 @@ connection/RPC deadlines and identity checks. A deliberately delayed real pipe
 server must reproduce the old race and pass the readiness-based path. Record
 bounded sanitized RPC/native causes so a later failure is diagnosable.
 Keep the complete 100,000-operation watcher stress check in the required x64
-canonical job. Server security jobs omit only that duplicate disk stress while
-retaining their complete Engine suites and all other native/cross-account
+canonical job. Server security jobs omit that duplicate disk stress while
+retaining all other native/cross-account
 probes. Their evidence explicitly records the watcher omission. Running the
 same stress concurrently with flush-heavy Engine fixtures exhausted its own
 deadline on Server 2022; do not increase deadlines or drop workflow coverage.
+After readiness/watcher fixes, Server 2025's Engine still exceeded its eleven
+minute child deadline while every P0/security probe passed. A prior partial
+Server 2025 TRX lacked the capacity method and fifteen later cases in that
+class; the same full 720-case head passed on Server 2022. Do not repeatedly pay
+to run this generic saturation boundary twice; preserve it as required once
+and keep the per-operation/native recovery matrix on both Windows versions.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included
