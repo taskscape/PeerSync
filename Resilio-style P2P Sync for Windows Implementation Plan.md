@@ -767,6 +767,11 @@ ordinary incoming mutations so missing children can arrive. Scanner observations
 refresh its native child-key inventory and changed input epochs wake its retry.
 Keep ordinary publication barriers and final case completion guards intact.
 Enable production staging only after incoming/subtree convergence tests pass.
+First wire an internal connected-coordinator preview: stage on complete scans,
+run one bounded publication pass after case preparation and before completion,
+repair needed paths after publication, and include durable publication retry
+deadlines in the puller's wake calculation. Keep the public production path
+inactive until connected acceptance passes; preserve existing public constructors.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

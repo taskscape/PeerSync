@@ -28,3 +28,11 @@ bounded continuation, unchanged-mtime and RW/RO tests. Native edits that prevent
 exact received-root reconstruction remain deferred; a later conflict/rebase
 protocol must prove their original member obligations before advertising a new
 parent snapshot.
+
+The connected preview uses internal constructor overloads, preserving public
+production behavior. Scanner stages only; one bounded worker pass per coordinator
+pass runs after case preparation/scanning and before final preservation release.
+Recompute changed advertised directory paths and include queue retry deadlines
+in normal coordinator scheduling. History requests a later scan through the
+existing wake path. Retain all connected baseline assertions while enabling
+preview on their nodes; investigate failures before production activation.
