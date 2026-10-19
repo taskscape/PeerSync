@@ -32,6 +32,7 @@ public sealed record NeededRow(string PathKey, byte[] SourceDevice, int Priority
     /// <summary>CPU-only resolver output, admitted atomically with needed work.
     /// Not part of the scheduling cache; read the durable preservation ledger.</summary>
     public IReadOnlyList<CasePreservationSource> CasePreservations { get; init; } = [];
+    public IReadOnlyList<DirectoryMetadataSource> DirectoryMetadataSources { get; init; } = [];
     /// <summary>Resolver-only directive: admit sources atomically but remove
     /// ordinary scheduled work when the original already matches its decision.</summary>
     public bool PreservationAdmissionOnly { get; init; }

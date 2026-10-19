@@ -71,11 +71,11 @@ internal sealed class DirectorySnapshotBlocks : IDisposable
             bytes = response.ToArray(); // Provider buffers never become retained mutable state.
         }
         var node = DirectorySnapshotNode.Open(expected, bytes!);
-        if (missing)
-        {
-            blocks.Put(bytes!, expected.Hash, token);
-            if (++pending >= 128) await FlushAsync(token).ConfigureAwait(false);
-        }
+        // A verified cache object may have survived interruption before catalog
+        // registration. Track its guarded identity too, so the next FULL flush
+        // owns cached and fetched metadata before graph progress commits.
+        blocks.Put(bytes!, expected.Hash, token);
+        if (++pending >= 128) await FlushAsync(token).ConfigureAwait(false);
         return node;
     }
     internal async Task<DirectorySnapshotNode> ReadRootAsync(SignedRecord directory,

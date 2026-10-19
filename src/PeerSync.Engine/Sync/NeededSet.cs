@@ -192,12 +192,21 @@ public sealed class NeededSet
             if (!ignore.IsIgnored(originalWinner.Path, originalWinner.Type == 1)) cases = CaseConflictPolicy.SelectSources(originals);
         }
         var decision = Decide(snapshot);
+        var metadata = new Dictionary<string, DirectoryMetadataSource>(StringComparer.Ordinal);
+        if (snapshot.Local?.Record is { } localDirectory) AddMetadata(VersionView.Open(localDirectory, keys, ownDevice));
+        if (decision.RequiresApply && decision.Winner is { } directoryWinner)
+        {
+            AddMetadata(directoryWinner);
+            if (decision.DesiredRecord is { } desiredDirectory) AddMetadata(VersionView.Open(desiredDirectory, keys, directoryWinner.SourceDevice.ToArray()));
+        }
+        foreach (var source in cases) AddMetadata(VersionView.Open(source.Record, keys, source.SourceDevice));
+        var metadataSources = metadata.Values.ToArray();
         if (!decision.RequiresApply)
         {
-            if (cases.Count == 0) return null;
-            var source = cases[0];
-            return new(snapshot.PathKey, source.SourceDevice, 0)
-            { PreservationAdmissionOnly = true, CasePreservations = cases };
+            if (cases.Count == 0 && metadataSources.Length == 0) return null;
+            byte[] hint = cases.Count != 0 ? cases[0].SourceDevice : metadataSources[0].RouteHint;
+            return new(snapshot.PathKey, hint, 0)
+            { PreservationAdmissionOnly = true, CasePreservations = cases, DirectoryMetadataSources = metadataSources };
         }
         var winner = decision.Winner!; var desired = decision.DesiredRecord!;
         using var hash = Blake3.Hasher.New(); hash.Update("PeerSync pull work v1"u8); hash.Update(desired.Body); hash.Update(desired.Signature); hash.Update(winner.SourceDevice);
@@ -208,8 +217,13 @@ public sealed class NeededSet
         return new(snapshot.PathKey, winner.SourceDevice.ToArray(), 0)
         {
             Work = new(stage, winner.Size, winner.MtimeTicks, hash.Finalize().AsSpan().ToArray()),
-            CasePreservations = cases
+            CasePreservations = cases, DirectoryMetadataSources = metadataSources
         };
+
+        void AddMetadata(VersionView version)
+        {
+            if (Hashing.DirectoryMetadataSources.FromVersion(version) is { } source) metadata.TryAdd(Convert.ToHexString(source.SourceId), source);
+        }
     }
 
     private static bool ActualMatches(LocalFileRow? local, VersionView winner)

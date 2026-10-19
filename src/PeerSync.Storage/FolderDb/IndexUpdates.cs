@@ -89,7 +89,7 @@ public sealed partial class FolderIndex
         int count = 0;
         foreach (var batch in unique.Chunk(1000))
         {
-            var result = await database.WriteDurableAsync<(int Updated, CasePreservationCapacityException? Capacity)>((connection, transaction) =>
+            var result = await database.WriteDurableAsync<(int Updated, IOException? Capacity)>((connection, transaction) =>
             {
                 using var needed = new NeededRewrite(connection, transaction, resolver);
                 int updated = 0;
@@ -100,7 +100,7 @@ public sealed partial class FolderIndex
                     // when capacity is reached, but let the valid prefix drain first.
                     transaction.Save("needed_path");
                     try { needed.Update(path); }
-                    catch (CasePreservationCapacityException capacity)
+                    catch (IOException capacity) when (capacity is CasePreservationCapacityException or DirectoryMetadataCapacityException)
                     {
                         transaction.Rollback("needed_path"); transaction.Release("needed_path");
                         return (updated, capacity);
@@ -160,6 +160,14 @@ public sealed partial class FolderIndex
             FolderMaps.Needed.Validate(row);
             if (PathRules.Key(row.PathKey) != path) throw new InvalidOperationException("Needed resolver returned another path.");
             AdmitCaseSources(connection, transaction, path, row.CasePreservations);
+            if (row.DirectoryMetadataSources.Count != 0)
+            {
+                var metadata = FreezeMetadataSources(row.DirectoryMetadataSources);
+                if (metadata.Any(source => PathRules.Key(source.Path) != path)) throw new InvalidDataException("Metadata admission returned another path.");
+                using var binding = connection.CreateCommand(); binding.Transaction = transaction; binding.CommandText = "SELECT value FROM meta WHERE key='_root-identity';";
+                byte[] root = binding.ExecuteScalar() as byte[] ?? throw new InvalidOperationException("Metadata source root is unbound.");
+                FolderMaps.RequireBytes(root, 24); AdmitMetadataSources(connection, transaction, root, metadata, DateTime.UtcNow.Ticks);
+            }
             if (row.PreservationAdmissionOnly) { remove.Parameters[0].Value = path; remove.ExecuteNonQuery(); return; }
             store.Parameters[0].Value = path; store.Parameters[1].Value = row.SourceDevice; store.Parameters[2].Value = row.Priority;
             store.Parameters[3].Value = (object?)row.Work?.Stage ?? DBNull.Value; store.Parameters[4].Value = (object?)row.Work?.Size ?? DBNull.Value;

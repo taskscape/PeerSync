@@ -32,6 +32,8 @@ public sealed class Puller : IDisposable
     private readonly DirectoryApplier directories;
     private readonly StagingCleaner staging;
     private readonly DirectoryPublicationWorker? publications;
+    private readonly DirectoryMetadataWorker metadata;
+    private long? nextMetadataTicks;
     private readonly Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch;
     private readonly TimeProvider clock;
     private readonly DiagnosticJournal? journal;
@@ -62,6 +64,7 @@ public sealed class Puller : IDisposable
         needed = new(index, keys, own, this.settings, journal: journal);
         scanner = new(rootPath, index, keys, own, timeProvider: clock, settings: this.settings, journal: journal) { StageDirectorySnapshots = directorySnapshots };
         if (directorySnapshots) publications = new(rootPath, index, keys, own, this.settings, clock, journal);
+        metadata = new(rootPath, index, keys, own, clock, fetch, journal);
         files = new(rootPath, index, keys, own, this.settings, journal, clock);
         directories = new(rootPath, index, keys, own, this.settings, journal);
         staging = new(rootPath, index, clock, journal);
@@ -159,14 +162,17 @@ public sealed class Puller : IDisposable
             {
                 try { await needed.RecomputeAsync(published.ChangedPaths, token).ConfigureAwait(false); }
                 catch (CasePreservationCapacityException) { CaseBackpressure(); }
+                catch (DirectoryMetadataCapacityException) { MetadataBackpressure(); }
             }
         }
+        var metadataPass = await metadata.RunAsync(token: token).ConfigureAwait(false); nextMetadataTicks = metadataPass.NextTicks;
         var casePaths = await files.CompleteCaseCopiesAsync(token).ConfigureAwait(false);
         if (casePaths.Count != 0)
         {
             if (neededRepairPending) { scanRetryTicks = 0; Volatile.Write(ref scanRequested, 1); }
             try { await needed.RecomputeAsync(casePaths, token).ConfigureAwait(false); }
             catch (CasePreservationCapacityException) { CaseBackpressure(); }
+            catch (DirectoryMetadataCapacityException) { MetadataBackpressure(); }
             foreach (string path in casePaths)
                 if (index.Needed.Find(path)?.Work is { } descriptor) await index.ClearPullRetryAsync(path, descriptor.Fingerprint, token).ConfigureAwait(false);
         }
@@ -208,7 +214,7 @@ public sealed class Puller : IDisposable
                 mustScan |= requiresScan;
                 if (outcome is FileApplyOutcome.Applied or FileApplyOutcome.Unchanged)
                 {
-                    if (outcome == FileApplyOutcome.Applied) { applied++; if (opensDirectory) { neededRepairPending = true; mustScan = true; } }
+                    if (outcome == FileApplyOutcome.Applied) { applied++; mustScan |= publications is not null; if (opensDirectory) { neededRepairPending = true; mustScan = true; } }
                     else await needed.RecomputeAsync([row.PathKey], token).ConfigureAwait(false);
                     await index.ClearPullRetryAsync(row.PathKey, row.Work.Fingerprint, token).ConfigureAwait(false);
                 }
@@ -275,6 +281,7 @@ public sealed class Puller : IDisposable
             else { scanAttempt = 0; scanRetryTicks = 0; if (result.RequiresFollowupScan) Volatile.Write(ref scanRequested, 1); }
         }
         catch (CasePreservationCapacityException) when (scanned) { CaseBackpressure(); }
+        catch (DirectoryMetadataCapacityException) when (scanned) { MetadataBackpressure(); }
         catch { Volatile.Write(ref scanRequested, 1); throw; }
     }
 
@@ -283,6 +290,13 @@ public sealed class Puller : IDisposable
         neededRepairPending = true; Volatile.Write(ref scanRequested, 1); scanRetryTicks = AddSeconds(Now, 10);
         journal?.TryWrite(new("puller.case_backpressure", "pull") { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Warning,
             ItemsDeferred = index.ReadPendingCasePreservations().Count, RetryInMilliseconds = 10000 });
+    }
+
+    private void MetadataBackpressure()
+    {
+        neededRepairPending = true; Volatile.Write(ref scanRequested, 1); scanRetryTicks = AddSeconds(Now, 10);
+        journal?.TryWrite(new("puller.metadata_backpressure", "directory-metadata")
+            { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Warning, ItemsDeferred = 1, RetryInMilliseconds = 10000 });
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -333,7 +347,10 @@ public sealed class Puller : IDisposable
         long? cases = index.ReadNextCasePreservationTicks(rootId!, now);
         long? result = pull is null ? cases : cases is null ? pull : Math.Min(pull.Value, cases.Value);
         long? publication = publications is null ? null : index.ReadNextDirectoryPublicationTicks(rootId!, now);
-        return result is null ? publication : publication is null ? result : Math.Min(result.Value, publication.Value);
+        result = result is null ? publication : publication is null ? result : Math.Min(result.Value, publication.Value);
+        long? metadataDue = index.ReadNextDirectoryMetadataTicks(rootId!, now);
+        if (nextMetadataTicks is long scheduled) metadataDue = metadataDue is null ? scheduled : Math.Min(metadataDue.Value, scheduled);
+        return result is null ? metadataDue : metadataDue is null ? result : Math.Min(result.Value, metadataDue.Value);
     }
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);
     private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException

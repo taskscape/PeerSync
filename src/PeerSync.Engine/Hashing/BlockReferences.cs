@@ -78,6 +78,20 @@ public sealed class BlockReferences
             Checkpoint?.Invoke("begun");
             var batch = new Dictionary<string, BlockReferenceRow>(StringComparer.Ordinal); int batches = 0;
             var graphs = new DirectorySnapshotGraph(rootPath, index, keys, device, journal); int graphBudget = DirectoryGraphWorkLimit;
+            // Queued original envelopes protect their cache while fetching, even
+            // if their former local row has already been replaced.
+            foreach (var pending in index.ReadDueDirectoryMetadataSources(root, DateTime.MaxValue.Ticks, limit: 1000))
+            {
+                cancellationToken.ThrowIfCancellationRequested(); var version = VersionView.Open(pending.Source.Record, keys, pending.Source.RouteHint);
+                var metadata = DirectoryMetadataSources.FromVersion(version);
+                if (metadata is null || metadata.Path != pending.Source.Path || metadata.Length != pending.Source.Length
+                    || !metadata.SourceId.AsSpan().SequenceEqual(pending.Source.SourceId) || !metadata.Hash.AsSpan().SequenceEqual(pending.Source.Hash))
+                    throw new InvalidDataException("Queued directory metadata source changed.");
+                var current = index.LocalFiles.Find(pending.Source.Path);
+                bool isCurrent = current?.Record is { } record && record.Body.SequenceEqual(version.Record.Body) && record.Signature.SequenceEqual(version.Record.Signature);
+                await AddVersionAsync(version, isCurrent ? BlockReferenceKind.Current : BlockReferenceKind.Needed).ConfigureAwait(false);
+            }
+            if (index.ReadNextDirectoryMetadataTicks(root, DateTime.UtcNow.Ticks) is not null) throw new DirectoryGraphPending();
             // Hints also cover unpublished/withheld/local RO rows. A stale hint
             // can conservatively retain bytes; it can never authorize deletion.
             foreach (var chunk in index.Chunks.ReadAll())
@@ -183,12 +197,16 @@ public sealed class BlockReferences
                 var body = version.ExportBody();
                 if (version.Type == 1 && body.DirectorySnapshotHash.Length != 0)
                 {
+                    var metadata = DirectoryMetadataSources.FromVersion(version)!;
+                    await index.AdmitDirectoryMetadataSourcesAsync(root, [metadata], DateTime.UtcNow.Ticks, cancellationToken).ConfigureAwait(false);
                     var graph = await graphs.AdvanceUnderGateAsync(version.Record,
                         (_, _, _) => throw new DirectoryGraphPending(), graphBudget, cancellationToken).ConfigureAwait(false);
                     graphBudget -= graph.Processed;
                     if (!graph.Complete) throw new DirectoryGraphPending();
                     foreach (var reference in index.ReadDirectoryGraphReferences(graph.Id))
                         await AddAsync(reference.Hash, reference.Length, kind).ConfigureAwait(false);
+                    if (index.ReadDirectoryMetadataSource(graph.Id) is { } queued)
+                        await index.CompleteDirectoryMetadataSourceAsync(queued, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 if (version.Type != 0) return;
