@@ -1520,6 +1520,7 @@ Our own writes need no special suppression: the puller records the new state in 
     - [ ] **P1.5.5c2 Control status delivery and rendered UI** (`PeerSync.Control.Contracts/`, `PeerSync.Service/`, `PeerSync.App/`) [WIP @codex 2026-10-19]
       - Done when: the real control pipe delivers the runtime status source and the app renders reason/minute difference, missing/invalid/disconnected states and recovery without stale updates. Verify real pipe lifecycle/authentication and rendered controls; integrate with production authenticated transport before the parent closes.
       - Implementation constraints: service-instance/sequence and client-generation guards; at most 1,000 rows/256 KiB and bounded subscriptions; real runtime snapshots with production availability explicit. Only the server gets pipe-instance creation rights; identify callers and verify both configured service owner SID and kernel server PID. Test real pipe cancellation/reconnect/identity failures and retain actual WPF render evidence. Full service installation/configuration/control operations remain later mandatory tasks.
+      - Local [contract checkpoint](docs/verification/P1.5.5c2-control-contract-2026-10-19.md): 28 protobuf/mapping cases and all 1,077 canonical cases/native/probe/publishing pass in 131.56 seconds, exit 0 (boundary fuzz skipped). Real pipe/client authentication, rendered UI, production transport and main/CI remain pending.
 
 ### 7.10 Code: resolving concurrent versions (P1.5.1, P1.5.2)
 
