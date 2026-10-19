@@ -794,6 +794,9 @@ required missing graphs continue to block GC and re-admit work. Recover retained
 RO directory originals through bounded rooted case-ledger pages; existing
 `_history-` markers remain file-only. Release completed queue entries only
 against the exact complete non-retiring graph. See the proposal for transitions.
+Metadata route fallback uses two preferred hints plus six paged known devices,
+with a source-specific durable cursor and wraparound, independent of retry UTC
+and source run ordinals. Later authenticated forwarders must remain reachable.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

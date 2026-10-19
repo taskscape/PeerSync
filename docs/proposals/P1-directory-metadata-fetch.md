@@ -68,6 +68,10 @@ barrier and its owner re-admits metadata work during reconciliation. New history
 roots are retained through ordinary pre-replacement source admission;
 root-bound, source-ID/byte-limited case-ledger pages recover retained originals.
 The public cache-fetch path may run without enabling snapshot publication.
+Keep at most two preferred hints plus six known-device routes per attempt.
+Persist a source-specific device-ID cursor with attempt accounting and wrap at
+the end of the rooted device catalog. UTC backoff and global fair run ordering
+must not repeatedly select the same first route page or exclude later forwarders.
 
 Required checks include source replacement/restart, atomic admission rollback,
 bounded continuation and starvation, incomplete-history/current/RO graphs,
