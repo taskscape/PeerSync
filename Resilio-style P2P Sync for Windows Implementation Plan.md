@@ -692,6 +692,12 @@ prevent mtime/vector feedback and pass convergence before activation.
 Retain authenticated signed child membership when local readiness is cleared;
 availability changes are not signed deletions. Metadata capture does not set
 file readiness or claim available bytes; materialization verifies each chunk.
+The next integration slice uses private versioned publication templates while
+retaining the previous signed row, direct-child inventory/dependency checks,
+bounded coordinator continuation between scans and a compact published-input
+cache. No-op roots release drafts without vector/sequence churn. Namespace and
+GC barriers, retry/fairness and readonly reconstruction remain mandatory; see
+docs/proposals/P1-directory-publication-queue.md before enabling scanner changes.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
