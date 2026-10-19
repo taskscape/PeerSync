@@ -1068,7 +1068,7 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.
 - [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
   - Done when: the schema in 7.7 is created by migration 1. Repositories cover `local_files`, `remote_files`, `needed`, `chunks`, `devices`, `archive` and `meta`. Bulk updates commit in batches of 1,000 rows per transaction. Indexing 1M rows takes under 60 s on the reference SSD.
-- [ ] **P1.3.3 Central state database** (`PeerSync.Storage/StateDb/`)
+- [ ] **P1.3.3 Central state database** (`PeerSync.Storage/StateDb/`) [WIP @Codex 2026-10-19]
   - Done when: `peersync.db` has `folders` (id, path, access level, protected key, `settings_json`, paused), `devices`, `pending_approvals` and `audit_log`. Folder keys are stored only through `FolderKeyProtector`.
 
 ### 7.7 Code: SQLite setup and folder schema (P1.3)
