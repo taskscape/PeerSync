@@ -382,7 +382,20 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    distinguish temporary/local reuse from verified network chunks with counts,
    timing and a session ID; they contain no paths, hashes or content.
 4. Re-check the target just before replacing. If it changed since the database last saw it, scan it now and re-run the conflict rules.
-5. If the target exists, `File.Replace(tmp, target, archivePath)` archives the old version and swaps in the new one, keeping the target's permissions. Otherwise `File.Move(tmp, target)`. Set mtime and attributes, then record the new state.
+5. Use the user-approved recoverable handle moves (2026-10-19), superseding the
+   original `File.Replace` example. Keep the verified original and directory
+   guards held; preserve its DACL/creation time on the fully verified, flushed
+   temporary file. Persist a FULL-synchronous intent bound to the root, target
+   and temporary file identities before moving the old handle to an exclusive
+   archive/conflict name. Move the temporary handle into the vacant target
+   without overwriting. Final installation is atomic; archival plus installation
+   has a brief missing-target interval visible to external applications.
+   Serialize scanning/application and recover pending intents before scanning.
+   Finish from verified temporary data, or restore the retained original if the
+   target is vacant. Never overwrite an unknown concurrent target. Commit the
+   local/chunk/sequence/archive/needed state and intent removal atomically with
+   FULL durability. Apply mtime before read-only/hidden attributes. Failure and
+   cancellation preserve all versions and enough identity-bound recovery state.
 6. Apply deletions last by moving files to the archive, then remove emptied directories deepest first.
 
 ### Archive, ignore rules and special files

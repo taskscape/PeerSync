@@ -1,6 +1,9 @@
 # P1.5.3 atomic replacement and recovery decision
 
-Status: proposal only; approval is pending. No atomicity requirement is waived.
+Status: Option A approved by the user on 2026-10-19 and applied to the source
+design and plan. Exact decision: "Approve recoverable handle moves: preserve
+old versions and recover before scanning; external apps may briefly see the
+target missing between archive and installation."
 
 The current source design's apply step 5 and plan.md section 7.11 use
 `File.Replace` for an existing file. The implementation also needs to keep its
@@ -33,7 +36,7 @@ Commit local/chunk/sequence/archive/needed metadata and remove the intent in
 the existing atomic durable transaction. Cover each crash/failure boundary,
 changed targets, locked/read-only files and root/reparse rejection in tests.
 
-Exact plan changes after approval:
+Approved plan changes:
 
 - Replace source apply step 5's File.Replace choice with the above journaled
   root-relative handle moves and explicit external missing-target interval.
@@ -42,7 +45,9 @@ Exact plan changes after approval:
 - Keep all P1.5.2 conflict outcomes, P1.5.3 scheduling/retry requirements,
   P1.5.4 retention requirements, no-lost-version tests and every phase gate.
 
-This changes observable atomicity, so it is not applied without approval.
+This changes observable atomicity with explicit user approval. Implementation
+and integration verification remain pending; approval does not complete a task
+or waive preservation, retries, retention, conflict outcomes or phase gates.
 
 ## Option B: retain strict existing-target atomic replacement
 
