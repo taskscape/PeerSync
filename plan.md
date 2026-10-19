@@ -72,6 +72,8 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.4.3: coalesce startup/periodic/watcher requests and use a process-wide single-folder scan budget to enforce the per-disk limit even across partitions/unknown volume mappings. Release it before 10-600 s retries. Set very-low I/O hints on scanner file handles; report rejected hints. | Sync engine design: Detecting local changes |
+| 2026-10-19 | P1.4.2: bound watcher ingress and pending paths; saturation/native errors request a consumer-side full scan. Use monotonic 2 s quiet/30 s maximum debounce, include both rename paths and emit relative batches. Initially schedule full safe walks for ready batches; committed own-write metadata prevents version loops. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.4.1 benchmark exposed quadratic initial chunk indexing: add schema migration 2 with an index on chunks(path_key). Preserve v1 databases and use the existing backup/transactional migration path. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.4.1: use handle-based directory metadata with 128-bit IDs and root-relative no-reparse file opens; pin root identity and preserve failed subtrees. Directory child-mtime changes alone do not publish versions. RO scans track local state without signing. Correlate scan events and numeric counters without logging names/content. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.3.3: place the shared folder-key protector in Crypto, preserving fixed v1 app entropy and machine-scope DPAPI. Protect a versioned role/FolderId/material frame, verify context on unprotect and clear plaintext buffers. State writes protect internally and key reads are audited. | Security model: Secrets at rest |
@@ -1187,11 +1189,13 @@ PRAGMA user_version = 1;
   - Done when: a full walk skips `.psp`, `*.!psp`, ignored paths and reparse points (recorded, not followed). Unchanged size, mtime, attributes and FileId mean no hashing. A rescan of 100k unchanged files takes under 10 s.
   - Code: 7.8 for the NTFS file id.
   - Local evidence: [scanner verification and 100k-file benchmark](docs/verification/P1.4.1-scanner-2026-10-19.md). Billing is resolved; required integration CI and merge remain pending, so the task stays unchecked.
-- [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`)
+- [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`) [WIP @Codex 2026-10-19]
   - Done when: events are coalesced per path (quiet 2 s, or 30 s maximum). A buffer overflow triggers a full scan. Our own writes don't create new versions.
   - Code: 7.9.
-- [ ] **P1.4.3 Rescan scheduler** (`PeerSync.Engine/Scanning/RescanScheduler.cs`)
+  - Local evidence: [watcher/scheduler verification](docs/verification/P1.4.2-3-watcher-scheduler-2026-10-19.md). Billing is resolved; required integration CI and merge remain pending.
+- [ ] **P1.4.3 Rescan scheduler** (`PeerSync.Engine/Scanning/RescanScheduler.cs`) [WIP @Codex 2026-10-19]
   - Done when: each folder rescans at start-up and every `RescanIntervalSeconds` (default 600), at most one folder hashes at a time per disk, and hashing runs at low I/O priority.
+  - Local evidence: [watcher/scheduler verification](docs/verification/P1.4.2-3-watcher-scheduler-2026-10-19.md). The initial budget serializes folder scans process-wide, including across partitions and unknown mappings.
 
 ### 7.8 Code: NTFS file id (P1.4.1)
 
@@ -1228,6 +1232,9 @@ internal static partial class FileIdentity
 ```
 
 ### 7.9 Code: watcher with debounce (P1.4.2)
+
+Superseded by `src/PeerSync.Engine/Scanning/FolderWatcher.cs`: bounded ingress
+and pending state, monotonic debounce and consumer-side full-scan recovery.
 
 **Tricky:**
 

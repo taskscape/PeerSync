@@ -42,6 +42,7 @@ public static class FileHasher
         IProgress<FileHashProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         using var handle = root.OpenFile(relativePath);
+        FileIoPriority.SetVeryLow(handle);
         await using var file = new FileStream(handle, FileAccess.Read, 0, isAsync: false);
         return await HashOpenedAsync(file, () => root.OpenFile(relativePath), progress, cancellationToken).ConfigureAwait(false);
     }

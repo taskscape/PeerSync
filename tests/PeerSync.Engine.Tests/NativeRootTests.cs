@@ -23,6 +23,7 @@ public sealed class NativeRootTests : IDisposable
         entries["é.txt"].MtimeTicks.ShouldBe(File.GetLastWriteTimeUtc(Path.Combine(root, "é.txt")).Ticks);
         entries["dir"].IsDirectory.ShouldBeTrue();
         using var handle = native.OpenFile("é.txt");
+        FileIoPriority.SetVeryLow(handle);
         using var stream = new FileStream(handle, FileAccess.Read, 0, isAsync: false);
         byte[] actual = new byte[bytes.Length];
         await stream.ReadExactlyAsync(actual, TestContext.Current.CancellationToken);

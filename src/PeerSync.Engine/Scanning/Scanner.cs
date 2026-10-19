@@ -37,6 +37,7 @@ public sealed class Scanner : IDisposable
     private readonly DiagnosticJournal? journal;
     private readonly int hashConcurrency;
     private readonly SemaphoreSlim scanGate = new(1);
+    internal string RootPath => rootPath;
 
     public Scanner(string rootPath, FolderIndex index, FolderKeys keys, byte[] deviceId,
         IgnoreMatcher? ignore = null, int? hashConcurrency = null, TimeProvider? timeProvider = null,
