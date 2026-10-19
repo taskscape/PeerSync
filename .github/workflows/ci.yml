@@ -86,13 +86,7 @@ jobs:
           global-json-file: global.json
       - name: Virtual-account and standard-user security checks
         shell: pwsh
-        run: |
-          dotnet build PeerSync.slnx -c Release
-          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-          ./build/Run-P0.ps1
-          ./build/Run-ServiceP0.ps1
-          dotnet test --project tests/PeerSync.Engine.Tests -c Release --no-build --report-trx --results-directory artifacts/tests/native-engine
-          if ($LASTEXITCODE -ne 0) { throw 'Native scanner/hasher tests failed' }
+        run: ./build/Verify-ServiceSecurity.ps1
       - name: Upload service security evidence
         if: always()
         uses: actions/upload-artifact@v7

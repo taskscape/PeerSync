@@ -1052,7 +1052,7 @@ role and run ID; historical events must neither satisfy nor fail its assertions.
 Keep earlier logs for diagnosis and retain the existing timeout/progress checks.
 
 App and service debug runs keep separate GUID directories under their respective
-log roots. Shared startup/periodic retention removes only inactive owned run
+log roots. Shared startup/periodic/close retention removes only inactive owned run
 directories: cap eligible inactive runs at eight and 100 MB and expire their
 debug files after 24 hours. Active writers retain per-run rotation and are never
 deleted to meet a quota. Unknown/unmarked content and inaccessible/linked/reparse
@@ -1060,6 +1060,10 @@ objects are preserved with a deferred/pressure diagnostic. Pin roots/ancestors
 and owned run directories, use relative no-reparse handles, verify ownership
 markers and remove exact guarded objects, never recursive pathname deletion.
 Concurrent processes keep distinct journals and coordinate the shared sweep.
+Close the journal before releasing its native active-writer lease; then sweep
+the newly inactive run before releasing the root. Bound contention waits and
+defer inaccessible work. Preserve unmarked legacy directories, since a filename
+alone cannot establish their ownership or inactivity.
 
 - **Logs:** Serilog rolling files, 7 days and 100 MB total (Resilio's defaults). Warnings and errors also go to the Windows Event Log. Keys and file contents are never logged.
 - **Metrics:** `System.Diagnostics.Metrics` counters (bytes up and down, peers, queue depth, hashing rate), streamed to the UI.
