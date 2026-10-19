@@ -33,6 +33,27 @@ public sealed class ApplyJournalTests : IDisposable
     }
 
     [Fact]
+    public async Task DeferralAccountsArchivesAndWithholdsStaleLocalStateInTheSameIdempotentTransaction()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        await index.LocalFiles.UpsertAsync([Row(OldHash)], Token);
+        var row = index.LocalFiles.Find("file")!;
+        var intent = new ApplyIntent(Guid.NewGuid(), "file", row.LocalSequence, [1]);
+        await index.ReserveApplyAsync(intent, Token);
+        var archive = new ArchiveRow(0, "file", ".psp/archive/file~20261019-010000", DateTime.UtcNow.Ticks, row.Size, OldHash);
+        using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(Token); cancelled.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(() => index.DeferApplyAsync(intent, [archive], cancelled.Token));
+        index.Archive.Count().ShouldBe(0); index.ReadApplyIntents().Count().ShouldBe(1);
+        index.LocalFiles.Find("file")!.Flags.ShouldBe(LocalFileState.None);
+        (await index.DeferApplyAsync(intent, [archive], Token)).ShouldBeTrue();
+        (await index.DeferApplyAsync(intent, [archive], Token)).ShouldBeFalse();
+        index.Archive.Count().ShouldBe(1); index.ReadApplyIntents().ShouldBeEmpty();
+        index.LocalFiles.Find("file")!.Flags.ShouldBe(LocalFileState.NeedsRescan);
+        index.LocalFiles.Find("file")!.LocalSequence.ShouldBe(row.LocalSequence);
+        index.ReadIndexBatch(0).Records.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task ReservationIsIdempotentAndPerPathExclusiveAndRecoveryStateUpdatesCompareExactBytes()
     {
         await using var index = await FolderIndex.OpenAsync(Database, Token);

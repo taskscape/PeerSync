@@ -72,6 +72,8 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.5.3b: assemble in exclusively created GUID sibling temporaries with persisted root/file ownership. Park staging ownership for verified restart reuse. Keep retained-file and ancestor guards through durable completion; concurrent targets trigger atomic archive accounting and stale-record suppression until rescan. | Sync engine design: Applying remote changes, steps 3 and 5 |
+| 2026-10-19 | User approved recoverable handle moves: retain the guarded old version, durably journal before moving it, atomically install into the vacant target, and recover before scanning. External apps may briefly see the target missing. This supersedes the strict existing-target atomic replacement choice below; all preservation, retry, conflict and phase-gate requirements remain. | Sync engine design: Applying remote changes, step 5 |
 | 2026-10-19 | P1 review repairs: select RO winners using signed vectors, merge cached knowledge afterward, preserve nested vector unknown fields, reject unsupported attributes and use safe conflict-name fallback stems. Engine diagnostics use best-effort writes so logging cannot change sync outcomes. | Sync engine design: Version vectors and conflicts; deployment diagnostics |
 | 2026-10-19 | P1.5.3b: share a per-index asynchronous gate across scans and filesystem apply/recovery, and reject scans with pending apply intent before walking. Cancellation releases component gates; unrelated folder owners remain independent. | Sync engine design: Metadata database |
 | 2026-10-19 | P1.5.3: preserve atomic existing-target installation and the held verified target guard; validate native replacement/POSIX semantics and no-overwrite old-object retention before coordinator integration. Unsupported behavior fails without substituting a two-rename gap. | Sync engine design: Applying remote changes |
@@ -1346,9 +1348,10 @@ Our own writes need no special suppression: the puller records the new state in 
   - [ ] **P1.5.3a Durable apply intent and index completion** (`PeerSync.Storage/FolderDb/ApplyJournal.cs`) [WIP @Codex 2026-10-19]
     - Done when: migration 4 creates bounded per-path intents through the existing backup path; intent lifecycle and completion use FULL-synchronous serialized transactions. Completion atomically commits local/chunk/sequence/archive/needed state and removes the intent. Failure, cancellation and local-sequence races preserve recoverable intent; regression tests cover reopening and rollback.
     - Local implementation and [verification](docs/verification/P1.5.3a-apply-journal-2026-10-19.md) are ready: 36 Storage cases, atomic rollback/reopening/race checks and a 5.75 s million-row indexing regression. Required CI and merge are pending; filesystem recovery/coordinator remain part of P1.5.3.
-  - [ ] **P1.5.3b Atomic file installation and startup recovery** (`PeerSync.Engine/Sync/FileApplier.cs`) [WIP @Codex 2026-10-19]
-    - Done when: verified assembly and metadata preparation feed atomic installation with old versions retained, guarded target rechecks, durable root/file-bound recovery intent and safe restart recovery before scanning. Unknown concurrent files are preserved; cancellation/failure and each mutation boundary have integration coverage. Parent scheduling/directory/conflict requirements remain mandatory.
-    - [Shared folder gate and capability checks](docs/verification/P1.5.3b-folder-gate-2026-10-19.md) pass locally. Guarded POSIX replacement is unsupported on this local machine; [the atomicity proposal](docs/proposals/P1-atomic-replacement-recovery.md) awaits a user decision. Atomicity is not waived, and the installation/recovery coordinator remains unimplemented.
+  - [ ] **P1.5.3b Recoverable archival, atomic final installation and startup recovery** (`PeerSync.Engine/Sync/FileApplier.cs`) [WIP @Codex 2026-10-19]
+    - Done when: verified assembly and metadata preparation feed a guarded old-handle move followed by atomic no-overwrite final installation, with durable root/file-bound recovery intent and safe restart recovery before scanning. The pair permits the user-approved brief missing-target interval visible to external apps. Unknown concurrent files are preserved; cancellation/failure and each mutation boundary have integration coverage. Parent scheduling/directory/conflict requirements remain mandatory.
+    - [Shared folder gate and capability checks](docs/verification/P1.5.3b-folder-gate-2026-10-19.md) pass locally. Guarded POSIX replacement is unsupported on this local machine. The user approved [recoverable handle moves](docs/proposals/P1-atomic-replacement-recovery.md) on 2026-10-19; the coordinator is in progress.
+    - Regular-file installation/deletion, verified staging reuse, metadata-only/case changes and startup recovery are implemented with [local integration evidence](docs/verification/P1.5.3b-recoverable-install-2026-10-19.md). Directory/type/conflict coordination, scheduling and stale-temp retention/cleanup still belong to the parent integration; the task remains unchecked pending those checks, CI and merge.
 - [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) [WIP @Codex 2026-10-19]
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
 - [ ] **P1.5.5 Clock-skew guard** (`PeerSync.Engine/Sync/ClockGuard.cs`)
@@ -1403,6 +1406,16 @@ static LoserFate FateOf(VersionView loser, FolderSettings s) =>
 ```
 
 ### 7.11 Code: applying a downloaded file safely (P1.5.3)
+
+The example below is superseded by the user-approved recoverable protocol in
+source design apply step 5 (2026-10-19). It is historical pseudocode, not the
+implementation contract. Use root-relative guarded handles and FULL-durable
+intents, retain the old version without overwriting, then atomically install
+the verified temporary file into the vacant target. External applications may
+observe the brief missing-target interval. Recover before scanning, preserve
+unknown targets, and commit the index/archive state and intent removal together.
+Temporary reuse requires persisted root/file ownership plus byte verification;
+never write or delete an unowned file merely because its name ends in `.!psp`.
 
 **Tricky:**
 

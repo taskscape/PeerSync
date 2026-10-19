@@ -373,7 +373,13 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
 
 1. Create new directories, shallowest first.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
-3. For each file, assemble it in a hidden temp file next to the target (`name.ext.!psp`, like Resilio's `.!sync`), from local chunks first, then network chunks. A new file created there inherits that directory's permissions. Verify every chunk and then the whole-file hash.
+3. For each file, assemble it in an exclusively created hidden `GUID.!psp`
+   sibling next to the target, from local chunks first, then network chunks.
+   This supersedes the predictable `name.ext.!psp` example. A new file created
+   there inherits that directory's permissions. Persist ownership using the
+   pinned root identity and file ID before assembly; reuse parked bytes only
+   when those identities still match. Never truncate or delete unowned names.
+   Verify every chunk and then the whole-file hash.
    Existing temporary bytes are also reusable only after chunk verification.
    Local index entries are hints: reject reparse traversal, verify the actual
    bytes and try at most 64 candidates per chunk before network fallback.
@@ -382,7 +388,23 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    distinguish temporary/local reuse from verified network chunks with counts,
    timing and a session ID; they contain no paths, hashes or content.
 4. Re-check the target just before replacing. If it changed since the database last saw it, scan it now and re-run the conflict rules.
-5. If the target exists, `File.Replace(tmp, target, archivePath)` archives the old version and swaps in the new one, keeping the target's permissions. Otherwise `File.Move(tmp, target)`. Set mtime and attributes, then record the new state.
+5. Use the user-approved recoverable handle moves (2026-10-19), superseding the
+   original `File.Replace` example. Keep the verified original and directory
+   guards held; preserve its DACL/creation time on the fully verified, flushed
+   temporary file. Persist a FULL-synchronous intent bound to the root, target
+   and temporary file identities before moving the old handle to an exclusive
+   archive/conflict name. Move the temporary handle into the vacant target
+   without overwriting. Final installation is atomic; archival plus installation
+   has a brief missing-target interval visible to external applications.
+   Serialize scanning/application and recover pending intents before scanning.
+   Finish from verified temporary data, or restore the retained original if the
+   target is vacant. Never overwrite an unknown concurrent target. Commit the
+   local/chunk/sequence/archive/needed state and intent removal atomically with
+   FULL durability. Apply mtime before read-only/hidden attributes. Failure and
+   cancellation preserve all versions and enough identity-bound recovery state.
+   If an unknown target wins a race, account for verified retained originals,
+   mark stale local metadata for rescan and remove the intent in one durable
+   transaction. Keep directory and original-file guards through that commit.
 6. Apply deletions last by moving files to the archive, then remove emptied directories deepest first.
 
 ### Archive, ignore rules and special files

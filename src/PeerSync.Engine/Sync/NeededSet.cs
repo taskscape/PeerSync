@@ -121,7 +121,7 @@ public sealed class NeededSet
             fate, blocked ? "read-only-local-change" : null);
     }
 
-    private NeededRow? ToNeededRow(FolderPathSnapshot snapshot)
+    internal NeededRow? ToNeededRow(FolderPathSnapshot snapshot)
     {
         var decision = Decide(snapshot);
         return decision.RequiresApply ? new(snapshot.PathKey, decision.Winner!.SourceDevice.ToArray(), 0) : null;

@@ -96,6 +96,14 @@ internal sealed class DirectoryLease : IDisposable
         return SafeFileTree.Open(parent, name, false, mutation ? 0x00130181u : 0x00100081u, mutation ? 1u : 7u, 1);
     }
 
+    // Only call after reading a persisted ownership identity; verify that identity
+    // before writing. Opening never truncates an existing temporary file.
+    public SafeFileHandle OpenOwnedTemporary(string name)
+    {
+        Check(name, temporary: true);
+        return SafeFileTree.Open(parent, name, false, 0x00170187, 0, 1);
+    }
+
     public void MoveHere(SafeFileHandle file, string name, bool temporary = false)
     {
         Check(name, temporary);

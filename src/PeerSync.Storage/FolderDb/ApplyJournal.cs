@@ -40,6 +40,36 @@ internal sealed class ApplyIntentJsonConverter : JsonConverter<ApplyIntent>
 
 public sealed partial class FolderIndex
 {
+    /// <summary>Leave an unknown concurrent filesystem target untouched. Account
+    /// for retained originals, withhold the stale local record until rescan, and
+    /// remove the exact intent together. The caller has already verified archives.</summary>
+    public Task<bool> DeferApplyAsync(ApplyIntent expected, IReadOnlyList<ArchiveRow> archives,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(archives);
+        if (archives.Count > 1000) throw new ArgumentOutOfRangeException(nameof(archives));
+        var retained = archives.Select(a => a with { FileHash = a.FileHash?.ToArray() }).ToArray();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var archive in retained)
+        {
+            FolderMaps.Archive.Validate(archive);
+            if (archive.Id != 0 || PathRules.Key(archive.OriginalPath) != expected.PathKey || !paths.Add(archive.ArchivePath))
+                throw new ArgumentException("Invalid deferred archives.", nameof(archives));
+        }
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            var current = ReadIntent(connection, transaction, expected.Id);
+            if (current is null) return false;
+            RequireSameIntent(current, expected); RequireExpectedSequence(connection, transaction, expected);
+            Archive.WriteBatch(connection, transaction, retained, cancellationToken);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "UPDATE local_files SET flags=flags|4 WHERE path_key=$path;";
+            command.Parameters.AddWithValue("$path", expected.PathKey); command.ExecuteNonQuery();
+            cancellationToken.ThrowIfCancellationRequested();
+            RemoveIntent(connection, transaction, expected.Id); return true;
+        }, cancellationToken);
+    }
+
     /// <summary>Commit intent before destructive filesystem work. Null expected sequence means no local row.
     /// An exact retry is idempotent; another pending operation on the same path is rejected.</summary>
     public Task<bool> ReserveApplyAsync(ApplyIntent intent, CancellationToken cancellationToken = default)
