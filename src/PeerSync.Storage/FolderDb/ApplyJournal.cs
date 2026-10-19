@@ -198,6 +198,16 @@ public sealed partial class FolderIndex
     /// marker, optional archive and exact intent removal commit together.</summary>
     public Task<bool> CommitHistoryAsync(ApplyIntent expected, MetaRow marker, ArchiveRow? archive,
         CancellationToken cancellationToken = default)
+        => CommitHistoryCoreAsync(expected, marker, archive, null, cancellationToken);
+
+    /// <summary>Engine-authenticated history and verified native location
+    /// accounting commit in the same FULL transaction as the marker/intent.</summary>
+    public Task<bool> CommitProtectedHistoryAsync(ApplyIntent expected, MetaRow marker, ArchiveRow? archive,
+        HistoryArchiveProtection protection, CancellationToken cancellationToken = default)
+        => CommitHistoryCoreAsync(expected, marker, archive, FreezeHistoryProtection(protection), cancellationToken);
+
+    private Task<bool> CommitHistoryCoreAsync(ApplyIntent expected, MetaRow marker, ArchiveRow? archive,
+        HistoryArchiveProtection? protection, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(marker);
         if (marker.Key.Length != 73 || !marker.Key.StartsWith("_history-", StringComparison.Ordinal)
@@ -205,6 +215,8 @@ public sealed partial class FolderIndex
             || marker.Value is not { Length: > 0 and <= ApplyIntent.MaxPayloadBytes })
             throw new ArgumentException("Invalid history marker.", nameof(marker));
         var frozen = marker with { Value = marker.Value.ToArray() };
+        if (protection is not null && PathRules.Key(protection.OriginalPath) != expected.PathKey)
+            throw new ArgumentException("History retention does not match its source path.", nameof(protection));
         ArchiveRow? retained = archive is null ? null : archive with { FileHash = archive.FileHash?.ToArray() };
         if (retained is not null)
         {
@@ -219,6 +231,7 @@ public sealed partial class FolderIndex
             RequireSameIntent(current, expected); RequireExpectedSequence(connection, transaction, expected);
             if (retained is not null) Archive.WriteBatch(connection, transaction, [retained], cancellationToken);
             Meta.WriteBatch(connection, transaction, [frozen], cancellationToken);
+            if (protection is not null) WriteHistoryProtection(connection, transaction, frozen, protection);
             cancellationToken.ThrowIfCancellationRequested(); RemoveIntent(connection, transaction, expected.Id); return true;
         }, cancellationToken);
     }

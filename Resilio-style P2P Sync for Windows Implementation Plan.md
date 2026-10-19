@@ -222,6 +222,16 @@ SQLite's online backup API (including committed WAL data), then apply SQL and
 Microsoft.Data.Sqlite's async ADO.NET calls execute synchronously, the writer
 runs on a worker task rather than blocking the service caller.
 
+Fresh database initialization reserves the file with CreateNew. Under SQLite's
+immediate writer transaction it must still have version zero and an empty schema
+before all initial migrations and the final version are committed together.
+There is no prior user state to back up in this case. Any existing file (including
+an empty version-zero database), or a newly reserved file another process has
+populated, retains the ordinary backup-before-each-step upgrade path. Failed or
+cancelled initial DDL rolls back the entire schema; startup never exposes a
+partially initialized database. Keep the full native checks and 15-minute CI
+limit; reduce initialization I/O rather than skipping durability tests.
+
 Destructive filesystem application requires a durable intent first. Add an
 `apply_intents` journal keyed by operation ID and unique path key, with the
 expected local sequence and a bounded versioned engine recovery payload.
@@ -364,6 +374,113 @@ detached sources, so archive-row removal/reuse cannot make an unknown source
 silently disappear from the reference safety checks. Missing/changed/locked/
 linked/reparse sources without a manifest remain uncovered and prevent future
 sweeping until explicit policy release is implemented.
+Retention must account for history reuse before releasing references or
+pruning physical archives. A newly retained authenticated snapshot can share an
+older private archive with matching bytes: FULL-durable retention accounting
+must protect the newer history's observation time while preserving the reused
+file's metadata. Age selection and capacity ordering use that effective
+retention time. Do not attach a new hold to an archive already reserved for
+policy deletion; retain another verified copy instead. Existing history markers
+must receive equivalent authenticated/root-bound accounting before pruning.
+Legacy history bootstrap authenticates each exact marker and checks the pinned
+root. Reuse a matching identity/hash/length under a held native guard when its
+private source is still retainable, then FULL-account the unchanged marker.
+Otherwise reconstruct the authenticated bytes through the ordinary kind-4
+intent path, preserving the original observation time and current user files.
+Missing/corrupt blocks or invalid markers fail visibly with prior protection
+and any recovery intent intact. Bootstrap waits for pending application recovery.
+Reconstruction also reserves the archive metadata namespace: do not install at
+an already indexed path even when its file is absent. Index the invariant
+uppercase archive path, backfill older rows in bounded durable batches before
+opening the index, and keep the original spelling. This prevents ambiguous
+source accounting without quadratic archive enumeration or ASCII-only matching.
+Bind new archive retirement authorizations to stable provenance source IDs,
+so a completed witness cannot authorize a later archive row which reuses the
+same numeric ID and metadata. Legacy orphan protection, explicit private/public
+history policy release, owned-object grace/cap selection, FULL-durable deletion
+intents and recovery with fresh references remain required before enabling
+block sweeping. Unknown, changed, linked, locked or reparse objects are preserved.
+Policy reference retirement runs under both folder/reference gates after
+authenticated bootstrap and before a fresh snapshot. FULL-delete an exact
+accounted marker only after its observation window expires or its private
+source has a completed, source-bound policy witness no older than the hold.
+Public history additionally requires an authenticated published local row at
+its conflict location, proving that ordinary current/deletion tracking has
+observed that copy. An unobserved or unpublished public copy keeps its marker.
+Release a private provenance source only when no history holds remain and
+its age expires or a source-bound policy retirement completes; pending native
+retirements defer release. Record the root/source/policy authorization durably,
+including for detached sources. Absence alone and legacy unbound witnesses do
+not authorize release. New history reuse atomically cancels an earlier source
+release. Reference builders exclude explicitly released archive sources and
+their staged content, while independently preserving current/needed/history
+references. Policy retirement itself never deletes filesystem data.
+Owned block cleanup records first-unreferenced observation durably in bounded
+batches. A fresh activated reference resets that observation; re-registration
+or identity/length changes also reset it. New catalog rows are distinguished
+from pre-cleanup rows by migration, so a once-initialized root-bound legacy
+window protects every older owned row for ArchiveDays without guessing from
+old capture timestamps. Keep unreferenced blocks for ArchiveDays normally;
+capacity pressure may retire them after a minimum 24 hours of observed grace.
+Capacity uses the configured archive percentage of the root volume and never
+evicts referenced or legacy-protected bytes. Report pressure that required
+references prevent satisfying. Process at most 1,000 objects per deletion pass.
+Hold the filesystem gate then the reference gate through fresh authenticated
+coverage, orphan selection and native deletion/recovery. Pending applications,
+uncovered archive sources and deferred capture proofs prevent sweeping.
+Under a held independent-file identity/hash/length guard, reserve a FULL
+deletion intent bound to the exact owned object and orphan observation before
+deleting that held object. FULL completion removes only matching ownership,
+orphan state and the exact intent after native absence is proven. Recovery
+refreshes references: cancel a still-present deletion when references, ownership
+or grace have changed; preserve unknown/changed/linked/locked/reparse data.
+If deletion already occurred before a new reference arrived, complete recovery
+and withhold stale local readiness for rescan/backfill. Never treat missing
+bytes as ready. Keep intent metadata bounded and recover before new sweeps.
+Incomplete capture expiry is a separate owned-temporary policy, not permission
+to discard a corrupt installed block. After at least 24 hours from its flushed
+capture proof, an unreferenced strict partial prefix may retire only after
+fully authenticated archive/history coverage and no pending application work.
+Verify the pinned root, independent proof/data objects, proof checksum and both
+native IDs. FULL-reserve an exact proof/root/data/prefix-length/prefix-hash
+retirement before deleting the guarded prefix, then remove only that verified
+proof and FULL-complete. Unknown, replaced, linked, locked, reparse, oversized
+or full-length corrupt objects remain untouched. The prefix was never a ready
+published block; its proof records creation before writing, not a completed hash.
+An expected hash may remain referenced when a duplicate complete block already
+exists. Permit prefix retirement in that case only with an independently
+verified, durably cataloged root/hash/length/file-ID replacement held under a
+read guard through FULL completion. Bind its ID in the retirement. Revalidate
+it on restart; a lost replacement cancels present-prefix retirement, or
+withholds readiness if prefix deletion already occurred. Do not let obsolete
+duplicate prefixes block all later maintenance indefinitely.
+Ordinary capture recovery defers proofs with pending retirements. Recovery uses
+fresh references and preserves changed proof/prefix bytes: cancel a still-present
+retirement if its expected hash is needed again, or complete already missing
+data with local readiness withheld. Retain durable authority if a proof vanished
+while its owned prefix is still needed. Rebuild references after capture cleanup
+and keep normal block sweeping disabled while any unresolved capture remains.
+Share the 1,000-owned-data-operation budget across captures and completed blocks.
+Recover old completed-block deletion intents before starting new partial work.
+When capture proofs still defer, recovery may cancel a present deletion or
+reconcile already absent data, but must not delete present block data. This
+keeps readiness truthful and frees journal capacity without bypassing the
+capture barrier. Share the 1,000 pending-journal bound across both intent tables.
+Historical metadata cleanup follows a fresh fully covered reference snapshot
+under both gates. FULL-mark explicitly released content manifests as retiring
+before draining at most 1,000 metadata mutations per batch. Active/pending
+readers and capture activation exclude retiring manifests; later captures do
+not cascade-delete their remaining chunks. The durable retiring state permits
+restart continuation without exposing a partially drained active manifest.
+Before renewing any history hold by reusing a guarded native copy, verify and
+durably recapture its exact signed chunks. A renewed source can then use its
+authenticated history/new content while an older retiring manifest finishes.
+Preserve native archive rows and attached provenance. Remove detached released
+sources only after all content, holds, coverage and completed witness links are
+drained; preserve pending or foreign recovery links. Delete only completed,
+unlinked, unneeded policy witnesses older than ArchiveDays. Never infer policy
+release from absence. Keep byte references, needed work, orphan clocks and
+deletion journals unchanged. Report remaining cleanup work for prompt retries.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.

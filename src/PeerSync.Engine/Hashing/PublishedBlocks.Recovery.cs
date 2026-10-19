@@ -26,6 +26,7 @@ public sealed partial class PublishedBlocks
             foreach (string name in names)
             {
                 cancellationToken.ThrowIfCancellationRequested(); Guid session = Guid.NewGuid();
+                if (name.Length == 40 && Guid.TryParseExact(name[..^8], "N", out var capture) && index.HasCaptureRetirement(capture)) { deferred++; continue; }
                 try
                 {
                     using var marker = home.OpenFile(name, mutation: true);

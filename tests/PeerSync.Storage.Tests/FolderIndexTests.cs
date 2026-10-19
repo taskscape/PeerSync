@@ -81,11 +81,17 @@ public sealed class FolderIndexTests : IDisposable
         Directory.GetFiles(root, "*.pre-v9-to-v10-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v10-to-v11-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v11-to-v12-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v12-to-v13-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v13-to-v14-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v14-to-v15-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v15-to-v16-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v16-to-v17-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v17-to-v18-*.bak").Length.ShouldBe(1);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        ((long)command.ExecuteScalar()!).ShouldBe(12);
+        ((long)command.ExecuteScalar()!).ShouldBe(18);
         command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
         command.Parameters.AddWithValue("$path", "FILE");
         var details = new List<string>();

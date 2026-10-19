@@ -29,7 +29,7 @@ public sealed partial class FolderIndex
             if (frozen.RootId is not null && !frozen.RootId.AsSpan().SequenceEqual(root)) throw new InvalidOperationException("Archive source belongs to another root.");
             RequireArchiveContentSource(connection, transaction, frozen);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "DELETE FROM archive_contents WHERE source_id=$source AND active=0; "
+            command.CommandText = "DELETE FROM archive_contents WHERE source_id=$source AND active=0 AND retiring=0; "
                 + "INSERT INTO archive_contents(id,source_id,root_id,file_id,size,file_hash,verified_ticks,active) VALUES($id,$source,$root,$file,$size,$hash,$ticks,0);";
             command.Parameters.AddWithValue("$source", frozen.SourceId.ToString("N")); command.Parameters.AddWithValue("$id", id.ToString("N"));
             command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$file", file); command.Parameters.AddWithValue("$size", frozen.Archive.Size);
@@ -88,7 +88,7 @@ public sealed partial class FolderIndex
             source.Parameters.AddWithValue("$hash", state.FileHash); source.Parameters.AddWithValue("$root", state.RootId);
             if ((long)source.ExecuteScalar()! != 1) throw new InvalidOperationException("Archive content source changed.");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "DELETE FROM archive_contents WHERE source_id=$source AND id<>$id; UPDATE archive_contents SET active=1 WHERE id=$id;";
+            command.CommandText = "DELETE FROM archive_contents WHERE source_id=$source AND id<>$id AND retiring=0; UPDATE archive_contents SET active=1 WHERE id=$id;";
             command.Parameters.AddWithValue("$source", state.SourceId.ToString("N")); command.Parameters.AddWithValue("$id", contentId.ToString("N")); command.ExecuteNonQuery(); return true;
         }, cancellationToken);
     }
@@ -96,7 +96,7 @@ public sealed partial class FolderIndex
     public ArchiveContentSnapshot? FindActiveArchiveContent(Guid sourceId)
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT " + ArchiveContentColumns + " FROM archive_contents WHERE source_id=$source AND active=1;";
+        command.CommandText = "SELECT " + ArchiveContentColumns + " FROM archive_contents WHERE source_id=$source AND active=1 AND retiring=0;";
         command.Parameters.AddWithValue("$source", sourceId.ToString("N")); using var reader = command.ExecuteReader(); return reader.Read() ? ReadArchiveContent(reader) : null;
     }
 
@@ -109,14 +109,14 @@ public sealed partial class FolderIndex
     public IEnumerable<ArchiveContentSnapshot> ReadPendingArchiveContents()
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT " + ArchiveContentColumns + " FROM archive_contents WHERE active=0 ORDER BY source_id;";
+        command.CommandText = "SELECT " + ArchiveContentColumns + " FROM archive_contents WHERE active=0 AND retiring=0 ORDER BY source_id;";
         using var reader = command.ExecuteReader(); while (reader.Read()) yield return ReadArchiveContent(reader);
     }
 
     private IEnumerable<LocalChunk> ReadArchiveContentChunksCore(Guid contentId, bool active)
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT c.file_offset,c.length,c.hash FROM archive_content_chunks c JOIN archive_contents a ON a.id=c.content_id WHERE a.id=$id AND a.active=$active ORDER BY c.file_offset;";
+        command.CommandText = "SELECT c.file_offset,c.length,c.hash FROM archive_content_chunks c JOIN archive_contents a ON a.id=c.content_id WHERE a.id=$id AND a.active=$active AND a.retiring=0 ORDER BY c.file_offset;";
         command.Parameters.AddWithValue("$id", contentId.ToString("N")); command.Parameters.AddWithValue("$active", active ? 1 : 0); using var reader = command.ExecuteReader();
         while (reader.Read()) yield return new(reader.GetInt64(0), reader.GetInt32(1), reader.GetFieldValue<byte[]>(2));
     }
@@ -142,7 +142,7 @@ public sealed partial class FolderIndex
     private static ArchiveContentSnapshot? FindArchiveContent(SqliteConnection connection, SqliteTransaction transaction, Guid contentId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT " + ArchiveContentColumns + " FROM archive_contents WHERE id=$id;";
+        command.CommandText = "SELECT " + ArchiveContentColumns + " FROM archive_contents WHERE id=$id AND retiring=0;";
         command.Parameters.AddWithValue("$id", contentId.ToString("N")); using var reader = command.ExecuteReader(); return reader.Read() ? ReadArchiveContent(reader) : null;
     }
     private static ArchiveContentSnapshot ReadArchiveContent(SqliteDataReader r) => new(Guid.ParseExact(r.GetString(0), "N"), Guid.ParseExact(r.GetString(1), "N"),

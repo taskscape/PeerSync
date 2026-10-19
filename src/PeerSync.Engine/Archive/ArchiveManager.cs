@@ -74,6 +74,11 @@ public sealed partial class ArchiveManager
                 TimeSpan retry = Retry(); Log("archive.wait_recovery", session, code: "pending-apply", retry: retry);
                 return new(0, 0, 0, 0, null, retry, WaitingForRecovery: true);
             }
+            if (index.HasUnaccountedHistory(identity))
+            {
+                TimeSpan retry = Retry(); Log("archive.wait_recovery", session, code: "history-accounting-required", deferred: 1, retry: retry);
+                return new(0, 0, 1, 0, null, retry, WaitingForRecovery: true);
+            }
             var recovered = await RecoverRetirementsAsync(tree, cancellationToken).ConfigureAwait(false);
             var pendingRetirements = index.ReadArchiveRetirements().Where(r => r.CompletedTicks is null).Select(r => r.Archive.Id).ToHashSet();
             long now = clock.GetUtcNow().UtcTicks, last = ReadLastSuccess();
@@ -107,11 +112,12 @@ public sealed partial class ArchiveManager
                 if (absent && !pendingRetirements.Contains(row.Id)) { await index.Archive.DeleteAsync([row.Id], cancellationToken).ConfigureAwait(false); missing++; }
                 else bytes = checked(bytes + row.Size);
             }
-            foreach (var row in index.ArchivesByAge())
+            foreach (var candidate in index.ArchivesByRetentionTime(identity))
             {
+                var row = candidate.Archive;
                 cancellationToken.ThrowIfCancellationRequested();
                 if (pendingRetirements.Contains(row.Id)) continue;
-                if (row.ArchivedTicks > cutoff && (bytes <= cap || capBlocked)) break;
+                if (candidate.RetainedTicks > cutoff && (bytes <= cap || capBlocked)) break;
                 try
                 {
                     using var parent = Parent(tree, row);
@@ -124,7 +130,7 @@ public sealed partial class ArchiveManager
                         { deferred++; capBlocked = true; Log("archive.defer", session, code: "changed-or-unverified"); continue; }
                         cancellationToken.ThrowIfCancellationRequested();
                         retirement = new(Guid.NewGuid(), row, tree.Identity.ToArray(), BlockCaptureProof.Identity(file),
-                            row.ArchivedTicks <= cutoff ? ArchiveRetirementReason.Age : ArchiveRetirementReason.Capacity, now);
+                            candidate.RetainedTicks <= cutoff ? ArchiveRetirementReason.Age : ArchiveRetirementReason.Capacity, now);
                         await index.ReserveArchiveRetirementAsync(retirement, cancellationToken).ConfigureAwait(false);
                         Log("archive.retirement_prepared", retirement.Id, bytes: row.Size); Checkpoint?.Invoke("retirement-prepared");
                         Log("archive.delete_prepared", session, bytes: row.Size);

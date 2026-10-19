@@ -17,6 +17,7 @@ internal static class ArchiveContent
         using var blocks = new PublishedBlocks(tree);
         foreach (var state in index.ReadPendingArchiveContents())
         {
+            if (index.IsArchiveSourceReleased(state.SourceId, tree.Identity.ToArray())) continue;
             token.ThrowIfCancellationRequested(); if (state.NextOffset != state.Size) continue;
             try
             {

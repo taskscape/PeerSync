@@ -53,7 +53,8 @@ internal static class FolderMaps
 
     public static RowMap<ArchiveRow> Archive { get; } = new("archive", ["id"],
     [new("id", Integer, r => r.Id == 0 ? null : r.Id), new("original_path", Text, r => r.OriginalPath), new("archive_path", Text, r => r.ArchivePath),
-        new("archived_ticks", Integer, r => r.ArchivedTicks), new("size", Integer, r => r.Size), new("file_hash", Blob, r => r.FileHash)],
+        new("archived_ticks", Integer, r => r.ArchivedTicks), new("size", Integer, r => r.Size), new("file_hash", Blob, r => r.FileHash),
+        new("archive_path_key", Text, r => r.ArchivePath.ToUpperInvariant())],
         r => new(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetInt64(3), r.GetInt64(4), OptionalBytes(r, 5)),
         r => { ArgumentOutOfRangeException.ThrowIfNegative(r.Id); RequirePath(r.OriginalPath); RequireTicks(r.ArchivedTicks);
             ArgumentOutOfRangeException.ThrowIfNegative(r.Size); if (r.FileHash is not null) RequireBytes(r.FileHash, 32);

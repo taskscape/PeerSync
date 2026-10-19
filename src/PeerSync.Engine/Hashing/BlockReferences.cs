@@ -43,10 +43,16 @@ public sealed class BlockReferences
     {
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         using var references = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
+        using var tree = new SafeFileTree(rootPath);
+        return await RefreshUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Maintenance retains both gates and this pinned root through its sweep.
+    internal async Task<BlockReferenceRefreshResult> RefreshUnderGateAsync(SafeFileTree tree, CancellationToken cancellationToken)
+    {
         Guid session = Guid.NewGuid(); var watch = Stopwatch.StartNew();
         try
         {
-            using var tree = new SafeFileTree(rootPath);
             if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } root || !root.AsSpan().SequenceEqual(tree.Identity))
                 throw new IOException("Block reference root changed or is not bound.");
             var recovery = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
@@ -94,7 +100,7 @@ public sealed class BlockReferences
                 }
             }
             await FlushArchiveCoverageAsync().ConfigureAwait(false);
-            foreach (var source in index.ReadArchiveProvenance())
+            foreach (var source in index.ReadRetainedArchiveProvenance(root))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var content = index.FindActiveArchiveContent(source.SourceId);
@@ -114,6 +120,7 @@ public sealed class BlockReferences
             }
             foreach (var pending in index.ReadPendingArchiveContents())
             {
+                if (index.IsArchiveSourceReleased(pending.SourceId, root)) continue;
                 if (!pending.RootId.AsSpan().SequenceEqual(root) || pending.ChunkCount > ArchiveContentSnapshot.MaximumChunks)
                     throw new InvalidDataException("Pending archive protection belongs to another root.");
                 long offset = 0; int count = 0;
