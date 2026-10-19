@@ -125,8 +125,17 @@ public sealed class Db : IAsyncDisposable
         try
         {
             startupCancellation.ThrowIfCancellationRequested();
+            bool created = false;
+            try
+            {
+                using var reservation = new FileStream(Path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                created = true;
+            }
+            catch (IOException error) when ((error.HResult & 0xFFFF) is 80 or 183)
+            { /* An existing file always takes the backed-up upgrade path. */ }
             using var connection = OpenConnection(writerConnectionString, writer: true);
-            Migrate(connection, migrations, startupCancellation);
+            if (!created || !TryInitialize(connection, migrations, startupCancellation))
+                Migrate(connection, migrations, startupCancellation);
             ready.TrySetResult();
             // The opening caller's token governs startup only. Each write owns
             // its cancellation, and disposal drains the channel gracefully.
@@ -139,6 +148,31 @@ public sealed class Db : IAsyncDisposable
             while (writes.Reader.TryRead(out var request)) request.Fail(error);
             throw;
         }
+    }
+
+    private static bool TryInitialize(SqliteConnection connection, IReadOnlyList<DbMigration> migrations,
+        CancellationToken cancellationToken)
+    {
+        // Reserve the SQLite writer before checking emptiness: another process may
+        // have populated the newly reserved file before we opened the connection.
+        using var transaction = connection.BeginTransaction(deferred: false);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA user_version;";
+        if (Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0) return false;
+        command.CommandText = "SELECT count(*) FROM sqlite_schema;";
+        if (Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0) return false;
+        foreach (var migration in migrations)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            command.CommandText = migration.Sql;
+            command.ExecuteNonQuery();
+            command.CommandText = "PRAGMA user_version = " + migration.Version.ToString(CultureInfo.InvariantCulture) + ";";
+            command.ExecuteNonQuery();
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        transaction.Commit();
+        return true;
     }
 
     private void Migrate(SqliteConnection connection, IReadOnlyList<DbMigration> migrations, CancellationToken cancellationToken)
