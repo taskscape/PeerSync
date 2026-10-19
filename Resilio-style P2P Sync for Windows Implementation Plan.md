@@ -685,6 +685,20 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    when those identities still match. Never truncate or delete unowned names.
    Verify every chunk and then the whole-file hash.
    Existing temporary bytes are also reusable only after chunk verification.
+   Parked staging uses a FULL-durable catalog tied to the live apply intent,
+   root/file identity, original target, GUID sibling name, first parked time,
+   kind, native change stamp and exact file length/hash. Capture under the
+   existing exclusive handle or a verified reopened guard. Re-parking unchanged
+   bytes preserves age; newly written bytes get a new grace period. Resume only
+   unchanged cataloged objects; changed/foreign objects are preserved. Legacy
+   unaged pointers remain compatible for verified reuse but never authorize age
+   cleanup until adopted under a verified apply/recovery context.
+   Expiry requires at least 24 hours, no needed work for the target and no active
+   apply. Stream verification outside the reference gate, then recheck under
+   filesystem/reference gates before a FULL deletion intent and native removal.
+   Recovery rechecks ownership and new needs. Delete only guarded exact files or
+   empty owned directories, never recursively/by filename. Protect changed or
+   foreign objects, preserve needed prefixes and bound each pass to 1,000 rows.
    Local index entries are hints: reject reparse traversal, verify the actual
    bytes and try at most 64 candidates per chunk before network fallback.
    Copy transport data into an owned, bounded chunk buffer before hashing it.
