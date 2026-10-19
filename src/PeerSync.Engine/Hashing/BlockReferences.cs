@@ -151,8 +151,14 @@ public sealed class BlockReferences
 
             async Task AddVersionAsync(VersionView version, BlockReferenceKind kind)
             {
-                if (version.Type != 0 || version.Deleted) return;
-                foreach (var chunk in version.ExportBody().Chunks)
+                if (version.Deleted) return;
+                var body = version.ExportBody();
+                // Until graph coverage is wired, a new directory hash must not
+                // silently activate an incomplete snapshot and permit sweeping.
+                if (version.Type == 1 && body.DirectorySnapshotHash.Length != 0)
+                    throw new IOException("Directory snapshot reference coverage is incomplete.");
+                if (version.Type != 0) return;
+                foreach (var chunk in body.Chunks)
                     await AddAsync(chunk.Hash.ToByteArray(), checked((int)chunk.Length), kind).ConfigureAwait(false);
             }
             async Task AddAsync(byte[] hash, int length, BlockReferenceKind kind)
