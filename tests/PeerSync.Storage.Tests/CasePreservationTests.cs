@@ -54,7 +54,7 @@ public sealed class CasePreservationTests : IDisposable
     {
         await using var index = await Open();
         await Receive(index, Enumerable.Range(1, FolderIndex.MaximumPendingCaseSources - 1).Select(Source).ToArray());
-        await Should.ThrowAsync<InvalidOperationException>(() => index.ApplyRemoteIndexAsync(Device, 1, 2, [Row("file", 2)],
+        await Should.ThrowAsync<CasePreservationCapacityException>(() => index.ApplyRemoteIndexAsync(Device, 1, 2, [Row("file", 2)],
             s => Needed(s.PathKey, [Source(1000), Source(1001)]), Token));
         index.Devices.Find(Device)!.LastSequenceReceived.ShouldBe(1); index.ReadPendingCasePreservations().Count.ShouldBe(999);
         // Writer remains usable and can acknowledge exactly the remaining capacity.
@@ -84,6 +84,17 @@ public sealed class CasePreservationTests : IDisposable
         await index.Meta.UpsertAsync([new("_root-identity", Enumerable.Repeat((byte)2, 24).ToArray())], Token);
         await Should.ThrowAsync<InvalidDataException>(() => index.RecomputeNeededAsync(["file"], s => Needed(s.PathKey, [Source(1)]), Token));
         index.ReadPendingCasePreservations().Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task AdmissionOnlyResolutionCommitsSourcesAndCursorWithoutOrdinaryWork()
+    {
+        await using var index = await Open();
+        var result=await index.ApplyRemoteIndexAsync(Device,0,1,[Row("file",1)],snapshot => Needed(snapshot.PathKey,[Source(1)]) with { PreservationAdmissionOnly=true },Token);
+        result.Applied.ShouldBeTrue(); index.Devices.Find(Device)!.LastSequenceReceived.ShouldBe(1); index.RemoteFiles.Count().ShouldBe(1);
+        index.Needed.Count().ShouldBe(0); index.ReadPendingCasePreservations().Count.ShouldBe(1);
+        await index.RecomputeNeededAsync(["file"],snapshot => Needed(snapshot.PathKey,[Source(1)]) with { PreservationAdmissionOnly=true },Token);
+        index.Needed.Count().ShouldBe(0); index.ReadPendingCasePreservations().Count.ShouldBe(1);
     }
 
     [Fact]
