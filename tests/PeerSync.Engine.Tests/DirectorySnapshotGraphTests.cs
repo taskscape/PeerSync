@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using Google.Protobuf;
+using Microsoft.Data.Sqlite;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Scanning;
@@ -20,6 +22,70 @@ public sealed class DirectorySnapshotGraphTests : IDisposable
     private readonly FolderKeys keys = FolderKeys.CreateNew();
     private readonly byte[] device = [1, .. new byte[31]];
     private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task DiagnosticsExposeProgressAndFailureWithoutPrivatePathsHashesOrSignedBodies()
+    {
+        await using var index = await Bind("source"); using var blocks = Store("source", index);
+        var root = await blocks.CaptureDirectoryAsync("private-topic", [Sign("private-topic/private-child", 0)], Token);
+        var directory = Sign("private-topic", 1, root);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "graph", debugEnabled: true);
+        using var gate = await FolderOperationGate.AcquireAsync(index, Token);
+        var graph = new DirectorySnapshotGraph(Root("source"), index, keys, device, journal);
+        (await graph.AdvanceUnderGateAsync(directory, NoFetch, 0, Token)).Complete.ShouldBeFalse();
+        (await graph.AdvanceUnderGateAsync(directory, NoFetch, 1000, Token)).Complete.ShouldBeTrue();
+        var malformed = await blocks.PutAsync(DirectorySnapshotNode.Blob(new byte[36]), Token); await blocks.FlushAsync(Token);
+        await Should.ThrowAsync<InvalidDataException>(() => graph.AdvanceUnderGateAsync(Sign("private-bad", 1, malformed), NoFetch, 1000, Token));
+        string log = File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl"));
+        log.ShouldContain("directory.graph_pending"); log.ShouldContain("directory.graph_complete"); log.ShouldContain("directory.graph_failed");
+        log.ShouldNotContain("private-topic"); log.ShouldNotContain("private-child"); log.ShouldNotContain("private-bad"); log.ShouldNotContain(fixture);
+        log.ShouldNotContain(Convert.ToHexString(root.Hash)); log.ShouldNotContain(Convert.ToBase64String(directory.Body));
+        log.ShouldNotContain(keys.ExportText());
+    }
+
+    [Fact]
+    public async Task NewlyNeededRetiringGraphWaitsAcrossRestartThenRebuildsFromIndependentMetadata()
+    {
+        SignedRecord directory; byte[] id;
+        await using (var index = await Bind("source"))
+        {
+            using var blocks = Store("source", index);
+            var root = await blocks.CaptureDirectoryAsync("topic", [Sign("topic/file", 0)], Token); directory = Sign("topic", 1, root);
+            var complete = await Advance("source", index, directory, NoFetch, 1000); complete.Complete.ShouldBeTrue(); id = complete.Id;
+            Age();
+            var state = index.ReadDirectoryGraph(id)!;
+            (await index.PruneDirectoryGraphsAsync(state.RootId, DateTime.UtcNow.Ticks, true, 1, Token)).Mutations.ShouldBe(1);
+            index.ReadDirectoryGraph(id)!.Retiring.ShouldBeTrue();
+        }
+        await using var reopened = await FolderIndex.OpenAsync(Database("source"), Token);
+        var waiting = await Advance("source", reopened, directory, NoFetch, 1000); waiting.Complete.ShouldBeFalse(); waiting.Processed.ShouldBe(0);
+        Should.Throw<InvalidOperationException>(() => reopened.ReadDirectoryGraphReferences(id).ToArray());
+        byte[] physical = reopened.ReadDirectoryGraph(id)!.RootId; int passes = 0;
+        DirectoryGraphPrune cleanup;
+        do
+        {
+            cleanup = await reopened.PruneDirectoryGraphsAsync(physical, DateTime.UtcNow.Ticks, false, 2, Token);
+            cleanup.Mutations.ShouldBeLessThanOrEqualTo(2); passes++; passes.ShouldBeLessThan(10);
+        } while (cleanup.MoreWork);
+        (await Advance("source", reopened, directory, NoFetch, 1000)).Complete.ShouldBeTrue();
+        reopened.ReadDirectoryGraphReferences(id).Count().ShouldBe(3); reopened.ReadBlockObjects().Count().ShouldBe(3);
+        reopened.ReadBlockDeletionIntents().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task FreshReferenceActivationTouchesCurrentGraphsAndRetiresOnlyUnusedCacheMetadata()
+    {
+        await using var index = await Bind("source"); using var blocks = Store("source", index);
+        var empty = await blocks.CaptureDirectoryAsync("topic", [], Token);
+        var current = Sign("topic", 1, empty); var view = VersionView.Open(current, keys, device);
+        await index.LocalFiles.UpsertAsync([new("topic", 1, 0, view.MtimeTicks, 0, false, view.ChangedTicks, null, view.Vector, current, null)], Token);
+        var builder = new BlockReferences(Root("source"), index, keys, device); (await builder.RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+        var unused = await Advance("source", index, Sign("unused", 1, empty), NoFetch, 1); unused.Complete.ShouldBeTrue(); Age();
+        (await builder.RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+        index.ReadDirectoryGraph(unused.Id).ShouldBeNull();
+        index.ReadDirectoryGraph(CaseConflictPolicy.SourceId(view))!.Retiring.ShouldBeFalse();
+        index.ReadBlockReferences().Count().ShouldBe(1); index.ReadBlockObjects().Count().ShouldBe(1); index.ReadBlockDeletionIntents().ShouldBeEmpty();
+    }
 
     [Fact]
     public async Task LegacyPendingDirectoryNeverClaimsEmptyTreeCoverage()
@@ -210,6 +276,11 @@ public sealed class DirectorySnapshotGraphTests : IDisposable
         body.Vv.Add(new VvEntry { Device = 1, Counter = 1 }); if (type == 0) body.FileHash = ByteString.CopyFrom(Hash([])); return body;
     }
     private DirectorySnapshotBlocks Store(string name, FolderIndex index) => new(Root(name), index, keys, device);
+    private void Age()
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database("source"), Pooling = false }.ToString()); connection.Open();
+        using var command = connection.CreateCommand(); command.CommandText = "UPDATE directory_graphs SET last_used_ticks=1;"; command.ExecuteNonQuery();
+    }
     private async Task<FolderIndex> Bind(string name)
     {
         Directory.CreateDirectory(Root(name)); var index = await FolderIndex.OpenAsync(Database(name), Token);

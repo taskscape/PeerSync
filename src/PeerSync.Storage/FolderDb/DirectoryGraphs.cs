@@ -5,7 +5,11 @@ namespace PeerSync.Storage.FolderDb;
 
 public enum DirectoryGraphWorkKind { Page, Record }
 public sealed record DirectoryGraphState(byte[] Id, byte[] RootId, string DirectoryPath, byte[] Hash, int Length, bool Complete)
-{ public override string ToString() => "Directory graph state (redacted)"; }
+{
+    public bool Retiring { get; init; }
+    public override string ToString() => "Directory graph state (redacted)";
+}
+public sealed record DirectoryGraphPrune(int Mutations, bool MoreWork);
 public sealed record DirectoryGraphWork(long Id, string ParentPath, byte[] Hash, int Length, DirectoryGraphWorkKind Kind, int PageDepth)
 { public override string ToString() => "Directory graph work (redacted)"; }
 public sealed record DirectoryGraphChild(string ParentPath, byte[] Hash, int Length, DirectoryGraphWorkKind Kind, int PageDepth)
@@ -28,12 +32,18 @@ public sealed partial class FolderIndex
             {
                 if (!existing.RootId.AsSpan().SequenceEqual(root) || existing.DirectoryPath != path || existing.Length != length || !existing.Hash.AsSpan().SequenceEqual(node))
                     throw new InvalidDataException("Directory graph identity has conflicting inputs.");
+                if (!existing.Retiring)
+                {
+                    using var touch = connection.CreateCommand(); touch.Transaction = transaction;
+                    touch.CommandText = "UPDATE directory_graphs SET last_used_ticks=$now WHERE id=$id;";
+                    touch.Parameters.AddWithValue("$id", id); touch.Parameters.AddWithValue("$now", DateTime.UtcNow.Ticks); touch.ExecuteNonQuery();
+                }
                 return existing;
             }
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO directory_graphs(id,root_id,directory_path,node_hash,node_length) VALUES($id,$root,$path,$hash,$length);";
+            command.CommandText = "INSERT INTO directory_graphs(id,root_id,directory_path,node_hash,node_length,last_used_ticks) VALUES($id,$root,$path,$hash,$length,$now);";
             command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$path", path);
-            command.Parameters.AddWithValue("$hash", node); command.Parameters.AddWithValue("$length", length); command.ExecuteNonQuery();
+            command.Parameters.AddWithValue("$hash", node); command.Parameters.AddWithValue("$length", length); command.Parameters.AddWithValue("$now", DateTime.UtcNow.Ticks); command.ExecuteNonQuery();
             InsertDirectoryGraphChild(connection, transaction, id, new(path, node, length, DirectoryGraphWorkKind.Page, 0));
             return new DirectoryGraphState(id.ToArray(), root.ToArray(), path, node.ToArray(), length, false);
         }, cancellationToken);
@@ -124,12 +134,14 @@ public sealed partial class FolderIndex
             using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true);
             var state = FindDirectoryGraph(connection, transaction, id) ?? throw new InvalidOperationException("Directory graph is unavailable.");
             RequireBlockReferenceRoot(connection, transaction, state.RootId);
-            if (!state.Complete) throw new InvalidOperationException("Directory graph coverage is incomplete.");
+            if (!state.Complete || state.Retiring) throw new InvalidOperationException("Directory graph coverage is incomplete or retiring.");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT hash,length FROM directory_graph_references WHERE graph_id=$id ORDER BY hash;"; command.Parameters.AddWithValue("$id", id);
             using var reader = command.ExecuteReader(); while (reader.Read()) yield return new(reader.GetFieldValue<byte[]>(0), reader.GetInt32(1));
         }
     }
+    /// <summary>Validated member prefix for continuation/diagnostics. Callers
+    /// must require a complete non-retiring graph before materialization.</summary>
     public IEnumerable<DirectoryGraphMember> ReadDirectoryGraphMembers(byte[] graphId)
     {
         FolderMaps.RequireBytes(graphId, 32); byte[] id = graphId.ToArray(); return Read();
@@ -143,13 +155,13 @@ public sealed partial class FolderIndex
     private static DirectoryGraphState? FindDirectoryGraph(SqliteConnection connection, SqliteTransaction? transaction, byte[] id)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT root_id,directory_path,node_hash,node_length,complete FROM directory_graphs WHERE id=$id;"; command.Parameters.AddWithValue("$id", id);
-        using var reader = command.ExecuteReader(); return reader.Read() ? new(id.ToArray(), reader.GetFieldValue<byte[]>(0), reader.GetString(1), reader.GetFieldValue<byte[]>(2), reader.GetInt32(3), reader.GetBoolean(4)) : null;
+        command.CommandText = "SELECT root_id,directory_path,node_hash,node_length,complete,retiring FROM directory_graphs WHERE id=$id;"; command.Parameters.AddWithValue("$id", id);
+        using var reader = command.ExecuteReader(); return reader.Read() ? new DirectoryGraphState(id.ToArray(), reader.GetFieldValue<byte[]>(0), reader.GetString(1), reader.GetFieldValue<byte[]>(2), reader.GetInt32(3), reader.GetBoolean(4)) { Retiring = reader.GetBoolean(5) } : null;
     }
     private static DirectoryGraphState RequireOpenDirectoryGraph(SqliteConnection connection, SqliteTransaction transaction, byte[] id)
     {
         var state = FindDirectoryGraph(connection, transaction, id) ?? throw new InvalidOperationException("Directory graph is unavailable.");
-        if (state.Complete) throw new InvalidOperationException("Completed directory graphs are immutable."); return state;
+        if (state.Complete || state.Retiring) throw new InvalidOperationException("Completed or retiring directory graphs are immutable."); return state;
     }
     private static void ValidateDirectoryChild(DirectoryGraphChild child)
     {

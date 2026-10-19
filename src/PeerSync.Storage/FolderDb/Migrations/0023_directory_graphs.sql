@@ -4,8 +4,11 @@ CREATE TABLE directory_graphs (
   directory_path TEXT NOT NULL,
   node_hash BLOB NOT NULL CHECK(length(node_hash)=32),
   node_length INTEGER NOT NULL CHECK(node_length BETWEEN 12 AND 4620),
-  complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1))
+  complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1)),
+  last_used_ticks INTEGER NOT NULL CHECK(last_used_ticks BETWEEN 1 AND 3155378975999999999),
+  retiring INTEGER NOT NULL DEFAULT 0 CHECK(retiring IN (0,1))
 ) WITHOUT ROWID;
+CREATE INDEX ix_directory_graph_retirement ON directory_graphs(root_id,retiring,last_used_ticks,id);
 CREATE TABLE directory_graph_work (
   id INTEGER PRIMARY KEY,
   graph_id BLOB NOT NULL REFERENCES directory_graphs(id) ON DELETE CASCADE,

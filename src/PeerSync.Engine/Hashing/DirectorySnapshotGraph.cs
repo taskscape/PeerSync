@@ -30,6 +30,7 @@ internal sealed class DirectorySnapshotGraph(string rootPath, FolderIndex index,
             using var blocks = new DirectorySnapshotBlocks(rootPath, index, keys, sourceHint, journal);
             byte[] physicalRoot = index.Meta.Find("_root-identity")?.Value?.ToArray() ?? throw new IOException("Directory graph root is unbound.");
             var state = await index.BeginDirectoryGraphAsync(id, physicalRoot, source.Path, root.Hash, root.EncodedLength, token).ConfigureAwait(false);
+            if (state.Retiring) { Log(false); return new(id, false, 0); }
             if (state.Complete) { Log(true); return new(id, true, 0); }
             while (processed < maximumWork)
             {

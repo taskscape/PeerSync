@@ -18,7 +18,7 @@ public sealed record BlockReferenceRefreshResult(Guid? SnapshotId, long Referenc
     /// <summary>Coverage of sources known at refresh time only. This is not
     /// deletion authorization: cleanup must also establish archive/migration
     /// provenance and refresh while holding both gates through its sweep.</summary>
-    public bool AllKnownSourcesCovered => SnapshotId is not null && !WaitingForRecovery && ArchivesWithoutManifest == 0 && CaptureDeferrals == 0;
+    public bool AllKnownSourcesCovered => SnapshotId is not null && !WaitingForRecovery && !WaitingForDirectorySnapshots && ArchivesWithoutManifest == 0 && CaptureDeferrals == 0;
 }
 
 /// <summary>Host owns the bound index and keys. Every production reference
@@ -59,6 +59,8 @@ public sealed class BlockReferences
             if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } root || !root.AsSpan().SequenceEqual(tree.Identity))
                 throw new IOException("Block reference root changed or is not bound.");
             var recovery = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
+            var graphRetirement = await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (graphRetirement.Mutations != 0) Log("directory.graph_pruned", changed: graphRetirement.Mutations, deferred: graphRetirement.MoreWork ? 1 : 0);
             if (index.ReadApplyIntents().Any())
             {
                 Log("block.references_wait", "pending-application"); return new(null, 0, 0, 0, recovery.Deferred, WaitingForRecovery: true);
@@ -151,6 +153,11 @@ public sealed class BlockReferences
             long unmanifested = index.CountUnmanifestedReferenceArchives(snapshot.Id);
             await FlushAsync().ConfigureAwait(false); Checkpoint?.Invoke("before-activate");
             await index.ActivateBlockReferenceSnapshotAsync(snapshot.Id, cancellationToken).ConfigureAwait(false);
+            if (graphRetirement.Mutations < 1000)
+            {
+                var retiredGraphs = await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: true, limit: 1000 - graphRetirement.Mutations, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (retiredGraphs.Mutations != 0) Log("directory.graph_pruned", changed: retiredGraphs.Mutations, deferred: retiredGraphs.MoreWork ? 1 : 0);
+            }
             var active = index.ReadActiveBlockReferenceSnapshot() ?? throw new InvalidOperationException("Reference activation disappeared.");
             Checkpoint?.Invoke("activated"); Log("block.references_complete", changed: active.References, deferred: unmanifested + recovery.Deferred);
             return new(active.Id, active.References, batches, unmanifested, recovery.Deferred);
