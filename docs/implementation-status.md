@@ -1,6 +1,7 @@
 # Implementation status — 2026-10-19
 
-P0 gate passed on 2026-10-19; P1 is ready to start. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
+Current phase: P1, starting P1.1.1 (folder keys/text). P0 gate passed on
+2026-10-19 under the user's approved external-test deferrals. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
 Ten tasks and the performance/certificate subchecks are verified. The CI
 budget repair is merged through [PR #4](https://github.com/taskscape/PeerSync/pull/4),
@@ -59,7 +60,7 @@ Open prerequisites:
 - Public release signing remains separate from the completed P0.1.3
   development signing path and the user's local development certificate.
 
-P1-P5 have not started; the revised P0 gate is now satisfied and P1 can begin.
+P1.1.1 is in progress; P2-P5 have not started.
 The production engine, client service,
 central tracker/relay, control app and installers are not implemented. The
 user-requested production diagnostic hooks are explicitly tracked as P2.5.6

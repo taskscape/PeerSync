@@ -105,7 +105,23 @@ DeviceId   = SHA-256(device certificate SubjectPublicKeyInfo)
 | FolderId | 32 bytes, never shown | Tracker, LAN | Find peers; nothing else |
 | DeviceId | 52 Base32 chars in groups of 4 | Every device | Identifies a device; pinned per folder |
 
-The checksum catches typos when a key is pasted. Keys are shared out of band, or later as links and QR codes. Key text is never logged.
+The checksum catches typos when a key is pasted. Use CRC-10/ATM over the
+canonical uppercase ASCII prefix followed by the raw payload: width 10,
+polynomial 0x233, initial/final XOR zero, no reflection. Encode its high five
+bits and low five bits as the final two RFC 4648 Base32 symbols. Reject nonzero
+unused Base32 padding bits and incorrect lengths. Input is case-insensitive
+and ignores whitespace/dashes. This preserves the 55/106/55-character forms
+and detects every single-symbol change that changes canonical key material;
+case and spacing changes preserve the same key by design. The earlier draft's
+truncated SHA checksum cannot guarantee the stated single-character typo
+rejection: a synthetic collision was reproduced before implementation. CRC
+is only an input-error check; HKDF/Ed25519/HMAC provide the security properties.
+Keys are shared out of band, or later as links and QR codes. Key text is never
+logged, and key objects redact their string/JSON representations. Key objects
+own their private buffers and native signing keys and clear them on disposal;
+key material is exposed through explicit exports returning defensive copies.
+Callers must clear exported secret byte arrays and avoid retaining exported
+key strings, which cannot be reliably erased from managed memory.
 
 ### Discovery
 

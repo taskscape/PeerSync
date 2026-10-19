@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | Not started | - |
+| P1 Local sync engine | 4-8 | In progress: P1.1.1 folder keys and text | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.1.1: use CRC-10/ATM for the two-character key checksum, preserving lengths and normalization, so every single Base32-symbol typo is detected. The draft's ten SHA bits admitted a reproduced single-symbol collision. HKDF/signing/security domains are unchanged; independent OpenSSL vectors and exhaustive typo tests cover the correction before any folder keys ship. | Protocol: Keys and identifiers |
 | 2026-10-19 | User approved deferring only P0.2.1's physical LAN measurement to Gate P2 and P0.2.2's native NAT matrix/final decision to Gate P4. Keep both tasks unchecked, preserve all acceptance requirements, and permit Gate P0 after its other checks pass. Use direct QUIC/TCP plus relay after 5 s as the implementation baseline; no coordinated-punch success is claimed. | Phased roadmap; NAT traversal |
 | 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
 | 2026-10-18 | User requested deployment diagnostics: opt-in structured events, shared session correlation, native errors, safe log bundles, and a server/second-PC runbook. Windows-version and NAT evidence must be recorded separately; current Docker runs Linux containers. | Logging, metrics and upgrades |
@@ -680,7 +681,7 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
 
 ### P1.1 Core types
 
-- [ ] **P1.1.1 Folder keys and their text form** (`PeerSync.Crypto/FolderKeys.cs`, `PeerSync.Core/Keys/KeyText.cs`)
+- [ ] **P1.1.1 Folder keys and their text form** (`PeerSync.Crypto/FolderKeys.cs`, `PeerSync.Core/Keys/KeyText.cs`) [WIP @Codex 2026-10-19]
   - Done when: RW, RO and F keys round-trip through text. The checksum rejects any single-character typo. RO and F keys derived from an RW key match fixed test vectors. Keys are never printed by `ToString()`.
   - Ref: Protocol specification, Keys and identifiers.
 - [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`)
@@ -694,6 +695,12 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
   - Done when: it supports gitignore-style `*`, `?`, `**`, `#` comments, a leading `/` to anchor at the root, a trailing `/` for directories only, and case-insensitive matching. Default rules are included. Resilio's IgnoreList examples pass as tests.
 
 ### 7.1 Code: key chain (P1.1.1)
+
+The sketch below is superseded by `src/PeerSync.Crypto/FolderKeys.cs` and
+`src/PeerSync.Core/Keys/KeyText.cs`: the implementation owns and clears secrets,
+caches the signing key until disposal, returns defensive copies, and provides
+explicit role-limited text exports. Public synthetic vectors live in
+`tests/Fixtures/folder-key-vectors.json`.
 
 ```csharp
 // src/PeerSync.Crypto/FolderKeys.cs
@@ -749,7 +756,7 @@ public sealed class FolderKeys
 }
 ```
 
-Key text: prefix letter (`A` RW, `B` RO, `F` encrypted), then RFC 4648 Base32 without padding, then a 2-character checksum (the first 10 bits of `SHA-256(prefix ‖ payload)`). Decode case-insensitively, and ignore spaces and dashes so keys survive copy-paste.
+Key text: prefix letter (`A` RW, `B` RO, `F` encrypted), then RFC 4648 Base32 without padding, then a 2-character CRC-10/ATM checksum over canonical uppercase ASCII prefix followed by raw payload (poly 0x233, init/xorout 0, no reflection; high five bits then low five bits). Reject nonzero unused padding bits. Decode ASCII letters case-insensitively and ignore whitespace/dashes so keys survive copy-paste. This corrects the draft's truncated-SHA checksum, which could not guarantee P1.1.1's single-character typo rejection.
 
 ### 7.2 Code: version vector (P1.1.2)
 
