@@ -152,6 +152,20 @@ public sealed partial class FolderIndex
             using var reader = command.ExecuteReader(); while (reader.Read()) yield return new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetInt32(2));
         }
     }
+    /// <summary>Bounded validated member prefix only. Callers must establish
+    /// complete non-retiring graph/source/root binding before materialization.
+    /// A cursor alone never proves earlier members were copied.</summary>
+    public IReadOnlyList<DirectoryGraphMember> ReadDirectoryGraphMemberPage(byte[] graphId, string? afterKey = null, int limit = 1000)
+    {
+        FolderMaps.RequireBytes(graphId, 32); if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        string? after = afterKey is null ? null : PathRules.Key(afterKey);
+        using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT path_key,record_hash,record_length FROM directory_graph_members WHERE graph_id=$id "
+            + (after is null ? "" : "AND path_key>$after ") + "ORDER BY path_key LIMIT $limit;";
+        command.Parameters.AddWithValue("$id", graphId); command.Parameters.AddWithValue("$limit", limit); if (after is not null) command.Parameters.AddWithValue("$after", after);
+        var rows = new List<DirectoryGraphMember>(); using var reader = command.ExecuteReader();
+        while (reader.Read()) rows.Add(new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetInt32(2))); return rows.AsReadOnly();
+    }
     private static DirectoryGraphState? FindDirectoryGraph(SqliteConnection connection, SqliteTransaction? transaction, byte[] id)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;

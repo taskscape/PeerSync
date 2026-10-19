@@ -11,6 +11,29 @@ public sealed class DirectoryGraphTests : IDisposable
     private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-DirectoryGraphDb-" + Guid.NewGuid().ToString("N"));
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private string Database => Path.Combine(fixture, "index.db");
+    private SqliteConnection Connect()
+    { var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()); connection.Open(); return connection; }
+    [Fact]
+    public async Task MemberPagesSeekByGraphAndExactCanonicalKeyAfterReopenWithoutScanningThePrefix()
+    {
+        await using (var index = await Open())
+        {
+            await Begin(index);
+            using var connection = Connect(); using var transaction = connection.BeginTransaction(); using var command = connection.CreateCommand();
+            command.Transaction = transaction; command.CommandText = "INSERT INTO directory_graph_members(graph_id,path_key,record_hash,record_length) VALUES($id,$path,$hash,48);";
+            command.Parameters.AddWithValue("$id", Id()); command.Parameters.AddWithValue("$hash", Id(3)); command.Parameters.Add("$path", SqliteType.Text);
+            for (int value = 0; value < 1001; value++) { command.Parameters["$path"].Value = "TOPIC/M" + value.ToString("D4", System.Globalization.CultureInfo.InvariantCulture); command.ExecuteNonQuery(); }
+            transaction.Commit();
+        }
+        await using var reopened = await Open(); var first = reopened.ReadDirectoryGraphMemberPage(Id()); first.Count.ShouldBe(1000); first[^1].PathKey.ShouldBe("TOPIC/M0999");
+        var last = reopened.ReadDirectoryGraphMemberPage(Id(), first[^1].PathKey); last.Single().PathKey.ShouldBe("TOPIC/M1000");
+        reopened.ReadDirectoryGraphMemberPage(Id(), "TOPIC/M1000").ShouldBeEmpty(); reopened.ReadDirectoryGraphMemberPage(Id(2)).ShouldBeEmpty();
+        Should.Throw<ArgumentOutOfRangeException>(() => reopened.ReadDirectoryGraphMemberPage(Id(), limit: 1001));
+        using var readerConnection = Connect(); using var query = readerConnection.CreateCommand();
+        query.CommandText = "EXPLAIN QUERY PLAN SELECT path_key,record_hash,record_length FROM directory_graph_members WHERE graph_id=$id AND path_key>$after ORDER BY path_key LIMIT 1000;";
+        query.Parameters.AddWithValue("$id", Id()); query.Parameters.AddWithValue("$after", "TOPIC/M0999"); using var reader = query.ExecuteReader(); var details = new List<string>();
+        while (reader.Read()) details.Add(reader.GetString(3)); string.Join('\n', details).ShouldContain("graph_id=? AND path_key>?"); string.Join('\n', details).ShouldNotContain("TEMP B-TREE");
+    }
     private static byte[] Root => new byte[24];
     private static byte[] Id(byte value = 1) => [value, .. new byte[31]];
     public DirectoryGraphTests() => Directory.CreateDirectory(fixture);
