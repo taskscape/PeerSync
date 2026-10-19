@@ -1065,6 +1065,20 @@ process ID. Verification must select the exact invocation using process lifetime
 role and run ID; historical events must neither satisfy nor fail its assertions.
 Keep earlier logs for diagnosis and retain the existing timeout/progress checks.
 
+App and service debug runs keep separate GUID directories under their respective
+log roots. Shared startup/periodic/close retention removes only inactive owned run
+directories: cap eligible inactive runs at eight and 100 MB and expire their
+debug files after 24 hours. Active writers retain per-run rotation and are never
+deleted to meet a quota. Unknown/unmarked content and inaccessible/linked/reparse
+objects are preserved with a deferred/pressure diagnostic. Pin roots/ancestors
+and owned run directories, use relative no-reparse handles, verify ownership
+markers and remove exact guarded objects, never recursive pathname deletion.
+Concurrent processes keep distinct journals and coordinate the shared sweep.
+Close the journal before releasing its native active-writer lease; then sweep
+the newly inactive run before releasing the root. Bound contention waits and
+defer inaccessible work. Preserve unmarked legacy directories, since a filename
+alone cannot establish their ownership or inactivity.
+
 - **Logs:** Serilog rolling files, 7 days and 100 MB total (Resilio's defaults). Warnings and errors also go to the Windows Event Log. Keys and file contents are never logged.
 - **Metrics:** `System.Diagnostics.Metrics` counters (bytes up and down, peers, queue depth, hashing rate), streamed to the UI.
 - **Upgrades:** running a newer Inno Setup installer stops the service, replaces the binaries and restarts it. On first start, migrations back up each database and then upgrade its schema. Signed auto-update comes in phase 5, by running the new installer silently.
@@ -1387,6 +1401,13 @@ Keep all five required jobs, full 1,001-object boundary tests, strict durability
 and 15-minute limits. The canonical local runner includes Engine by default;
 an explicit CI partition switch records its omission in verification evidence.
 Collect all required jobs before treating the partitioned workflow as passing.
+After the immutable build, overlap each Server job's complete no-build Engine
+run with its independent P0 and cross-account security probes. The latter publish
+only Core/SpikeSupport probe outputs, not active Engine test output. Capture
+stdout/stderr/TRX and both exit results, bound waits, and terminate the owned
+test process on failure/cancellation. Keep all checks, 600-second fuzz and
+15-minute limits. This avoids exhausting the budget on serial setup/probes
+before native Engine tests start; do not blindly rerun timed-out old heads.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included
