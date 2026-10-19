@@ -181,12 +181,56 @@ public sealed class CaseCoordinationTests : IDisposable
         paths.Select(File.ReadAllText).Order(StringComparer.Ordinal).ToArray().ShouldBe(new[]{First,Second}.Order(StringComparer.Ordinal).ToArray());
         paths.Count(path=>Path.GetFileName(path).Contains(".case-conflict",StringComparison.OrdinalIgnoreCase)).ShouldBe(1);
     }
+
+    [Fact]
+    public async Task LateChildrenWaitBehindAFileButTombstonesAndLaterDirectoryReactivationStillProgress()
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2); await using var c = await NodeAsync(3);
+        await PublishDirectory(a, "node", "child", First, early); await Publish(a, "node/survivor", First, early);
+        await Publish(b, "node", Second, early.AddMinutes(1));
+        var network = new InMemoryNetwork(); network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        var endpoint = network.Register(c.Id, c.Engine.CreateHandler);
+        await using var cb = await c.Engine.ConnectAsync(endpoint.Connect(b.Id), Token); await cb.SynchronizeAsync(cancellationToken: Token);
+        await c.Engine.RunPassAsync(Token); File.ReadAllText(Path.Combine(c.Root, "node")).ShouldBe(Second);
+        await using var ca = await c.Engine.ConnectAsync(endpoint.Connect(a.Id), Token); await ca.SynchronizeAsync(cancellationToken: Token);
+        for (int pass = 0; pass < 4; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
+        c.Index.Needed.Find("node/child").ShouldBeNull(); c.Index.Needed.Find("node/survivor").ShouldBeNull();
+        c.Index.RemotesForPath("node/survivor").Count().ShouldBeGreaterThan(0); // Suspension retains original signed versions.
+        File.ReadAllText(Path.Combine(c.Root, "node")).ShouldBe(Second);
+        File.Delete(Path.Combine(a.Root, "node", "child")); a.Engine.RequestScan(); await a.Engine.RunPassAsync(Token);
+        await ca.SynchronizeAsync(cancellationToken: Token);
+        for (int pass = 0; pass < 4; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
+        c.Index.LocalFiles.Find("node/child")!.Deleted.ShouldBeTrue(); File.ReadAllText(Path.Combine(c.Root, "node")).ShouldBe(Second);
+        File.Delete(Path.Combine(b.Root, "node")); await PublishDirectory(b, "node", "fresh", Second, early.AddMinutes(2));
+        await cb.SynchronizeAsync(cancellationToken: Token);
+        for (int pass = 0; pass < 8; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
+        File.ReadAllText(Path.Combine(c.Root, "node", "survivor")).ShouldBe(First);
+        File.ReadAllText(Path.Combine(c.Root, "node", "fresh")).ShouldBe(Second);
+        File.Exists(Path.Combine(c.Root, "node", "child")).ShouldBeFalse(); c.Index.Needed.Count().ShouldBe(0, CaseState(c));
+    }
     private static string CaseState(Node node) => string.Join(Environment.NewLine,
         node.Index.ReadPendingCasePreservations().Select(row => "case " + row.Source.PathKey + " -> " + row.DestinationPath + " retry=" + node.Index.ReadCasePreservationRetry(row.Source.SourceId)
             + " progress=" + (row.InstalledFileId is null ? null : node.Index.ReadDirectoryCaseProgress(row.Source.SourceId, row.InstalledFileId)))
         .Concat(node.Index.LocalFiles.ReadAll().Select(row => "local " + row.Path + " flags=" + row.Flags + " ready=" + row.ContentReady + " seq=" + row.LocalSequence))
         .Concat(node.Index.Needed.ReadAll().Select(row => "needed " + row.PathKey + " work=" + row.Work))
         .Concat(node.Index.ReadDirectoryPublicationPaths().Select(path => "publication " + path + " mode=" + node.Index.ReadDirectoryPublication(path)!.ReconstructionOnly)));
+
+    [Fact]
+    public async Task LocalDirectoryReplacementReactivatesSuspendedRemoteChildren()
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2); await using var c = await NodeAsync(3);
+        await PublishDirectory(a, "node", "child", First, early); await Publish(b, "node", Second, early.AddMinutes(1));
+        var network = new InMemoryNetwork(); network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        var endpoint = network.Register(c.Id, c.Engine.CreateHandler);
+        await using var cb = await c.Engine.ConnectAsync(endpoint.Connect(b.Id), Token); await cb.SynchronizeAsync(cancellationToken: Token); await c.Engine.RunPassAsync(Token);
+        await using var ca = await c.Engine.ConnectAsync(endpoint.Connect(a.Id), Token); await ca.SynchronizeAsync(cancellationToken: Token);
+        for (int pass = 0; pass < 4; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
+        c.Index.Needed.Find("node/child").ShouldBeNull(); File.ReadAllText(Path.Combine(c.Root, "node")).ShouldBe(Second);
+        File.Delete(Path.Combine(c.Root, "node")); Directory.CreateDirectory(Path.Combine(c.Root, "node")); c.Engine.RequestScan();
+        for (int pass = 0; pass < 8; pass++) { var result = await c.Engine.RunPassAsync(Token); c.Clock.AdvanceTo(result.NextAttemptTicks); }
+        File.ReadAllText(Path.Combine(c.Root, "node", "child")).ShouldBe(First);
+        c.Index.Needed.Count().ShouldBe(0, CaseState(c)); c.Index.HasPendingDirectoryPublications().ShouldBeFalse();
+    }
     private static async Task Publish(Node node,string path,string text,DateTime at)
     { string disk=Path.Combine(node.Root,path); File.WriteAllText(disk,text); File.SetLastWriteTimeUtc(disk,at); node.Engine.RequestScan(); await node.Engine.RunPassAsync(Token); }
     private async Task<Node> NodeAsync(ulong identity,bool readOnly=false)

@@ -4,7 +4,10 @@ using PeerSync.Core.Paths;
 
 namespace PeerSync.Storage.FolderDb;
 
-public sealed record FolderPathSnapshot(string PathKey, LocalFileRow? Local, IReadOnlyList<RemoteFileRow> Remote);
+public sealed record FolderPathSnapshot(string PathKey, LocalFileRow? Local, IReadOnlyList<RemoteFileRow> Remote)
+{
+    public LocalFileRow? BlockingFileAncestor { get; init; }
+}
 public sealed record RemoteIndexResult(bool Applied, long LastSequence, int AffectedPaths);
 
 public sealed partial class FolderIndex
@@ -118,7 +121,7 @@ public sealed partial class FolderIndex
     {
         private readonly SqliteConnection connection;
         private readonly SqliteTransaction transaction;
-        private readonly SqliteCommand local, remote, store, remove;
+        private readonly SqliteCommand local, remote, store, remove, ancestor;
         private readonly Func<FolderPathSnapshot, NeededRow?> resolver;
         public NeededRewrite(SqliteConnection connection, SqliteTransaction transaction, Func<FolderPathSnapshot, NeededRow?> resolver)
         {
@@ -126,6 +129,9 @@ public sealed partial class FolderIndex
             this.resolver = resolver;
             local = Make("SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE path_key=$path;");
             remote = Make("SELECT device_id,path_key,vv,record_body,signature FROM remote_files WHERE path_key=$path ORDER BY device_id;");
+            ancestor = Make("WITH RECURSIVE ancestors(key) AS (VALUES($path) UNION ALL SELECT rtrim(rtrim(key,replace(key,'/','')),'/') FROM ancestors WHERE instr(key,'/')>0) "
+                + "SELECT " + string.Join(',', FolderMaps.LocalColumns.Split(',').Select(column => "l." + column.Trim()))
+                + " FROM ancestors a JOIN local_files l ON l.path_key=a.key WHERE a.key<>$path AND l.type=0 AND l.deleted=0 AND l.flags=0 AND l.record_body IS NOT NULL AND l.ntfs_file_id IS NOT NULL ORDER BY length(a.key) DESC LIMIT 1;");
             store = Make("INSERT INTO needed(path_key,source_device,priority,work_stage,work_size,work_mtime,work_hash) VALUES($path,$source,$priority,$stage,$size,$mtime,$hash) "
                 + "ON CONFLICT(path_key) DO UPDATE SET source_device=excluded.source_device,priority=excluded.priority,work_stage=excluded.work_stage,work_size=excluded.work_size,work_mtime=excluded.work_mtime,work_hash=excluded.work_hash;");
             store.Parameters.Add("$source", SqliteType.Blob); store.Parameters.Add("$priority", SqliteType.Integer);
@@ -147,7 +153,9 @@ public sealed partial class FolderIndex
             using (var reader = remote.ExecuteReader())
                 while (reader.Read()) remoteRows.Add(new(reader.GetFieldValue<byte[]>(0), reader.GetString(1),
                     Core.Sync.VersionVector.Deserialize(reader.GetFieldValue<byte[]>(2)), new(reader.GetFieldValue<byte[]>(3), reader.GetFieldValue<byte[]>(4))));
-            var row = resolver(new(path, localRow, remoteRows.AsReadOnly()));
+            ancestor.Parameters[0].Value = path; LocalFileRow? blocking;
+            using (var reader = ancestor.ExecuteReader()) blocking = reader.Read() ? FolderMaps.ReadLocal(reader) : null;
+            var row = resolver(new(path, localRow, remoteRows.AsReadOnly()) { BlockingFileAncestor = blocking });
             if (row is null) { remove.Parameters[0].Value = path; remove.ExecuteNonQuery(); return; }
             FolderMaps.Needed.Validate(row);
             if (PathRules.Key(row.PathKey) != path) throw new InvalidOperationException("Needed resolver returned another path.");
@@ -158,6 +166,6 @@ public sealed partial class FolderIndex
             store.Parameters[5].Value = (object?)row.Work?.MtimeTicks ?? DBNull.Value; store.Parameters[6].Value = (object?)row.Work?.Fingerprint ?? DBNull.Value;
             store.ExecuteNonQuery();
         }
-        public void Dispose() { local.Dispose(); remote.Dispose(); store.Dispose(); remove.Dispose(); }
+        public void Dispose() { local.Dispose(); remote.Dispose(); store.Dispose(); remove.Dispose(); ancestor.Dispose(); }
     }
 }

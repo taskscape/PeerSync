@@ -151,6 +151,16 @@ public sealed class NeededSet
         if (candidates.Count == 0) return new(null, null, empty, false, false, LoserFate.None);
         var winner = ConflictResolver.SelectWinner(candidates);
         if (PathRules.Key(winner.Path) != snapshot.PathKey) throw new InvalidDataException("Record does not match the stored path key.");
+        if (!winner.Deleted && snapshot.BlockingFileAncestor is { } ancestor)
+        {
+            if (ancestor is not { Type: 0, Deleted: false, Flags: LocalFileState.None, Record: not null, FileId: not null })
+                throw new InvalidDataException("Invalid blocking ancestor observation.");
+            var parent = VersionView.Open(ancestor.Record, keys, ownDevice);
+            if (parent.Type != 0 || parent.Deleted || PathRules.Key(parent.Path) != PathRules.Key(ancestor.Path)
+                || !snapshot.PathKey.StartsWith(PathRules.Key(parent.Path) + '/', StringComparison.Ordinal))
+                throw new InvalidDataException("Blocking ancestor does not match its signed path.");
+            return new(winner, null, empty, false, false, LoserFate.None, "ancestor-is-file");
+        }
         if (winner.Type == 2 || ignore.IsIgnored(winner.Path, winner.Type == 1))
             return new(winner, null, empty, false, false, LoserFate.None, winner.Type == 2 ? "unsupported-type" : "ignored");
         var vector = ConflictResolver.MergeVectors(candidates);

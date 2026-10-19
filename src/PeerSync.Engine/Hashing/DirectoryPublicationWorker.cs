@@ -14,7 +14,10 @@ using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Hashing;
 
-internal sealed record DirectoryPublicationPass(IReadOnlyList<string> ChangedPaths, int Visited, int Deferred, bool More, bool RequiresScan);
+internal sealed record DirectoryPublicationPass(IReadOnlyList<string> ChangedPaths, int Visited, int Deferred, bool More, bool RequiresScan)
+{
+    public bool RequiresNeededRebuild { get; init; }
+}
 
 // Bounded continuation of scanner-owned private templates. It never walks the
 // native tree; each inventory was supplied by a complete scanner observation.
@@ -27,7 +30,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
     {
         if (maximumMembers is < 1 or > 1000 || maximumDirectories is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumMembers));
         using var gate = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
-        var changed = new List<string>(); int remaining = maximumMembers, visited = 0, deferred = 0; bool scan = false;
+        var changed = new List<string>(); int remaining = maximumMembers, visited = 0, deferred = 0; bool scan = false, rebuild = false;
         foreach (var initial in index.ReadDueDirectoryPublications(clock.GetUtcNow().UtcTicks, maximumDirectories))
         {
             if (remaining == 0) break;
@@ -87,7 +90,11 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 }
                 stage = "commit";
                 var committed = await capture.CommitQueuedUnderGateAsync(queued, draft, publication, clock.GetUtcNow().UtcTicks, token).ConfigureAwait(false);
-                if (committed.Changed) changed.Add(committed.Row.Path);
+                if (committed.Changed)
+                {
+                    changed.Add(committed.Row.Path);
+                    rebuild |= previous is { Type: 0, Deleted: false, Record: not null };
+                }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or CryptographicException or SqliteException or InvalidOperationException)
             { await Retry(error).ConfigureAwait(false); }
@@ -107,6 +114,6 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
         bool more = root is { Length: 24 } && index.ReadNextDirectoryPublicationTicks(root, now) is long next && next <= now;
         journal?.TryWrite(new("directory.publication_pass", "directory-publication") { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Debug,
             ItemsVisited = visited, ItemsChanged = changed.Count, ItemsDeferred = deferred });
-        return new(changed.AsReadOnly(), visited, deferred, more, scan);
+        return new(changed.AsReadOnly(), visited, deferred, more, scan) { RequiresNeededRebuild = rebuild };
     }
 }

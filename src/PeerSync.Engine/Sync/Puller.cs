@@ -154,6 +154,7 @@ public sealed class Puller : IDisposable
         {
             var published = await publications.RunAsync(token: token).ConfigureAwait(false);
             if (published.RequiresScan) RequestScan();
+            if (published.RequiresNeededRebuild) { neededRepairPending = true; RequestScan(); }
             if (!neededRepairPending && published.ChangedPaths.Count != 0)
             {
                 try { await needed.RecomputeAsync(published.ChangedPaths, token).ConfigureAwait(false); }
@@ -183,6 +184,7 @@ public sealed class Puller : IDisposable
             try
             {
                 FileApplyOutcome outcome; bool requiresScan;
+                bool opensDirectory = row.Work!.Stage == 0 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
                 if (row.Work!.Stage is 0 or 3)
                 {
                     var result = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
@@ -206,7 +208,7 @@ public sealed class Puller : IDisposable
                 mustScan |= requiresScan;
                 if (outcome is FileApplyOutcome.Applied or FileApplyOutcome.Unchanged)
                 {
-                    if (outcome == FileApplyOutcome.Applied) applied++;
+                    if (outcome == FileApplyOutcome.Applied) { applied++; if (opensDirectory) { neededRepairPending = true; mustScan = true; } }
                     else await needed.RecomputeAsync([row.PathKey], token).ConfigureAwait(false);
                     await index.ClearPullRetryAsync(row.PathKey, row.Work.Fingerprint, token).ConfigureAwait(false);
                 }

@@ -174,6 +174,12 @@ public sealed partial class FolderIndex
             using var needed = new NeededRewrite(connection, transaction, resolver);
             needed.Update(expected.PathKey);
             if (movedDirectory) WithholdDescendants(connection, transaction, expected.PathKey);
+            else if (frozen.Type == 0 && !frozen.Deleted)
+            {
+                using var descendants = connection.CreateCommand(); descendants.Transaction = transaction;
+                descendants.CommandText = "DELETE FROM needed WHERE path_key >= $low AND path_key < $high AND work_stage<2;";
+                descendants.Parameters.AddWithValue("$low", expected.PathKey + '/'); descendants.Parameters.AddWithValue("$high", expected.PathKey + '0'); descendants.ExecuteNonQuery();
+            }
             cancellationToken.ThrowIfCancellationRequested();
             RemoveIntent(connection, transaction, expected.Id); return true;
         }, cancellationToken);
