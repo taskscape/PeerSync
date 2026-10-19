@@ -234,8 +234,16 @@
         "type": "Project",
         "dependencies": {
           "PeerSync.Crypto": "[1.0.0, )",
+          "PeerSync.Net": "[1.0.0, )",
           "PeerSync.Protocol": "[1.0.0, )",
           "PeerSync.Storage": "[1.0.0, )"
+        }
+      },
+      "peersync.net": {
+        "type": "Project",
+        "dependencies": {
+          "PeerSync.Core": "[1.0.0, )",
+          "PeerSync.Protocol": "[1.0.0, )"
         }
       },
       "peersync.protocol": {

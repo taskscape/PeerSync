@@ -31,10 +31,11 @@ try {
         }
         & "$PSScriptRoot/Test-Diagnostics.ps1"
         # Only projects with real tests are counted; future-phase skeletons are excluded.
-        foreach ($name in @('Core','Crypto','Protocol','Engine','Storage')) {
+        foreach ($name in @('Core','Crypto','Protocol','Net','Engine','Storage')) {
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
         }
+        & "$PSScriptRoot/Run-Simulation.ps1" -Cases 8 -NoBuild
         & "$PSScriptRoot/Run-P0.ps1"
         & "$PSScriptRoot/Test-QuicDiagnostics.ps1"
     }

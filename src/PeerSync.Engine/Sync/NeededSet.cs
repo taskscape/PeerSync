@@ -40,13 +40,22 @@ public sealed class NeededSet
 
     /// <summary>Call only after transport authenticates the folder and sender.
     /// Shares the reference gate with receive and scheduled deletion checks.</summary>
-    public async Task<RemoteIndexRange> AnnounceIndexRangeAsync(byte[] sourceDevice, long targetSequence, CancellationToken cancellationToken = default)
+    public Task<RemoteIndexRange> AnnounceIndexRangeAsync(byte[] sourceDevice, long targetSequence, CancellationToken cancellationToken = default)
+        => AnnounceIndexRangeCoreAsync(sourceDevice, targetSequence, null, cancellationToken);
+
+    internal Task<RemoteIndexRange> AnnounceAdmittedIndexRangeAsync(byte[] sourceDevice, long targetSequence, Action admission, CancellationToken token)
+        => AnnounceIndexRangeCoreAsync(sourceDevice, targetSequence, admission, token);
+
+    private async Task<RemoteIndexRange> AnnounceIndexRangeCoreAsync(byte[] sourceDevice, long targetSequence, Action? admission, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(sourceDevice); sourceDevice = sourceDevice.ToArray(); Guid session = Guid.NewGuid();
         try
         {
             using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-            var range = await index.AnnounceRemoteIndexRangeAsync(sourceDevice, targetSequence, cancellationToken).ConfigureAwait(false);
+            admission?.Invoke();
+            var range = admission is null
+                ? await index.AnnounceRemoteIndexRangeAsync(sourceDevice, targetSequence, cancellationToken).ConfigureAwait(false)
+                : await index.AnnounceRemoteIndexRangeWithAdmissionAsync(sourceDevice, targetSequence, admission, cancellationToken).ConfigureAwait(false);
             journal?.TryWrite(new(range.Complete ? "index.range_complete" : "index.range_pending", "index") { SessionId = session, ItemsVisited = 1 });
             return range;
         }
@@ -56,8 +65,16 @@ public sealed class NeededSet
         }
     }
 
-    public async Task<RemoteIndexResult> ApplyIndexUpdateAsync(byte[] sourceDevice, long afterSequence, long lastSequence,
+    public Task<RemoteIndexResult> ApplyIndexUpdateAsync(byte[] sourceDevice, long afterSequence, long lastSequence,
         IReadOnlyList<Envelope> records, CancellationToken cancellationToken = default)
+        => ApplyIndexCoreAsync(sourceDevice, afterSequence, lastSequence, records, null, cancellationToken);
+
+    internal Task<RemoteIndexResult> ApplyAdmittedIndexUpdateAsync(byte[] sourceDevice, long afterSequence, long lastSequence,
+        IReadOnlyList<Envelope> records, Action admission, CancellationToken token)
+        => ApplyIndexCoreAsync(sourceDevice, afterSequence, lastSequence, records, admission, token);
+
+    private async Task<RemoteIndexResult> ApplyIndexCoreAsync(byte[] sourceDevice, long afterSequence, long lastSequence,
+        IReadOnlyList<Envelope> records, Action? admission, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(sourceDevice);
@@ -69,6 +86,7 @@ public sealed class NeededSet
         try
         {
             using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
+            admission?.Invoke();
             var rows = new List<RemoteFileRow>(records.Count);
             foreach (var record in records)
             {
@@ -76,7 +94,9 @@ public sealed class NeededSet
                 var view = VersionView.Open(record, keys, sourceDevice);
                 rows.Add(new(sourceDevice.ToArray(), PathRules.Key(view.Path), view.Vector, record));
             }
-            var result = await index.ApplyRemoteIndexAsync(sourceDevice, afterSequence, lastSequence, rows, ToNeededRow, cancellationToken).ConfigureAwait(false);
+            var result = admission is null
+                ? await index.ApplyRemoteIndexAsync(sourceDevice, afterSequence, lastSequence, rows, ToNeededRow, cancellationToken).ConfigureAwait(false)
+                : await index.ApplyRemoteIndexWithAdmissionAsync(sourceDevice, afterSequence, lastSequence, rows, ToNeededRow, admission, cancellationToken).ConfigureAwait(false);
             journal?.TryWrite(new(result.Applied ? "index.receive_complete" : "index.replay", "index")
             { SessionId = session, ItemsVisited = records.Count, ItemsChanged = result.AffectedPaths, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             return result;

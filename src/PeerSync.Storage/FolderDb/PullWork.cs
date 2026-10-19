@@ -19,10 +19,22 @@ public sealed partial class FolderIndex
     /// <summary>Current sender index generation only. A rollback/reset needs
     /// explicit transport reconciliation; never lower an outstanding target.</summary>
     public Task<RemoteIndexRange> AnnounceRemoteIndexRangeAsync(byte[] deviceId, long targetSequence, CancellationToken cancellationToken = default)
+        => AnnounceRemoteIndexRangeCoreAsync(deviceId, targetSequence, null, cancellationToken);
+
+    /// <summary>Admission runs inside the writer transaction at entry and before
+    /// commit. It must be pure, bounded and never reenter storage.</summary>
+    public Task<RemoteIndexRange> AnnounceRemoteIndexRangeWithAdmissionAsync(byte[] deviceId, long targetSequence, Action admission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(admission); return AnnounceRemoteIndexRangeCoreAsync(deviceId, targetSequence, admission, cancellationToken);
+    }
+
+    private Task<RemoteIndexRange> AnnounceRemoteIndexRangeCoreAsync(byte[] deviceId, long targetSequence, Action? admission, CancellationToken cancellationToken)
     {
         FolderMaps.RequireBytes(deviceId, 32); ArgumentOutOfRangeException.ThrowIfNegative(targetSequence); byte[] device = deviceId.ToArray();
         return database.WriteDurableAsync((connection, transaction) =>
         {
+            admission?.Invoke();
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT last_seq_received FROM devices WHERE device_id=$device;"; command.Parameters.AddWithValue("$device", device);
             long received = command.ExecuteScalar() is long cursor ? cursor : 0;
@@ -31,7 +43,8 @@ public sealed partial class FolderIndex
                 + "ON CONFLICT(device_id) DO UPDATE SET target_sequence=MAX(remote_index_ranges.target_sequence,excluded.target_sequence);";
             command.Parameters.AddWithValue("$target", targetSequence); command.ExecuteNonQuery();
             command.CommandText = "SELECT target_sequence FROM remote_index_ranges WHERE device_id=$device;";
-            return new RemoteIndexRange(device.ToArray(), (long)command.ExecuteScalar()!, received);
+            long target = (long)command.ExecuteScalar()!; admission?.Invoke();
+            return new RemoteIndexRange(device.ToArray(), target, received);
         }, cancellationToken);
     }
 
