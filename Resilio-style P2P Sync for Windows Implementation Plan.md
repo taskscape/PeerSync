@@ -298,6 +298,15 @@ for pending application work; orphan expiry must not infer ownership from a
 filename alone. All reference-changing engine entry points must serialize with
 the folder sweep, and cleanup must verify root/file identity, length/hash and
 independent-file state under native guards before deleting known objects.
+Before policy pruning an indexed archive, FULL-durably record its exact archive
+row, bound root/file identity, hash/length and expiry/cap reason under the verified
+file guard. After native deletion is proven complete, atomically remove the
+unchanged row and complete that retirement witness. On restart, finish only a
+matching verified object or an already absent prepared target; preserve changed,
+replaced, linked, locked and reparse objects. Unexpected missing archives without
+such a witness may reconcile their rows, but do not authorize releasing history
+references. Reference retention consumes completed witnesses or the explicit age
+policy, never absence alone. Pending application still blocks policy maintenance.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
