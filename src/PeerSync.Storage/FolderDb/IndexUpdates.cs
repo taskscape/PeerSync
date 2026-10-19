@@ -86,12 +86,30 @@ public sealed partial class FolderIndex
         int count = 0;
         foreach (var batch in unique.Chunk(1000))
         {
-            count += await database.WriteDurableAsync((connection, transaction) =>
+            var result = await database.WriteDurableAsync<(int Updated, CasePreservationCapacityException? Capacity)>((connection, transaction) =>
             {
                 using var needed = new NeededRewrite(connection, transaction, resolver);
-                foreach (string path in batch) { cancellationToken.ThrowIfCancellationRequested(); needed.Update(path); }
-                return batch.Length;
+                int updated = 0;
+                foreach (string path in batch)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    // One path can admit multiple sources. Never leave a partial path
+                    // when capacity is reached, but let the valid prefix drain first.
+                    transaction.Save("needed_path");
+                    try { needed.Update(path); }
+                    catch (CasePreservationCapacityException capacity)
+                    {
+                        transaction.Rollback("needed_path"); transaction.Release("needed_path");
+                        return (updated, capacity);
+                    }
+                    transaction.Release("needed_path"); updated++;
+                }
+                return (updated, null);
             }, cancellationToken).ConfigureAwait(false);
+            count += result.Updated;
+            // The writer commits FULL before exposing recoverable backpressure.
+            // All other failures/cancellation still roll back the whole current batch.
+            if (result.Capacity is not null) throw result.Capacity;
         }
         return count;
     }

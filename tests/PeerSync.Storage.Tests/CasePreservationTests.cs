@@ -64,6 +64,53 @@ public sealed class CasePreservationTests : IDisposable
     }
 
     [Fact]
+    public async Task RecomputeCapacityCommitsValidPrefixButRollsBackEverySourceInTheFailingPath()
+    {
+        await using (var index = await Open())
+        {
+            await Receive(index, Enumerable.Range(1, 998).Select(Source).ToArray());
+            await index.Needed.UpsertAsync([new("b", Device, 99)], Token);
+            bool visitedLater = false;
+            await Should.ThrowAsync<CasePreservationCapacityException>(() => index.RecomputeNeededAsync(["a", "b", "c"], snapshot =>
+            {
+                if (snapshot.PathKey == "C") visitedLater = true;
+                var sources = snapshot.PathKey == "A"
+                    ? new[] { new CasePreservationSource(Id(1000), Device, "a", Record(1)) }
+                    : new[] { new CasePreservationSource(Id(1001), Device, "b", Record(1)), new CasePreservationSource(Id(1002), Device, "b", Record(1)) };
+                return Needed(snapshot.PathKey, sources);
+            }, Token));
+            visitedLater.ShouldBeFalse();
+            index.ReadPendingCasePreservations().Count.ShouldBe(999);
+            index.HasPendingCasePreservation("a").ShouldBeTrue(); index.HasPendingCasePreservation("b").ShouldBeFalse();
+            index.Needed.Find("a").ShouldNotBeNull(); index.Needed.Find("b")!.Priority.ShouldBe(99);
+            index.Devices.Find(Device)!.LastSequenceReceived.ShouldBe(1);
+        }
+        await using var reopened = await FolderIndex.OpenAsync(Database, Token);
+        reopened.ReadPendingCasePreservations().Count.ShouldBe(999); reopened.Needed.Find("a").ShouldNotBeNull();
+        reopened.Needed.Find("b")!.Priority.ShouldBe(99);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NoncapacityRecomputeFailureOrCancellationRollsBackTheCurrentWholeBatch(bool cancel)
+    {
+        await using var index = await Open(); using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        async Task Run() => await index.RecomputeNeededAsync(["a", "b"], snapshot =>
+        {
+            if (snapshot.PathKey == "B")
+            {
+                if (!cancel) throw new InvalidDataException("resolver rejected");
+                stop.Cancel(); return null;
+            }
+            return Needed("a", [new(Id(1000), Device, "a", Record(1))]);
+        }, stop.Token);
+        if (cancel) await Should.ThrowAsync<OperationCanceledException>(Run);
+        else await Should.ThrowAsync<InvalidDataException>(Run);
+        index.ReadPendingCasePreservations().ShouldBeEmpty(); index.Needed.Count().ShouldBe(0);
+    }
+
+    [Fact]
     public async Task FailedFinalAdmissionRollsBackNewSourcesAndExistingCursor()
     {
         await using var index = await Open(); int admissions = 0;

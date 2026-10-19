@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Threading.Channels;
+using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
@@ -121,6 +122,47 @@ public sealed class CaseCopyRecoveryTests : IDisposable
         index.ReadPendingCasePreservations().ShouldBeEmpty(); index.Needed.Count().ShouldBe(0); index.ReadApplyIntents().ShouldBeEmpty();
         Directory.GetFiles(Root).Count(path=>Path.GetFileName(path).Contains(".case-conflict",StringComparison.Ordinal)).ShouldBe(count);
         for(int i=0;i<count;i++) File.ReadAllText(Disk("FILE"+i.ToString("D4",System.Globalization.CultureInfo.InvariantCulture)+".TXT")).ShouldBe(Second);
+    }
+
+    [Fact]
+    public async Task PartiallyOccupiedCapacityStillDrainsNewCasePathsWhileOlderSourcesAreUnavailable()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); var clock = new MutableClock();
+        using (var scanner = new Scanner(Root, index, keys, Device(1))) await scanner.ScanAsync(Token);
+        var held = Enumerable.Range(1, 999).Select(number =>
+        {
+            var record = Record("held.txt", 8, (ulong)number, number, First, 1);
+            var view = VersionView.Open(record, keys, Device(8));
+            return new CasePreservationSource(CaseConflictPolicy.SourceId(view), Device(8), view.Path, record);
+        }).ToArray();
+        await index.RecomputeNeededAsync(["held.txt"], snapshot => new(snapshot.PathKey, Device(8), 0)
+        { CasePreservations = held, PreservationAdmissionOnly = true }, Token);
+        // Persist the already backed-off historical sources in one fixture transaction.
+        // Their real signed proofs remain intact and continue holding block references.
+        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()))
+        {
+            connection.Open(); using var transaction = connection.BeginTransaction(); using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO case_preservation_retries(source_id,attempts,failed_ticks,next_ticks) SELECT source_id,7,$now,$next FROM case_preservations;";
+            command.Parameters.AddWithValue("$now", clock.GetUtcNow().UtcTicks); command.Parameters.AddWithValue("$next", clock.GetUtcNow().AddMinutes(10).UtcTicks);
+            command.ExecuteNonQuery(); transaction.Commit();
+        }
+        var rows = new List<RemoteFileRow>(); SignedRecord? last = null;
+        for (int number = 0; number < 4; number++)
+        {
+            string path = "file" + number.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt";
+            var a = Record(path, 2, 1, 10, First, 1); var b = Record(path.ToUpperInvariant(), 3, 1, 20, Second, 1); last = b;
+            rows.Add(new(Device(2), path, VersionView.Open(a, keys, Device(2)).Vector, a)); rows.Add(new(Device(3), path, VersionView.Open(b, keys, Device(3)).Vector, b));
+        }
+        await index.RemoteFiles.UpsertAsync(rows, Token); var winner = VersionView.Open(last!, keys, Device(3));
+        await index.Needed.UpsertAsync([new(winner.Path, Device(3), 1) { Work = new(1, winner.Size, winner.MtimeTicks, new byte[32]) }], Token);
+        using var puller = new Puller(Root, index, keys, Device(1), Fetch, timeProvider: clock);
+        (await puller.RunPassAsync(Token)).Visited.ShouldBe(0); File.Exists(Disk(winner.Path)).ShouldBeFalse();
+        for (int pass = 0; pass < 8; pass++) await puller.RunPassAsync(Token);
+        index.ReadPendingCasePreservations().Count.ShouldBe(999);
+        index.ReadPendingCasePreservations().ShouldAllBe(source => source.Source.PathKey == "HELD.TXT");
+        index.Needed.Count().ShouldBe(0); index.ReadApplyIntents().ShouldBeEmpty();
+        Directory.GetFiles(Root).Count(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal)).ShouldBe(4);
+        for (int number = 0; number < 4; number++) File.ReadAllText(Disk("FILE" + number.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".TXT")).ShouldBe(Second);
     }
 
     [Fact]

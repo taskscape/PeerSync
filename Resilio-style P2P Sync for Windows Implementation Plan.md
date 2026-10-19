@@ -620,6 +620,13 @@ as recoverable backpressure. After a successful native scan, allow already
 admitted sources to install, scan and complete even if full needed recomputation
 is capacity-limited. Block ordinary application until that repair completes,
 then resume remaining batches; never spin on blocked ordinary deadlines.
+Startup/local recomputation may commit a valid prefix within each bounded
+batch when preservation capacity is reached. Use a per-path savepoint so the
+failing path retains neither partial source admission nor changed needed work;
+commit the prefix FULL before reporting recoverable saturation. This permits
+progress when unavailable older sources leave fewer than a batch's free slots.
+Remote receipt remains whole-batch atomic with its cursor. Other resolver
+failures or cancellation roll back the current entire recomputation batch.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
@@ -1341,6 +1348,13 @@ the same update otherwise starts independent push and PR matrices, and
 per-ref concurrency cannot cancel that duplication. Keep every required job,
 the full fuzz duration, publishing and evidence. Combine related local work
 before submitting a new head, and inspect the causal failure before retrying.
+The required Server 2022 and Server 2025 security jobs each run the complete
+native Engine suite. The x64 packaging job runs the remaining unit suites,
+simulation and native probes; avoid a third duplicate Engine execution there.
+Keep all five required jobs, full 1,001-object boundary tests, strict durability
+and 15-minute limits. The canonical local runner includes Engine by default;
+an explicit CI partition switch records its omission in verification evidence.
+Collect all required jobs before treating the partitioned workflow as passing.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included
