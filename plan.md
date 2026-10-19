@@ -1649,6 +1649,7 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
     - Done when: generated/replayed operation traces use actual engine folders, heal to byte-identical visible trees and verify preservation from current/archive/conflict files. Save failure evidence and promote found regressions. Initial bounded smoke does not close the parent or phase gate.
     - [Simulation evidence](docs/verification/P1.6.2a-real-engine-simulation-2026-10-19.md) and [merged audit](docs/verification/P1-clock-transport-ci-merge-2026-10-19.md): initial generated scenarios, saved checker regression and native loss-oracle negative control pass locally and in final green CI, with an eight-scenario smoke. Expanded coverage, 1,000 CI cases, five consecutive days and the parent gate remain pending.
     - An additional local 1,000-case batch on the first PR #34 head passes: 9,807 versions, 500 actual renames and 1,001 actual deletions, all converged/preserved. This is initial flat-path evidence before the review repairs, not CI/five-day/100k-file gate evidence.
+    - A [fresh local 1,000-case batch](docs/verification/P1-simulation-current-head-1000-2026-10-19.md) on submitted PR #35 head passes after the review/hierarchy/staging changes: 1,000 distinct seeds, 9,696 ledger versions, 508 actual renames and 940 actual deletions; exit 0 in 12m42s. Flat-path coverage remains separate from expanded scenarios, 1,000 CI cases, five consecutive days and the 100k-file gate.
 
 ### Gate P1
 
