@@ -28,6 +28,15 @@ public sealed partial class FolderIndex
         command.Parameters.AddWithValue("$root", rootId); return (long)command.ExecuteScalar()! != 0;
     }
 
+    public bool IsHistoryAccounted(string markerKey, byte[] rootId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(markerKey); FolderMaps.RequireBytes(rootId, 24);
+        using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM history_archive_links WHERE marker_key=$key AND root_id=$root);";
+        command.Parameters.AddWithValue("$key", markerKey); command.Parameters.AddWithValue("$root", rootId);
+        return (long)command.ExecuteScalar()! != 0;
+    }
+
     public Guid? FindArchiveRetirementSource(Guid retirementId)
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();

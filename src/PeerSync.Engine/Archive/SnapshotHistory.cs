@@ -23,6 +23,27 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
 {
     internal Action<string>? Checkpoint { get; init; }
 
+    // The caller authenticates the marker and owns the folder gate. Reuse has
+    // native identity proof; reconstruction only reads immutable source blocks.
+    internal async Task BootstrapMarkerAsync(SafeFileTree tree, MetaRow marker, HistoryState retained, CancellationToken token)
+    {
+        if (!retained.Root.AsSpan().SequenceEqual(tree.Identity)) throw new IOException("Historical root changed.");
+        if (VerifyLocation(tree, retained, token) && (retained.PublicCopy || index.CanRetainHistoryArchive(Protection(retained))))
+        {
+            using var parent = tree.Directory(ApplyState.Parent(retained.Destination), privatePath: !retained.PublicCopy);
+            using var file = parent.OpenFile(ApplyState.Name(retained.Destination), mutation: true); Verify(file, retained, token);
+            if (!await index.AccountExistingHistoryAsync(marker, Protection(retained), token).ConfigureAwait(false))
+                throw new InvalidOperationException("History changed while bootstrapping retention.");
+            Signal("accounted", Guid.NewGuid()); return;
+        }
+        var state = new HistoryState { Root = tree.Identity.ToArray(), Source = retained.Source, PublicCopy = retained.PublicCopy,
+            ArchivedTicks = retained.ArchivedTicks, Temporary = "" };
+        state.Temporary = TemporaryFor(state); var current = index.LocalFiles.Find(retained.Source.Path);
+        var intent = new ApplyIntent(Guid.NewGuid(), retained.Source.Path, current?.LocalSequence, state.Encode());
+        await index.ReserveApplyAsync(intent, token).ConfigureAwait(false); Signal("reserved", intent.Id);
+        await RecoverIntentAsync(tree, intent, token).ConfigureAwait(false);
+    }
+
     internal async Task<bool> EnsureAsync(SafeFileTree tree, LocalFileRow previous, LocalFileRow next, string? retainedCopy, CancellationToken token)
     {
         if (previous is not { Type: 0, Deleted: false, Record: not null }
@@ -138,6 +159,12 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
                 while (true)
                 {
                     token.ThrowIfCancellationRequested();
+                    if (!state.PublicCopy && index.ArchivePathExists(state.Destination))
+                    {
+                        if (++state.Collision > 1000) throw new IOException("History collision budget exceeded.");
+                        intent = await index.RewriteApplyAsync(intent, state.Encode(), token).ConfigureAwait(false);
+                        continue;
+                    }
                     try { parent.MoveHere(file, ApplyState.Name(state.Destination)); break; }
                     catch (Win32Exception error) when (error.NativeErrorCode is 80 or 183)
                     {
