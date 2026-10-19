@@ -1062,7 +1062,7 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
 
 ### P1.3 Storage
 
-- [ ] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`)
+- [ ] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) [WIP @Codex 2026-10-19]
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.
 - [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`)
   - Done when: the schema in 7.7 is created by migration 1. Repositories cover `local_files`, `remote_files`, `needed`, `chunks`, `devices`, `archive` and `meta`. Bulk updates commit in batches of 1,000 rows per transaction. Indexing 1M rows takes under 60 s on the reference SSD.
