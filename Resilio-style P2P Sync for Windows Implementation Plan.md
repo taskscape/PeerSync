@@ -283,6 +283,21 @@ sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
   Bind the reused location in a FULL-durable source marker without changing its
   metadata. Index archive lookups by original path/hash/size. Changed or
   unverified destinations remain protected; reconstruct another independent copy.
+
+Published block ownership is persistent. Before writing a new staging blob,
+flush a bounded local capture proof binding the root, proof/data file identities,
+expected hash/length, capture time and canonical GUID. A checksum detects torn
+proofs; it is local recovery metadata, not network authorization. After installing
+and verifying a blob, FULL-durable catalog registration precedes any live-file
+readiness/publication. Recovery can finish complete owned staging, reconcile
+installed captures after a crash, and preserve unknown, changed or invalid
+objects. Valid proof cleanup follows catalog durability. Existing verified bytes
+matching a caller-owned capture can be registered without rewriting them.
+The subsequent reference sweep must protect current/needed/history data and wait
+for pending application work; orphan expiry must not infer ownership from a
+filename alone. All reference-changing engine entry points must serialize with
+the folder sweep, and cleanup must verify root/file identity, length/hash and
+independent-file state under native guards before deleting known objects.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
