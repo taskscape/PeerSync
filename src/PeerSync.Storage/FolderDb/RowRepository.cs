@@ -71,6 +71,7 @@ public sealed class RowRepository<T> where T : class
         return ReadWhere(KeyClause(), NormalizeKeys(keys)).FirstOrDefault();
     }
 
+    /// <summary>Physical metadata removal. Publish filesystem deletions as signed tombstones instead.</summary>
     public Task<int> DeleteAsync(object?[] keys, CancellationToken cancellationToken = default)
     {
         ValidateKeys(keys);
@@ -78,8 +79,13 @@ public sealed class RowRepository<T> where T : class
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = $"DELETE FROM \"{map.Table}\" WHERE {KeyClause()};";
             BindValues(command, NormalizeKeys(keys));
+            if (map.Table == "local_files")
+            {
+                command.CommandText = "DELETE FROM chunks WHERE path_key=$k0;";
+                command.ExecuteNonQuery();
+            }
+            command.CommandText = $"DELETE FROM \"{map.Table}\" WHERE {KeyClause()};";
             return command.ExecuteNonQuery();
         }, cancellationToken);
     }

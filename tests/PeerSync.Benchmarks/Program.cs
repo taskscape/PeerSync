@@ -13,9 +13,11 @@ if (args is ["--micro"])
     BenchmarkRunner.Run<PeerSync.Benchmarks.ChunkingBenchmark>();
     return 0;
 }
+if (args is ["--index", var databasePath, "--rows", var rowCount])
+    return await PeerSync.Benchmarks.IndexingBenchmark.RunAsync(databasePath, int.Parse(rowCount, CultureInfo.InvariantCulture));
 if (args.Length < 1)
 {
-    Console.Error.WriteLine("<file> [--create <bytes>] | --micro");
+    Console.Error.WriteLine("<file> [--create <bytes>] | --micro | --index <new-database> --rows <count>");
     return 2;
 }
 string path = Path.GetFullPath(args[0]);

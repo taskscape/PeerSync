@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core types and chunk hashing complete; storage underway | - |
+| P1 Local sync engine | 4-8 | In progress: core types and chunk hashing complete; storage underway; CI promotion blocked by GitHub billing (#10) | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -1064,7 +1064,7 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
 
 ### P1.3 Storage
 
-- [ ] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) [WIP @Codex 2026-10-19]
+- [ ] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) [WIP @Codex 2026-10-19] [BLOCKED: required CI cannot start due to GitHub account billing/spending allowance, since 2026-10-19; #10]
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.
 - [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
   - Done when: the schema in 7.7 is created by migration 1. Repositories cover `local_files`, `remote_files`, `needed`, `chunks`, `devices`, `archive` and `meta`. Bulk updates commit in batches of 1,000 rows per transaction. Indexing 1M rows takes under 60 s on the reference SSD.

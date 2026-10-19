@@ -103,6 +103,10 @@ public sealed class FolderIndexTests : IDisposable
         await index.LocalFiles.UpsertAsync([row with { Deleted = true, IndexedChunks = [] }], TestContext.Current.CancellationToken);
         index.Chunks.Count().ShouldBe(0);
         index.LocalFiles.Find("file")!.Deleted.ShouldBeTrue();
+        await index.LocalFiles.UpsertAsync([row], TestContext.Current.CancellationToken);
+        index.Chunks.Count().ShouldBe(2);
+        await index.LocalFiles.DeleteAsync(["file"], TestContext.Current.CancellationToken);
+        index.Chunks.Count().ShouldBe(0); index.LocalFiles.Find("file").ShouldBeNull();
     }
 
     [Fact]
@@ -139,8 +143,11 @@ public sealed class FolderIndexTests : IDisposable
         await Should.ThrowAsync<ArgumentException>(() => index.RemoteFiles.UpsertAsync([new(Peer, "../escape", new Dictionary<ulong, ulong>(), Row("file").Record!)], TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public async Task SnapshotCursorDoesNotSkipRecordsDuringConcurrentWrites()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7)]
+    [InlineData(1000)]
+    public async Task SnapshotCursorDoesNotSkipRecordsDuringConcurrentWrites(int limit)
     {
         await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
         var writing = Task.WhenAll(Enumerable.Range(0, 60).Select(i => index.LocalFiles.UpsertAsync([Row($"file-{i}")], TestContext.Current.CancellationToken)));
@@ -151,7 +158,7 @@ public sealed class FolderIndexTests : IDisposable
             // If completion is observed only after the read, the last commit
             // can land between an empty snapshot and the exit check.
             bool completedBeforeRead = writing.IsCompleted;
-            var batch = index.ReadIndexBatch(cursor, 7);
+            var batch = index.ReadIndexBatch(cursor, limit);
             foreach (var row in batch.Records)
             {
                 row.LocalSequence.ShouldBeGreaterThan(cursor);
