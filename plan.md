@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | Begin clock UI status integration with endpoint-local Hello measurements and immutable authenticated-session snapshots. Exchange valid Hello UTC in both directions even when index admission is blocked, preserve closed skew/invalid reasons separately from reset admission, clear old warnings on a fresh valid session, bound recent history/snapshots and expose truncation. Control-pipe and rendered UI wiring remain mandatory. | Sync engine design: clock status; Control API |
 | 2026-10-19 | PR #35 review identifies an omitted held-temporary handle in concurrent-target recovery and old parent spelling in catalog case-alias reuse. Reproduce edited prepared staging plus a concurrent target and interrupted alias reuse; forward native ownership instead of reopening and bind new intents to the current parent spelling while preserving catalog age/identity. Keep both repairs in one verified head. | Applying remote changes: staging lifecycle |
 | 2026-10-19 | Cold staging recovery cancels pending deletion permissions before apply recovery/scan, retaining witnesses for fresh post-recompute expiry. This prevents destructive replay against stale needed state. Persist bounded cursor pages across all parked entries; continue full pages immediately, retry transient deferrals and reconcile missing metadata only after current references are available. | Applying remote changes: staging expiry |
 | 2026-10-19 | Staging expiry uses a persistent root-bound bounded cursor, counts skipped rows, recovers prepared retirements first and verifies bytes before taking the reference gate. FULL reservation rechecks current age/needs/witness/apply state. Inaccessible reservations may be safely canceled without deleting bytes to free journal capacity; preserve foreign replacements and retire only confirmed-missing metadata. | Applying remote changes: staging expiry |
@@ -1509,8 +1510,12 @@ Our own writes need no special suppression: the puller records the new state in 
   - [ ] **P1.5.5b Guard peer index admission** (`PeerSync.Engine/`, `PeerSync.Net/`) [WIP @Codex 2026-10-19]
     - Done when: authenticated peer sessions check current clock admission before incoming and outgoing index exchange; skewed or missing samples exchange no index data and recovery after a valid Hello is tested using production engine/transport integration.
     - Local [facade/transaction evidence](docs/verification/P1.5.5b-peer-index-admission-2026-10-19.md): eleven Engine, four Storage and three Core additions pass with all 935 canonical tests/native/probe/publishing in 110.20 seconds, exit 0 (CI fuzz skipped locally). Pure checks under writer/reference gates, rollback, identity binding, immutable pages and private trace/session diagnostics are covered. Production transport wiring, UI and main/CI remain pending.
-  - [ ] **P1.5.5c Present clock status in the control UI** (`PeerSync.App/`)
+  - [ ] **P1.5.5c Present clock status in the control UI** (`PeerSync.App/`) [WIP @codex 2026-10-19]
     - Done when: the real control UI presents the peer clock reason and numeric minute difference from service status, and clears it on recovery. Remains required before the parent closes.
+    - [ ] **P1.5.5c1 Typed session status source and lifecycle** (`PeerSync.Core/`, `PeerSync.Engine/`) [WIP @codex 2026-10-19]
+      - Done when: both endpoints calculate their own signed Hello offset, status snapshots bind authenticated peer/session identity, disconnect resets admission while preserving the display reason, reconnect clears old closed warnings, and bounded history/truncation/immutability and connected regressions pass. This source alone does not close the rendered UI requirement.
+    - [ ] **P1.5.5c2 Control status delivery and rendered UI** (`PeerSync.Control.Contracts/`, `PeerSync.Service/`, `PeerSync.App/`)
+      - Done when: the real control pipe delivers the runtime status source and the app renders reason/minute difference, missing/invalid/disconnected states and recovery without stale updates. Verify real pipe lifecycle/authentication and rendered controls; integrate with production authenticated transport before the parent closes.
 
 ### 7.10 Code: resolving concurrent versions (P1.5.1, P1.5.2)
 

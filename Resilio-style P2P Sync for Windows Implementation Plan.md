@@ -542,6 +542,24 @@ seconds without peer names, identifiers, nonces, keys or file data. The UTC Hell
 and decision model are P1 foundations; actual index admission and rendered UI
 remain required parts of P1.5.5 before its checkbox can close.
 
+A valid authenticated Hello exchanges both UTC samples even if the receiver's
+clock guard already blocks index exchange. Each endpoint then evaluates its
+own signed offset (peer UTC minus local UTC); the remote endpoint's exception
+must not masquerade as the caller's local clock measurement. Index and block
+operations retain their existing guards. Hello still validates protocol,
+identity and nonce before updating clock state.
+
+The control status source reads immutable session-bound snapshots rather than
+reconstructing state from logs. Keep the authenticated peer identity and local
+session correlation ID separate from untrusted Hello fields. On disconnect,
+admission resets immediately, but a closed session's last skew/invalid reason
+and numeric offset remain available for display. A fresh valid session clears
+the corresponding closed-peer warning. Bound recent closed history to 64
+peers, bound each snapshot to 1,000 rows and signal truncation explicitly.
+Active sessions remain host-owned and must be drained. Display snapshots never
+grant admission. Typed source/lifecycle checks precede control-pipe and rendered
+UI wiring; those remain mandatory before P1.5.5c or its parent can close.
+
 An authenticated peer-bound index facade supplies the source identity from its
 transport context, never from Hello. It checks clock admission before receiving
 data, after acquiring the reference gate, and in the writer transaction both
