@@ -74,7 +74,8 @@ public sealed partial class FolderIndex
             if (state.Active) return false;
             RequireNoReferenceApply(connection, transaction);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "DELETE FROM block_reference_snapshots WHERE id<>$id; UPDATE block_reference_snapshots SET active=1 WHERE id=$id;";
+            command.CommandText = "DELETE FROM block_orphans WHERE EXISTS(SELECT 1 FROM block_references r WHERE r.snapshot_id=$id AND r.hash=block_orphans.hash); "
+                + "DELETE FROM block_reference_snapshots WHERE id<>$id; UPDATE block_reference_snapshots SET active=1 WHERE id=$id;";
             command.Parameters.AddWithValue("$id", snapshot.ToString("N")); command.ExecuteNonQuery(); return true;
         }, cancellationToken);
     }

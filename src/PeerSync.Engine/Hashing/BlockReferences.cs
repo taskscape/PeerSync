@@ -43,10 +43,16 @@ public sealed class BlockReferences
     {
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         using var references = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
+        using var tree = new SafeFileTree(rootPath);
+        return await RefreshUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Maintenance retains both gates and this pinned root through its sweep.
+    internal async Task<BlockReferenceRefreshResult> RefreshUnderGateAsync(SafeFileTree tree, CancellationToken cancellationToken)
+    {
         Guid session = Guid.NewGuid(); var watch = Stopwatch.StartNew();
         try
         {
-            using var tree = new SafeFileTree(rootPath);
             if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } root || !root.AsSpan().SequenceEqual(tree.Identity))
                 throw new IOException("Block reference root changed or is not bound.");
             var recovery = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);

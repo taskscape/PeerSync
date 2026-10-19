@@ -41,12 +41,18 @@ public sealed class HistoryPolicy
     {
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         using var references = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-        using var tree = new SafeFileTree(rootPath); byte[] root = tree.Identity.ToArray();
-        if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } bound || !bound.AsSpan().SequenceEqual(root))
-            throw new IOException("History policy root changed or is not bound.");
+        using var tree = new SafeFileTree(rootPath);
+        return await RetireUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<HistoryPolicyResult> RetireUnderGateAsync(SafeFileTree tree, CancellationToken cancellationToken)
+    {
         Guid session = Guid.NewGuid(); var watch = Stopwatch.StartNew(); int retired = 0, released = 0;
         try
         {
+            byte[] root = tree.Identity.ToArray();
+            if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } bound || !bound.AsSpan().SequenceEqual(root))
+                throw new IOException("History policy root changed or is not bound.");
             var bootstrap = await new HistoryRecovery(rootPath, index, keys, device, settings, journal)
                 .BootstrapUnderGateAsync(tree, cancellationToken).ConfigureAwait(false);
             if (bootstrap.WaitingForRecovery) { Log("history.policy_wait", "pending-apply"); return new(0, 0, true); }

@@ -25,8 +25,9 @@ public sealed partial class FolderIndex
             root.CommandText = "SELECT value FROM meta WHERE key='_root-identity';";
             byte[] identity = root.ExecuteScalar() as byte[] ?? throw new InvalidOperationException("Bind the root before catalog registration.");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO block_objects(hash,length,root_id,file_id,captured_ticks,last_used_ticks) VALUES($hash,$length,$root,$id,$captured,$used) "
+            command.CommandText = "INSERT INTO block_objects(hash,length,root_id,file_id,captured_ticks,last_used_ticks,legacy_retention) VALUES($hash,$length,$root,$id,$captured,$used,0) "
                 + "ON CONFLICT(hash) DO UPDATE SET length=excluded.length,root_id=excluded.root_id,file_id=excluded.file_id,"
+                + "legacy_retention=CASE WHEN block_objects.file_id=excluded.file_id AND block_objects.root_id=excluded.root_id AND block_objects.length=excluded.length THEN block_objects.legacy_retention ELSE 0 END,"
                 + "captured_ticks=CASE WHEN block_objects.file_id=excluded.file_id AND block_objects.root_id=excluded.root_id THEN MIN(block_objects.captured_ticks,excluded.captured_ticks) ELSE excluded.captured_ticks END,"
                 + "last_used_ticks=CASE WHEN block_objects.file_id=excluded.file_id AND block_objects.root_id=excluded.root_id THEN MAX(block_objects.last_used_ticks,excluded.last_used_ticks) ELSE excluded.last_used_ticks END;";
             command.Parameters.Add("$hash", SqliteType.Blob); command.Parameters.Add("$root", SqliteType.Blob); command.Parameters.Add("$id", SqliteType.Blob);
