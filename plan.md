@@ -1180,7 +1180,7 @@ PRAGMA user_version = 1;
 
 ### P1.4 Scanner and watcher
 
-- [ ] **P1.4.1 Scanner** (`PeerSync.Engine/Scanning/Scanner.cs`)
+- [ ] **P1.4.1 Scanner** (`PeerSync.Engine/Scanning/Scanner.cs`) [WIP @Codex 2026-10-19]
   - Done when: a full walk skips `.psp`, `*.!psp`, ignored paths and reparse points (recorded, not followed). Unchanged size, mtime, attributes and FileId mean no hashing. A rescan of 100k unchanged files takes under 10 s.
   - Code: 7.8 for the NTFS file id.
 - [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`)
