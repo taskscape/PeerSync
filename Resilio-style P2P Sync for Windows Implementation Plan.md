@@ -698,6 +698,13 @@ bounded coordinator continuation between scans and a compact published-input
 cache. No-op roots release drafts without vector/sequence churn. Namespace and
 GC barriers, retry/fairness and readonly reconstruction remain mandatory; see
 docs/proposals/P1-directory-publication-queue.md before enabling scanner changes.
+The native and indexed child inventories share a streaming BLAKE3 fingerprint:
+domain `PeerSync directory child keys v1`, canonical parent and direct child
+keys as UInt32LE byte lengths plus UTF-16BE bytes in strict ordinal order,
+then UInt64LE child count. Read the indexed keys and mutation epoch in one
+SQLite read transaction without loading record bodies. Match both digest and
+count before binding queue keys to that epoch; this proves membership only,
+never signed content, native ownership or local byte readiness.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
