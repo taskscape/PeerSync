@@ -7,6 +7,23 @@
         "requested": "[3.0.2, )",
         "resolved": "3.0.2",
         "contentHash": "Yq4rCmvgPsjJhB4reD98RwxFWq51BvnSrnNlcFq8aA+6da6atTJTdgAhxN4UqcwpDsa8wBqbgGf/52thhbSEjA=="
+      },
+      "NSec.Cryptography": {
+        "type": "Direct",
+        "requested": "[26.4.0, )",
+        "resolved": "26.4.0",
+        "contentHash": "0vsCtY5f+YgQROiWNqzgWp+l2pddfk9FkWoGV/bEo0MuEYPKlJWuoA8aOfO6qp3f+EnObKE3zSJhn1PspJeJVg==",
+        "dependencies": {
+          "libsodium": "[1.0.22, 1.0.23)"
+        }
+      },
+      "libsodium": {
+        "type": "Transitive",
+        "resolved": "1.0.22",
+        "contentHash": "KPD9SloJFclrsjnhABu7dzWrcyYkwPbvx5l1gRSPAX/0n+OBtSiVCKtGFv4n+ecWUHU0tCG9LSSwoZZx673zBQ=="
+      },
+      "peersync.core": {
+        "type": "Project"
       }
     },
     "net10.0-windows10.0.20348/win-arm64": {
@@ -15,6 +32,11 @@
         "requested": "[3.0.2, )",
         "resolved": "3.0.2",
         "contentHash": "Yq4rCmvgPsjJhB4reD98RwxFWq51BvnSrnNlcFq8aA+6da6atTJTdgAhxN4UqcwpDsa8wBqbgGf/52thhbSEjA=="
+      },
+      "libsodium": {
+        "type": "Transitive",
+        "resolved": "1.0.22",
+        "contentHash": "KPD9SloJFclrsjnhABu7dzWrcyYkwPbvx5l1gRSPAX/0n+OBtSiVCKtGFv4n+ecWUHU0tCG9LSSwoZZx673zBQ=="
       }
     },
     "net10.0-windows10.0.20348/win-x64": {
@@ -23,6 +45,11 @@
         "requested": "[3.0.2, )",
         "resolved": "3.0.2",
         "contentHash": "Yq4rCmvgPsjJhB4reD98RwxFWq51BvnSrnNlcFq8aA+6da6atTJTdgAhxN4UqcwpDsa8wBqbgGf/52thhbSEjA=="
+      },
+      "libsodium": {
+        "type": "Transitive",
+        "resolved": "1.0.22",
+        "contentHash": "KPD9SloJFclrsjnhABu7dzWrcyYkwPbvx5l1gRSPAX/0n+OBtSiVCKtGFv4n+ecWUHU0tCG9LSSwoZZx673zBQ=="
       }
     }
   }

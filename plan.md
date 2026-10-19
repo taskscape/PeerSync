@@ -696,6 +696,12 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
 
 ### 7.1 Code: key chain (P1.1.1)
 
+The sketch below is superseded by `src/PeerSync.Crypto/FolderKeys.cs` and
+`src/PeerSync.Core/Keys/KeyText.cs`: the implementation owns and clears secrets,
+caches the signing key until disposal, returns defensive copies, and provides
+explicit role-limited text exports. Public synthetic vectors live in
+`tests/Fixtures/folder-key-vectors.json`.
+
 ```csharp
 // src/PeerSync.Crypto/FolderKeys.cs
 public sealed class FolderKeys

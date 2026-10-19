@@ -117,7 +117,11 @@ truncated SHA checksum cannot guarantee the stated single-character typo
 rejection: a synthetic collision was reproduced before implementation. CRC
 is only an input-error check; HKDF/Ed25519/HMAC provide the security properties.
 Keys are shared out of band, or later as links and QR codes. Key text is never
-logged, and key objects redact their string/JSON representations.
+logged, and key objects redact their string/JSON representations. Key objects
+own their private buffers and native signing keys and clear them on disposal;
+key material is exposed through explicit exports returning defensive copies.
+Callers must clear exported secret byte arrays and avoid retaining exported
+key strings, which cannot be reliably erased from managed memory.
 
 ### Discovery
 

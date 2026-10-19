@@ -1,7 +1,8 @@
 # PeerSync
 
-A Windows peer-to-peer folder sync service, currently in **P0: foundations and
-spikes**. The production sync engine, central tracker/relay, WPF client and
+A Windows peer-to-peer folder sync service, currently in **P1: local sync
+engine**. P0 passed with physical LAN/NAT validation deferred to Gates P2/P4.
+The production sync engine, central tracker/relay, WPF client and
 installers are not implemented yet. See [plan.md](plan.md) for the acceptance
 criteria and phase gates. P6 is optional and outside the v1 target.
 
@@ -26,6 +27,12 @@ CI runs the full ten-minute fuzz smoke in its own required parallel job;
 build/publish jobs report `fuzzSeconds: 0` and do not substitute for that job.
 The default local `Verify.ps1` still includes fuzzing. `Run-Fuzz.ps1` runs the
 same target independently.
+
+Folder capabilities use HKDF-SHA256 and Ed25519 with explicit RW/RO/F text
+exports. Key objects redact string/JSON diagnostics and clear owned secrets
+when disposed. The checked-in public synthetic vectors are generated
+independently with Python/OpenSSL; normal .NET tests need no Python. See
+[the key verification report](docs/verification/P1.1.1-folder-keys-2026-10-19.md).
 
 For server / second-PC probe deployment, debug events and diagnostic bundles,
 read [docs/diagnostics.md](docs/diagnostics.md). Probe bundles deliberately say

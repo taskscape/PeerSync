@@ -1,3 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup><PackageReference Include="Blake3.Native" /></ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Blake3.Native" />
+    <PackageReference Include="NSec.Cryptography" />
+    <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
+  </ItemGroup>
 </Project>
