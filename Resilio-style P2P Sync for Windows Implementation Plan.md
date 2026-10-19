@@ -542,6 +542,18 @@ seconds without peer names, identifiers, nonces, keys or file data. The UTC Hell
 and decision model are P1 foundations; actual index admission and rendered UI
 remain required parts of P1.5.5 before its checkbox can close.
 
+An authenticated peer-bound index facade supplies the source identity from its
+transport context, never from Hello. It checks clock admission before receiving
+data, after acquiring the reference gate, and in the writer transaction both
+before changes and immediately before returning for commit. The writer callback
+does no diagnostic I/O and cannot reenter storage. A changed clock rolls back
+records, needed work, cursor and range metadata together. Materialized outgoing
+pages are checked before reading and again before handoff. Bound pages freeze
+their record list and enforce cursor/order/count limits. Transport integration
+must use this facade; raw engine/storage entry points are trusted local
+primitives, not authenticated network admission. Disconnect resets the session
+sample, including admission of queued work.
+
 The source design's mtime rule takes precedence over the draft checklist's
 blanket `changed_ticks` comparison: a newly noticed old offline file must not
 beat a genuinely newer edit. Tombstones use their signed deletion timestamp
