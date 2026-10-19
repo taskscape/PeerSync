@@ -13,6 +13,7 @@ internal sealed class SafeFileTree : IDisposable
     private readonly NativeRoot root;
     public SafeFileTree(string rootPath) => root = new NativeRoot(rootPath, preventRename: true);
     public ReadOnlySpan<byte> Identity => root.Identity;
+    public ulong CapacityBytes => NativeVolume.Capacity(root.Handle);
 
     public DirectoryLease Directory(string path, bool create = false, bool privatePath = false)
     {
