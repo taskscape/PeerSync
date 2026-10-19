@@ -705,6 +705,16 @@ then UInt64LE child count. Read the indexed keys and mutation epoch in one
 SQLite read transaction without loading record bodies. Match both digest and
 count before binding queue keys to that epoch; this proves membership only,
 never signed content, native ownership or local byte readiness.
+Keep scanner snapshot staging internal and inactive in production until
+incoming-directory and subtree integration passes. Its local-source preview
+retains old signed rows and queues complete supported native inventories after
+file/tombstone commits. Reuse identical private templates and cached no-op
+observations, pause uncertain namespaces, and discard obsolete queue/draft
+metadata only after a complete walk proves absence, another type or exclusion.
+An incoming authenticated snapshot without a matching local publication cache
+is reconstruction-only: never infer a user deletion from not-yet-applied
+remote children. Its graph/materialization proof must be integrated before
+activation; readonly scans retain their existing unsigned-edit behavior.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
