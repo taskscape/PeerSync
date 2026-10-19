@@ -223,7 +223,8 @@
         "dependencies": {
           "Blake3.Native": "[3.0.2, )",
           "NSec.Cryptography": "[26.4.0, )",
-          "PeerSync.Core": "[1.0.0, )"
+          "PeerSync.Core": "[1.0.0, )",
+          "System.Security.Cryptography.ProtectedData": "[10.0.13, )"
         }
       },
       "peersync.engine": {
@@ -246,6 +247,12 @@
         "dependencies": {
           "libsodium": "[1.0.22, 1.0.23)"
         }
+      },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.13, )",
+        "resolved": "10.0.13",
+        "contentHash": "aUSmC6cPjFLSE0rDTsmkR3wvUOnscqewebOaaELEToh12sNmoltZqT3f0C81mJ1zhxKjWco25soHTvYwsXCsUw=="
       }
     },
     "net10.0-windows10.0.20348/win-arm64": {

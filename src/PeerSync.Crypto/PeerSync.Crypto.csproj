@@ -2,6 +2,7 @@
   <ItemGroup>
     <PackageReference Include="Blake3.Native" />
     <PackageReference Include="NSec.Cryptography" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
   </ItemGroup>
 </Project>

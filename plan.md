@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.3.3: place the shared folder-key protector in Crypto, preserving fixed v1 app entropy and machine-scope DPAPI. Protect a versioned role/FolderId/material frame, verify context on unprotect and clear plaintext buffers. State writes protect internally and key reads are audited. | Security model: Secrets at rest |
 | 2026-10-19 | P1.3.2: local sequence allocation, file-row storage and supplied chunk-index replacement share the batch transaction. Unsyncable local metadata has no signed record; remote paths remain strict. Batch at 1,000 rows and preserve envelope bytes verbatim. | Sync engine design: metadata database |
 | 2026-10-19 | P1.3.1: one normalized-path writer owner and a bounded channel, transactional operations with rollback, independent read-only connections, and online SQLite backup before transactional user_version migrations. Run synchronous SQLite I/O on the writer worker; retain WAL/NORMAL/foreign_keys/busy_timeout/temp_store settings. | Sync engine design: metadata database |
 | 2026-10-19 | P1.2.2: bound one-pass hashing to the original length and compare handle/path size, timestamps, attributes and 128-bit file identity. Detected mutation/removal/replacement retries; progress exposes counts only. This is metadata-based detection with shared writers, not an atomic snapshot. | Sync engine design: Detecting local changes |
@@ -197,6 +198,10 @@ The service is the only writer of machine-wide state. Everything lives under `%P
 
 ### 4.1 Settings model
 
+The folder settings portion is superseded by `src/PeerSync.Core/Settings/FolderSettings.cs`
+with strict JSON/range/endpoint validation. Device settings and atomic file
+recovery remain P2.5.4 work.
+
 ```csharp
 // src/PeerSync.Core/Settings/DeviceSettings.cs
 public sealed record DeviceSettings
@@ -296,6 +301,10 @@ public sealed class SettingsStore(string path, ILogger<SettingsStore> log)
 The service loads the file with `AddJsonFile(path, optional: false, reloadOnChange: true)` and binds it to `IOptionsMonitor<DeviceSettings>`, so a save is picked up live.
 
 ### 4.3 Folder-key protection
+
+Superseded by `src/PeerSync.Crypto/FolderKeyProtector.cs`. Crypto owns the
+shared helper to avoid Storage depending on Service. Fixed v1 entropy is
+unchanged; a versioned binary payload binds the role and folder identity.
 
 ```csharp
 // src/PeerSync.Service/Secrets/FolderKeyProtector.cs
