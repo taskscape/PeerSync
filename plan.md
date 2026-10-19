@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: P1.1.1 folder keys and text | - |
+| P1 Local sync engine | 4-8 | In progress: folder keys complete; core records, paths and ignore rules underway | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -681,9 +681,10 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
 
 ### P1.1 Core types
 
-- [ ] **P1.1.1 Folder keys and their text form** (`PeerSync.Crypto/FolderKeys.cs`, `PeerSync.Core/Keys/KeyText.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.1.1 Folder keys and their text form** (`PeerSync.Crypto/FolderKeys.cs`, `PeerSync.Core/Keys/KeyText.cs`) (#6)
   - Done when: RW, RO and F keys round-trip through text. The checksum rejects any single-character typo. RO and F keys derived from an RW key match fixed test vectors. Keys are never printed by `ToString()`.
   - Ref: Protocol specification, Keys and identifiers.
+  - Evidence: [key verification](docs/verification/P1.1.1-folder-keys-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39181190139). Merged tree equals the tested head.
 - [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`)
   - Done when: compare, merge and increment are covered by property tests (compare is antisymmetric, merge is commutative and idempotent). Compact binary serialization is sorted by device.
 - [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`)

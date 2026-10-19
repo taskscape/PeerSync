@@ -1,6 +1,11 @@
 # Implementation status — 2026-10-19
 
-Current phase: P1, starting P1.1.1 (folder keys/text). P0 gate passed on
+Current phase: P1; P1.1.1 folder keys/text completed through
+[PR #6](https://github.com/taskscape/PeerSync/pull/6), with all five
+[CI jobs green](https://github.com/taskscape/PeerSync/actions/runs/39181190139).
+Nineteen Core/Crypto cases passed; fuzz completed 153,215 seeds over 600 seconds
+without crashes. The merged tree equals the tested head. Core records, paths
+and ignore rules are next. P0 gate passed on
 2026-10-19 under the user's approved external-test deferrals. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
 Ten tasks and the performance/certificate subchecks are verified. The CI
@@ -60,7 +65,7 @@ Open prerequisites:
 - Public release signing remains separate from the completed P0.1.3
   development signing path and the user's local development certificate.
 
-P1.1.1 is in progress; P2-P5 have not started.
+P1 is in progress; P2-P5 have not started.
 The production engine, client service,
 central tracker/relay, control app and installers are not implemented. The
 user-requested production diagnostic hooks are explicitly tracked as P2.5.6
