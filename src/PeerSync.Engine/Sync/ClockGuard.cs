@@ -8,6 +8,7 @@ public sealed class PeerClockException(PeerClockStatus status) : IOException(sta
 {
     public PeerClockStatus Status { get; } = status;
 }
+internal sealed class PeerSessionExpiredException() : IOException("Peer session was disconnected.") { }
 
 /// <summary>One sample per authenticated peer session. This is clock sanity,
 /// not authentication. The transport must enforce this guard for both index
@@ -21,6 +22,7 @@ public sealed class ClockGuard
     private readonly Guid session;
     private Sample? sample;
     private PeerClockState? logged;
+    private long generation;
 
     public ClockGuard(TimeProvider? timeProvider = null, DiagnosticJournal? journal = null, Guid? sessionId = null)
     { clock = timeProvider ?? TimeProvider.System; this.journal = journal; session = sessionId ?? Guid.NewGuid(); }
@@ -36,22 +38,42 @@ public sealed class ClockGuard
     }
 
     public PeerClockStatus GetStatus() => StatusAndLog();
-    public void Reset() { lock (gate) sample = null; _ = StatusAndLog(); }
+    public void Reset() { lock (gate) { sample = null; generation++; } _ = StatusAndLog(); }
     public void RequireIndexExchangeAllowed()
     {
         var status = GetStatus(); if (!status.IndexExchangeAllowed) throw new PeerClockException(status);
     }
 
-    internal void RequireIndexExchangeAllowedWithoutDiagnostics()
+    internal long CaptureIndexAdmission()
     {
-        PeerClockStatus status; lock (gate) status = Evaluate();
+        var snapshot = SnapshotAndLog();
+        if (!snapshot.Status.IndexExchangeAllowed) throw new PeerClockException(snapshot.Status);
+        return snapshot.Generation;
+    }
+
+    internal void RequireIndexAdmission(long expectedGeneration)
+    {
+        var snapshot = SnapshotAndLog();
+        if (snapshot.Generation != expectedGeneration) throw new PeerSessionExpiredException();
+        if (!snapshot.Status.IndexExchangeAllowed) throw new PeerClockException(snapshot.Status);
+    }
+
+    internal void RequireIndexExchangeAllowedWithoutDiagnostics(long expectedGeneration)
+    {
+        PeerClockStatus status;
+        lock (gate)
+        {
+            if (generation != expectedGeneration) throw new PeerSessionExpiredException();
+            status = Evaluate();
+        }
         if (!status.IndexExchangeAllowed) throw new PeerClockException(status);
     }
 
-    private PeerClockStatus StatusAndLog()
+    private PeerClockStatus StatusAndLog() => SnapshotAndLog().Status;
+    private (PeerClockStatus Status, long Generation) SnapshotAndLog()
     {
-        PeerClockStatus status; bool changed;
-        lock (gate) { status = Evaluate(); changed = logged != status.State; logged = status.State; }
+        PeerClockStatus status; bool changed; long current;
+        lock (gate) { status = Evaluate(); current = generation; changed = logged != status.State; logged = status.State; }
         if (changed)
         {
             journal?.TryWrite(new(status.IndexExchangeAllowed ? "clock.accepted" : "clock.blocked", "peer-clock")
@@ -60,7 +82,7 @@ public sealed class ClockGuard
                 ErrorCode = status.State.ToString(), ClockSkewSeconds = status.OffsetTicks / (double?)TimeSpan.TicksPerSecond,
             });
         }
-        return status;
+        return (status, current);
     }
 
     private PeerClockStatus Evaluate()

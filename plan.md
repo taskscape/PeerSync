@@ -1615,11 +1615,13 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
   - Local implementation and 955-case canonical verification pass; no merge/CI claim yet. See `docs/verification/P1.6.1-in-memory-engine-transport-2026-10-19.md`. Actual TLS/folder authentication, rendered clock UI and the separate multi-node property gate remain open.
   - [ ] **P1.6.1c Connected-session review hardening** [WIP @codex 2026-10-19]
     - Done when: growth beyond an announced target retains the true range barrier; disconnect/fresh-Hello cannot revive old queued admission; peer cancellation/disposal permits independent work and durable retry while caller cancellation remains intact; all folder disposal callers await the same drain/failure. Focused regressions and canonical/main/CI evidence pass.
+    - Local [repair evidence](docs/verification/P1.6.1c-connected-session-hardening-2026-10-19.md): baseline reproduces seven failures; all 52 focused and 970 canonical cases pass after twelve additions. Updated-head CI/main evidence remains pending.
 - [ ] **P1.6.2 Multi-node property tests** (`tests/PeerSync.Simulation`) [WIP @codex 2026-10-19]
   - Done when: `CsCheck` generates random edits, renames, deletes, partitions and heals on 3 to 7 nodes, each with a temp folder. After the network heals, all trees are identical. Every overwritten version exists in some node's archive or as a conflict copy. 1,000 seeds run in CI, and failing seeds are saved as regression tests.
   - [ ] **P1.6.2a Reproducible real-engine scenarios and loss oracle** [WIP @codex 2026-10-19]
     - Done when: generated/replayed operation traces use actual engine folders, heal to byte-identical visible trees and verify preservation from current/archive/conflict files. Save failure evidence and promote found regressions. Initial bounded smoke does not close the parent or phase gate.
     - Local [simulation evidence](docs/verification/P1.6.2a-real-engine-simulation-2026-10-19.md): 100 distinct three-to-seven-node cases pass convergence/preservation. A checker regression excludes internal staging from user trees; a native negative-control test rejects private cache alone as preservation. Canonical verification now passes 958 cases including an eight-scenario smoke. Full coverage, 1,000 CI cases, five consecutive days and main/CI evidence remain pending.
+    - An additional local 1,000-case batch on the first PR #34 head passes: 9,807 versions, 500 actual renames and 1,001 actual deletions, all converged/preserved. This is initial flat-path evidence before the review repairs, not CI/five-day/100k-file gate evidence.
 
 ### Gate P1
 

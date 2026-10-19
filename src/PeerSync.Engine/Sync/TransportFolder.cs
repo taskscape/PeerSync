@@ -23,6 +23,7 @@ public sealed class TransportFolder : IAsyncDisposable
     private readonly Puller puller;
     private readonly ConcurrentDictionary<string, PeerFolderConnection> peers = new(StringComparer.Ordinal);
     private readonly object lifecycle = new();
+    private readonly TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int disposed;
 
     public TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
@@ -47,7 +48,7 @@ public sealed class TransportFolder : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(transport); PeerFolderConnection? connection = null;
         try
         {
-            RequireOpen(); byte[] remote = transport.RemoteDeviceId;
+            RequireOpen(); byte[] remote = transport.RemoteDeviceId.ToArray();
             if (remote.AsSpan().SequenceEqual(own)) throw new InvalidOperationException("Cannot connect folder to itself.");
             connection = new(this, transport, puller.OpenPeerIndexSession(remote));
             await connection.HandshakeAsync(cancellationToken).ConfigureAwait(false);
@@ -66,11 +67,16 @@ public sealed class TransportFolder : IAsyncDisposable
         }
     }
 
-    private ValueTask<ReadOnlyMemory<byte>> FetchAsync(ReadOnlyMemory<byte> source, ReadOnlyMemory<byte> hash, int length, CancellationToken token)
+    private async ValueTask<ReadOnlyMemory<byte>> FetchAsync(ReadOnlyMemory<byte> source, ReadOnlyMemory<byte> hash, int length, CancellationToken token)
     {
-        RequireOpen();
-        return peers.TryGetValue(Convert.ToHexString(source.Span), out var peer)
-            ? peer.FetchAsync(hash, length, token) : ValueTask.FromException<ReadOnlyMemory<byte>>(new IOException("Source peer is disconnected."));
+        RequireOpen(); token.ThrowIfCancellationRequested();
+        try
+        {
+            if (!peers.TryGetValue(Convert.ToHexString(source.Span), out var peer)) throw new IOException("Source peer is disconnected.");
+            return await peer.FetchAsync(hash, length, token).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException && !token.IsCancellationRequested && Volatile.Read(ref disposed) == 0)
+        { throw new IOException("Source peer disconnected during transfer.", error); }
     }
     internal Hello CreateHello() => new() { ProtocolVersion = 1, DeviceId = ByteString.CopyFrom(own),
         Nonce = ByteString.CopyFrom(RandomNumberGenerator.GetBytes(32)), UtcTicks = clock.GetUtcNow().UtcDateTime.Ticks };
@@ -83,16 +89,25 @@ public sealed class TransportFolder : IAsyncDisposable
     internal void Remove(PeerFolderConnection peer)
         => peers.TryRemove(new KeyValuePair<string, PeerFolderConnection>(Convert.ToHexString(peer.RemoteDeviceId), peer));
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         PeerFolderConnection[] snapshot;
         lock (lifecycle)
         {
-            if (disposed != 0) return;
+            if (disposed != 0) return new(closed.Task);
             Volatile.Write(ref disposed, 1); snapshot = peers.Values.ToArray();
         }
-        try { await Task.WhenAll(snapshot.Select(peer => peer.DisposeAsync().AsTask())).ConfigureAwait(false); }
-        finally { puller.Dispose(); }
+        _ = CloseAsync(snapshot); return new(closed.Task);
+    }
+    private async Task CloseAsync(PeerFolderConnection[] snapshot)
+    {
+        try
+        {
+            try { await Task.WhenAll(snapshot.Select(peer => peer.DisposeAsync().AsTask())).ConfigureAwait(false); }
+            finally { puller.Dispose(); }
+            closed.TrySetResult();
+        }
+        catch (Exception error) { closed.TrySetException(error); }
     }
 
     private sealed class Handler(TransportFolder folder, PeerIndexSession session) : IPeerRequestHandler
