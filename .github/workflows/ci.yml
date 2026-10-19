@@ -28,7 +28,8 @@ jobs:
         shell: pwsh
         run: |
           $skip = '${{ matrix.runtime }}' -eq 'win-arm64'
-          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipFuzz
+          # Both required Server jobs below run every native Engine test.
+          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipEngineTests -SkipFuzz
       - name: Sign and verify a test EXE with a temporary development identity
         shell: pwsh
         run: ./build/Test-Signing.ps1 -Runtime '${{ matrix.runtime }}'

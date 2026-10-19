@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [switch]$SkipRuntimeChecks, [switch]$SkipFuzz, [int]$FuzzSeconds = 600)
+param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [switch]$SkipRuntimeChecks, [switch]$SkipEngineTests, [switch]$SkipFuzz, [int]$FuzzSeconds = 600)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
@@ -32,6 +32,9 @@ try {
         & "$PSScriptRoot/Test-Diagnostics.ps1"
         # Only projects with real tests are counted; future-phase skeletons are excluded.
         foreach ($name in @('Core','Crypto','Protocol','Net','Engine','Storage','Control.Contracts')) {
+            # Required Server 2022 and Server 2025 jobs each run the complete Engine
+            # suite. Packaging CI can omit its third copy; local default stays full.
+            if ($name -eq 'Engine' -and $SkipEngineTests) { continue }
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
         }
@@ -52,7 +55,7 @@ try {
     $clock.Stop()
     $fuzzDuration = 0
     if ($fuzz) { $fuzzDuration = $FuzzSeconds }
-    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P1';gateP1Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
+    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);engineTestsRun=(-not $SkipRuntimeChecks -and -not $SkipEngineTests);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P1';gateP1Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
 }
 finally {
     if ($fuzz) {
