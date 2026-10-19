@@ -11,6 +11,7 @@ using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Native;
+using PeerSync.Engine.Sync;
 using PeerSync.Protocol.Records;
 using PeerSync.Protocol.Signing;
 using PeerSync.Storage.FolderDb;
@@ -22,7 +23,7 @@ public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int R
     int Deleted, int Ignored, int Unsyncable, TimeSpan Elapsed, IReadOnlyList<ScanProblem> Problems);
 
 /// <summary>Tracks a local tree. The caller owns the index, keys and optional journal.
-/// Serialize remote index application with scans using the folder's engine scheduler.</summary>
+/// Filesystem apply/recovery shares the per-index operation gate with scans.</summary>
 public sealed class Scanner : IDisposable
 {
     private const string RootIdentityKey = "_root-identity";
@@ -66,7 +67,10 @@ public sealed class Scanner : IDisposable
         Guid session = Guid.NewGuid();
         try
         {
+            using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
             journal?.Write(new("scan.start", "scan") { SessionId = session });
+            if (index.ReadApplyIntents().Any())
+                throw new IOException("Pending file application must be recovered before scanning.");
             using var root = new NativeRoot(rootPath);
             byte[]? identity = index.Meta.Find(RootIdentityKey)?.Value;
             if (identity is not null && !identity.AsSpan().SequenceEqual(root.Identity))

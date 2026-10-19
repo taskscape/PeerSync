@@ -99,7 +99,36 @@ internal sealed class DirectoryLease : IDisposable
     public void MoveHere(SafeFileHandle file, string name, bool temporary = false)
     {
         Check(name, temporary);
-        Rename(file, parent, name);
+        SetName(file, parent, name, infoClass: 10, flags: 0);
+    }
+
+    public void LinkHere(SafeFileHandle file, string name)
+    {
+        Check(name, temporary: false);
+        SetName(file, parent, name, infoClass: 11, flags: 0);
+    }
+
+    /// <summary>Attempt atomic replacement while the verified original guard remains held.
+    /// A no-delete-sharing guard currently causes a sharing violation even with POSIX flags;
+    /// this is a capability check, not the coordinator's solved installation primitive.</summary>
+    public void ReplaceHere(SafeFileHandle replacement, SafeFileHandle expectedTarget, string name)
+    {
+        Check(name, temporary: false);
+        bool retained = false;
+        try
+        {
+            expectedTarget.DangerousAddRef(ref retained);
+            var expected = FileSnapshot.Read(expectedTarget);
+            using (var current = OpenFile(name))
+            {
+                var actual = FileSnapshot.Read(current);
+                if (expected.Volume != actual.Volume || expected.IdLow != actual.IdLow || expected.IdHigh != actual.IdHigh)
+                    throw new IOException("Replacement target identity changed.");
+            }
+            // FileRenameInformationEx: REPLACE_IF_EXISTS | POSIX_SEMANTICS | IGNORE_READONLY_ATTRIBUTE.
+            SetName(replacement, parent, name, infoClass: 65, flags: 0x43);
+        }
+        finally { if (retained) expectedTarget.DangerousRelease(); }
     }
 
     private void Check(string name, bool temporary)
@@ -108,21 +137,22 @@ internal sealed class DirectoryLease : IDisposable
         if (!SafeFileTree.ComponentValid(name, temporary)) throw new IOException("Invalid file component.");
     }
 
-    private static unsafe void Rename(SafeFileHandle source, SafeFileHandle destination, string name)
+    private static unsafe void SetName(SafeFileHandle source, SafeFileHandle destination, string name, int infoClass, uint flags)
     {
-        // FILE_RENAME_INFORMATION (class 10): BOOLEAN at 0, HANDLE at 8,
+        // FILE_RENAME/LINK_INFORMATION: BOOLEAN/Flags at 0, HANDLE at 8,
         // ULONG filename bytes at 16, WCHAR name at 20, minimum size 24 on x64/Arm64.
         byte[] buffer = new byte[Math.Max(24, 20 + name.Length * 2)];
         bool retained = false;
         try
         {
             destination.DangerousAddRef(ref retained);
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer, flags);
             BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(8), destination.DangerousGetHandle());
             BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(16), checked((uint)(name.Length * 2)));
             MemoryMarshal.AsBytes(name.AsSpan()).CopyTo(buffer.AsSpan(20));
             fixed (byte* pointer = buffer)
             {
-                int status = NativeMutations.NtSetInformationFile(source, out _, pointer, (uint)buffer.Length, 10);
+                int status = NativeMutations.NtSetInformationFile(source, out _, pointer, (uint)buffer.Length, infoClass);
                 if (status < 0) throw new Win32Exception((int)NativeFiles.RtlNtStatusToDosError(status));
             }
         }

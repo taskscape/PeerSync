@@ -232,6 +232,11 @@ archive rows and latest needed-set recomputation, then removes the intent in
 one transaction. A changed local sequence or failed/cancelled callback rolls
 back the entire commit and retains recovery intent. Schema migration 4 follows
 the existing backup-before-each-step policy. Ordinary scan batches retain NORMAL.
+Scans and filesystem application/recovery share a per-folder asynchronous gate
+keyed by the folder index owner. Before walking, the scanner rejects a folder
+with pending apply intent, so an interrupted filesystem mutation is never
+published as an ordinary local deletion. Recovery must resolve or safely park
+pending work before scanning can resume.
 
 Folder repositories commit up to 1,000 rows per transaction. Allocate local
 sequence numbers and persist their records in that same transaction, so an
