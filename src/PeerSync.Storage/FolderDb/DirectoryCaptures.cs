@@ -5,7 +5,10 @@ namespace PeerSync.Storage.FolderDb;
 
 public sealed record DirectoryCaptureState(string ParentPath, byte[] RootId, byte[] NativeId, byte[] InputHash, long MemberCount,
     long Accepted, string? LastKey, byte[]? BuilderState, byte[]? Hash, int? Length)
-{ public override string ToString() => "Directory capture state (redacted)"; }
+{
+    public long? InputEpoch { get; init; }
+    public override string ToString() => "Directory capture state (redacted)";
+}
 
 public sealed partial class FolderIndex
 {
@@ -24,11 +27,11 @@ public sealed partial class FolderIndex
             bool same = before is not null && before.ParentPath == parentPath && before.MemberCount == memberCount
                 && before.NativeId.AsSpan().SequenceEqual(native) && before.InputHash.AsSpan().SequenceEqual(input);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = same ? "UPDATE directory_captures SET last_used_ticks=$now WHERE parent_key=$key;" :
+            command.CommandText = same ? "UPDATE directory_captures SET last_used_ticks=$now,input_epoch=NULL WHERE parent_key=$key;" :
                 "INSERT INTO directory_captures(parent_key,parent_path,root_id,native_id,input_hash,member_count,builder_state,last_used_ticks) "
                 + "VALUES($key,$path,$root,$native,$input,$count,$state,$now) ON CONFLICT(parent_key) DO UPDATE SET "
                 + "parent_path=excluded.parent_path,root_id=excluded.root_id,native_id=excluded.native_id,input_hash=excluded.input_hash,member_count=excluded.member_count,"
-                + "accepted=0,last_key=NULL,builder_state=excluded.builder_state,node_hash=NULL,node_length=NULL,last_used_ticks=excluded.last_used_ticks;";
+                + "accepted=0,last_key=NULL,builder_state=excluded.builder_state,node_hash=NULL,node_length=NULL,input_epoch=NULL,last_used_ticks=excluded.last_used_ticks;";
             command.Parameters.AddWithValue("$key", key); command.Parameters.AddWithValue("$now", DateTime.UtcNow.Ticks);
             if (!same)
             {
@@ -61,6 +64,7 @@ public sealed partial class FolderIndex
         return database.WriteDurableAsync((connection, transaction) =>
         {
             RequireCaptureExpected(connection, transaction, prior);
+            if (prior.InputEpoch is { } epoch) RequireDirectoryCaptureEpoch(connection, transaction, epoch);
             if (prior.Hash is not null) throw new InvalidOperationException("Completed directory capture is immutable.");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "UPDATE directory_captures SET accepted=$accepted,last_key=$last,builder_state=$state,node_hash=$hash,node_length=$length,last_used_ticks=$now WHERE parent_key=$key;";
@@ -101,7 +105,9 @@ public sealed partial class FolderIndex
             throw new ArgumentException("Directory publication does not match its capture.", nameof(publication));
         return database.WriteDurableAsync((connection, transaction) =>
         {
-            RequireCaptureExpected(connection, transaction, prior); string key = PathRules.Key(prior.ParentPath);
+            RequireCaptureExpected(connection, transaction, prior);
+            if (prior.InputEpoch is { } epoch) RequireDirectoryCaptureEpoch(connection, transaction, epoch);
+            string key = PathRules.Key(prior.ParentPath);
             using var query = connection.CreateCommand(); query.Transaction = transaction;
             query.CommandText = "SELECT local_seq FROM local_files WHERE path_key=$key;"; query.Parameters.AddWithValue("$key", key);
             if ((query.ExecuteScalar() is long sequence ? sequence : 0) != expectedLocalSequence) throw new InvalidOperationException("Directory publication source changed.");
@@ -123,17 +129,18 @@ public sealed partial class FolderIndex
         var actual = FindDirectoryCapture(connection, transaction, PathRules.Key(expected.ParentPath));
         if (actual is null || actual.ParentPath != expected.ParentPath || actual.MemberCount != expected.MemberCount || actual.Accepted != expected.Accepted || actual.LastKey != expected.LastKey
             || !actual.RootId.AsSpan().SequenceEqual(expected.RootId) || !actual.NativeId.AsSpan().SequenceEqual(expected.NativeId) || !actual.InputHash.AsSpan().SequenceEqual(expected.InputHash)
-            || !Equal(actual.BuilderState, expected.BuilderState) || !Equal(actual.Hash, expected.Hash) || actual.Length != expected.Length)
+            || !Equal(actual.BuilderState, expected.BuilderState) || !Equal(actual.Hash, expected.Hash) || actual.Length != expected.Length || actual.InputEpoch != expected.InputEpoch)
             throw new InvalidOperationException("Directory capture progress changed.");
         static bool Equal(byte[]? a, byte[]? b) => a is null ? b is null : b is not null && a.AsSpan().SequenceEqual(b);
     }
     private static DirectoryCaptureState? FindDirectoryCapture(SqliteConnection connection, SqliteTransaction? transaction, string key)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT parent_path,root_id,native_id,input_hash,member_count,accepted,last_key,builder_state,node_hash,node_length FROM directory_captures WHERE parent_key=$key;";
+        command.CommandText = "SELECT parent_path,root_id,native_id,input_hash,member_count,accepted,last_key,builder_state,node_hash,node_length,input_epoch FROM directory_captures WHERE parent_key=$key;";
         command.Parameters.AddWithValue("$key", key); using var reader = command.ExecuteReader();
-        return reader.Read() ? new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetFieldValue<byte[]>(3), reader.GetInt64(4), reader.GetInt64(5),
-            reader.IsDBNull(6) ? null : reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7), reader.IsDBNull(8) ? null : reader.GetFieldValue<byte[]>(8), reader.IsDBNull(9) ? null : reader.GetInt32(9)) : null;
+        return reader.Read() ? new DirectoryCaptureState(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetFieldValue<byte[]>(3), reader.GetInt64(4), reader.GetInt64(5),
+            reader.IsDBNull(6) ? null : reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7), reader.IsDBNull(8) ? null : reader.GetFieldValue<byte[]>(8), reader.IsDBNull(9) ? null : reader.GetInt32(9))
+            { InputEpoch = reader.IsDBNull(10) ? null : reader.GetInt64(10) } : null;
     }
     private static string CaptureParent(string path) { int separator = path.LastIndexOf('/'); return separator < 0 ? "" : path[..separator]; }
 }

@@ -27,6 +27,85 @@ public sealed class DirectorySnapshotCaptureTests : IDisposable
     public DirectorySnapshotCaptureTests() => Directory.CreateDirectory(Path.Combine(Root, "topic"));
 
     [Fact]
+    public async Task IndexedCaptureResumesAfterRestartWithoutRevalidatingUnchangedFullInput()
+    {
+        WriteFiles("a", "b", "c"); byte[] expected; DirectoryCaptureState first;
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "index-capture", debugEnabled: true);
+        await using (var index = await Open())
+        {
+            using var blocks = new DirectorySnapshotBlocks(Root, index, keys, device);
+            expected = (await blocks.CaptureDirectoryAsync("topic", index.ReadDirectorySnapshotChildren("topic").Rows.Select(row => row.Record!), Token)).Hash;
+            first = await AdvanceIndex(index, 1, journal: journal); first.Accepted.ShouldBe(1); first.InputEpoch.ShouldBe(index.ReadDirectoryCaptureEpoch());
+        }
+        await using var reopened = await FolderIndex.OpenAsync(Database, Token);
+        var second = await AdvanceIndex(reopened, 1, journal: journal); second.Accepted.ShouldBe(2); second.InputHash.ShouldBe(first.InputHash);
+        var third = await AdvanceIndex(reopened, 1, journal: journal); third.Accepted.ShouldBe(3); third.Hash.ShouldBe(expected);
+        (await AdvanceIndex(reopened, 1, journal: journal)).Hash.ShouldBe(expected);
+        File.ReadAllLines(Path.Combine(fixture, "logs", "debug.jsonl")).Count(line => line.Contains("directory.capture_input_revalidated", StringComparison.Ordinal)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ChangedEpochWithIdenticalManifestPreservesAcceptedPrefix()
+    {
+        WriteFiles("a", "b", "c"); await using var index = await Open(); var first = await AdvanceIndex(index, 1);
+        await index.LocalFiles.UpsertAsync([index.LocalFiles.Find("topic/a")!], Token); // Sequence/epoch changes; original signed bytes do not.
+        var next = await AdvanceIndex(index, 1); next.Accepted.ShouldBe(2); next.InputHash.ShouldBe(first.InputHash); next.InputEpoch.ShouldNotBe(first.InputEpoch);
+        (await AdvanceIndex(index, 1)).Hash.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task ReadinessRepairRetainsAuthenticatedMembershipAndAdvancesTheSamePrefix()
+    {
+        WriteFiles("a", "b", "c"); await using var index = await Open(); var first = await AdvanceIndex(index, 1);
+        long sequence = index.ReadIndexHighWater(); Sql("UPDATE local_files SET content_ready=0 WHERE path_key='TOPIC/C';");
+        index.ReadIndexHighWater().ShouldBe(sequence);
+        var next = await AdvanceIndex(index, 1); next.Accepted.ShouldBe(2); next.MemberCount.ShouldBe(3); next.InputHash.ShouldBe(first.InputHash);
+        var done = await AdvanceIndex(index, 1); done.Accepted.ShouldBe(3); done.Hash.ShouldNotBeNull();
+        index.LocalFiles.Find("topic/c")!.ContentReady.ShouldBeFalse("metadata capture does not claim payload availability");
+    }
+
+    [Fact]
+    public async Task NewPublishedChildChangesTheManifestAndRestartsItsDraft()
+    {
+        WriteFiles("a", "b", "c"); await using var index = await Open(); var first = await AdvanceIndex(index, 1);
+        WriteFiles("d"); using (var scanner = new Scanner(Root, index, keys, device)) (await scanner.ScanAsync(Token)).Problems.ShouldBeEmpty();
+        var reset = await AdvanceIndex(index, 1); reset.Accepted.ShouldBe(1); reset.MemberCount.ShouldBe(4); reset.InputHash.ShouldNotBe(first.InputHash);
+        (await AdvanceIndex(index, 1000)).Accepted.ShouldBe(4);
+    }
+
+    [Theory]
+    [InlineData("before-input-bind")]
+    [InlineData("captured")]
+    public async Task MutationBetweenInputCheckAndCommitNeverBindsOrAdvancesAStaleWitness(string boundary)
+    {
+        WriteFiles("a", "b", "c"); await using var index = await Open();
+        if (boundary == "captured") await AdvanceIndex(index, 1);
+        await Should.ThrowAsync<InvalidOperationException>(() => AdvanceIndex(index, 1, stage =>
+        {
+            if (stage == boundary) Sql("UPDATE local_files SET change_filetime=COALESCE(change_filetime,0)+1 WHERE path_key='TOPIC/A';");
+        }));
+        var saved = index.ReadDirectoryCapture("topic")!; saved.Accepted.ShouldBe(1); saved.Hash.ShouldBeNull();
+        if (boundary == "before-input-bind") saved.InputEpoch.ShouldBeNull();
+        (await AdvanceIndex(index, 1000)).Accepted.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task CorruptStoredMemberCountCannotCompleteWhileIndexedMembersRemain()
+    {
+        WriteFiles("a", "b", "c"); await using var index = await Open(); await AdvanceIndex(index, 1);
+        Sql("UPDATE directory_captures SET member_count=2;");
+        await Should.ThrowAsync<InvalidDataException>(() => AdvanceIndex(index, 1));
+        index.ReadDirectoryCapture("topic")!.Accepted.ShouldBe(1); index.ReadDirectoryCapture("topic")!.Hash.ShouldBeNull();
+    }
+
+    private void WriteFiles(params string[] names) { foreach (string name in names) File.WriteAllBytes(Path.Combine(Root, "topic", name), []); }
+    private async Task<DirectoryCaptureState> AdvanceIndex(FolderIndex index, int budget, Action<string>? checkpoint = null, DiagnosticJournal? journal = null)
+    {
+        using var gate = await FolderOperationGate.AcquireAsync(index, Token);
+        return await new DirectorySnapshotCapture(Root, index, keys, device, journal) { Checkpoint = checkpoint }.AdvancePublishedUnderGateAsync("topic", budget, Token);
+    }
+
+    [Fact]
     public async Task PublicationDiagnosticsExposeCommitStageAndNativeCodeWithoutSqlOrSourceDetails()
     {
         await using var index = await Open(); var draft = await Advance(index, [], 1000); var prior = index.LocalFiles.Find("topic")!;

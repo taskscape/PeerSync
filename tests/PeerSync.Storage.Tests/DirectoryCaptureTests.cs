@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using PeerSync.Core.Sync;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
 using Xunit;
@@ -15,6 +16,60 @@ public sealed class DirectoryCaptureTests : IDisposable
     private static byte[] Input => new byte[32];
     private static byte[] Initial => [0x50, 0x53, 0x44, 0x42, 1, .. new byte[11]];
     public DirectoryCaptureTests() => Directory.CreateDirectory(fixture);
+
+    [Fact]
+    public async Task MutationEpochCoversReadinessAndDeletionWithoutChangingAdvertisedSequence()
+    {
+        await using var index = await Open(); index.ReadDirectoryCaptureEpoch().ShouldBe(0);
+        await index.LocalFiles.UpsertAsync([Row("topic/a")], Token); long high = index.ReadIndexHighWater(), first = index.ReadDirectoryCaptureEpoch(); first.ShouldBe(1);
+        Sql("UPDATE local_files SET content_ready=0 WHERE path_key='TOPIC/A';");
+        index.ReadIndexHighWater().ShouldBe(high); index.ReadDirectoryCaptureEpoch().ShouldBeGreaterThan(first);
+        long second = index.ReadDirectoryCaptureEpoch(); await index.LocalFiles.DeleteAsync(["topic/a"], Token);
+        index.ReadDirectoryCaptureEpoch().ShouldBeGreaterThan(second); index.ReadIndexHighWater().ShouldBe(high);
+    }
+
+    [Fact]
+    public async Task ChangedEpochRejectsProgressAndGenericEnumerationClearsTheTrustedWitness()
+    {
+        await using var index = await Open(); var original = await Begin(index);
+        var bound = await index.BindDirectoryCaptureEpochAsync(original, index.ReadDirectoryCaptureEpoch(), Token); bound.InputEpoch.ShouldBe(0);
+        await index.LocalFiles.UpsertAsync([Row("topic/a")], Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => index.AdvanceDirectoryCaptureAsync(bound, 1, "topic/a", Initial, null, null, Token));
+        await Should.ThrowAsync<InvalidOperationException>(() => index.BindDirectoryCaptureEpochAsync(bound, 0, Token));
+        index.ReadDirectoryCapture("topic")!.Accepted.ShouldBe(0);
+        var generic = await Begin(index); generic.InputEpoch.ShouldBeNull();
+        (await index.BindDirectoryCaptureEpochAsync(generic, index.ReadDirectoryCaptureEpoch(), Token)).InputEpoch.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task PublicationCannotReleaseACompleteDraftAfterAnyLocalMutation()
+    {
+        await using var index = await Open();
+        var draft = await index.BeginDirectoryCaptureAsync("topic", Root, Native, Input, 0, Initial, Token);
+        var complete = await index.AdvanceDirectoryCaptureAsync(draft, 0, null, null, Input, 12, Token);
+        var bound = await index.BindDirectoryCaptureEpochAsync(complete, index.ReadDirectoryCaptureEpoch(), Token);
+        await index.LocalFiles.UpsertAsync([Row("elsewhere/a")], Token);
+        var publication = Row("topic") with { Type = 1, FileHash = null, FileId = Native };
+        await Should.ThrowAsync<InvalidOperationException>(() => index.PublishDirectoryCaptureAsync(bound, publication, 0, Token));
+        index.HasDirectoryCaptures().ShouldBeTrue(); index.LocalFiles.Find("topic").ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task EpochOverflowRollsBackRowAndPublicationSequenceRatherThanWrapping()
+    {
+        await using var index = await Open(); await index.LocalFiles.UpsertAsync([Row("topic/a")], Token); long high = index.ReadIndexHighWater();
+        Sql("UPDATE directory_capture_clock SET epoch=9223372036854775807 WHERE id=1;");
+        await Should.ThrowAsync<SqliteException>(() => index.LocalFiles.UpsertAsync([Row("topic/b")], Token));
+        index.ReadDirectoryCaptureEpoch().ShouldBe(long.MaxValue); index.ReadIndexHighWater().ShouldBe(high); index.LocalFiles.Find("topic/b").ShouldBeNull();
+    }
+
+    private static LocalFileRow Row(string path) => new(path, 0, 0, 638000000000000000, 0, false, 638000000000000000,
+        new byte[32], new Dictionary<ulong, ulong> { [1] = 1 }, new SignedRecord([1], new byte[64]), null) { ContentReady = true };
+    private void Sql(string sql)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()); connection.Open();
+        using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
+    }
 
     [Fact]
     public async Task DurablePrefixAndFinalUnpublishedRootSurviveReopening()

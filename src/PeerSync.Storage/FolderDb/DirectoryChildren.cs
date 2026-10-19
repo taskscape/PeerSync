@@ -9,8 +9,9 @@ public sealed record DirectoryChildBatch(IReadOnlyList<LocalFileRow> Rows, strin
 public sealed partial class FolderIndex
 {
     /// <summary>Bounded exact signed logical children, ordered like C# ordinal
-    /// keys including supplementary Unicode. NeedsRescan can retain the last
-    /// published independently captured version; ignored/unsupported rows cannot.
+    /// keys including supplementary Unicode. NeedsRescan/unready rows retain
+    /// their last authenticated version; availability is not signed deletion.
+    /// Ignored/unsupported rows cannot enter this logical snapshot.
     /// Callers authenticate the envelopes and serialize local-index mutation.</summary>
     public DirectoryChildBatch ReadDirectorySnapshotChildren(string parentPath, string? afterKey = null, int limit = 1000, int byteBudget = 8 * 1024 * 1024)
     {
@@ -19,7 +20,7 @@ public sealed partial class FolderIndex
         if (limit is < 1 or > 1000 || byteBudget is < 1 or > 8 * 1024 * 1024) throw new ArgumentOutOfRangeException(nameof(limit));
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
         command.CommandText = "SELECT " + FolderMaps.LocalColumns + ",length(record_body)+length(signature)+length(vv) FROM local_files "
-            + "WHERE parent_key=$parent AND deleted=0 AND (flags&3)=0 AND type IN (0,1) AND record_body IS NOT NULL AND (type<>0 OR content_ready=1) "
+            + "WHERE parent_key=$parent AND deleted=0 AND (flags&3)=0 AND type IN (0,1) AND record_body IS NOT NULL "
             + (after is null ? "" : "AND path_sort_key>$after ") + "ORDER BY path_sort_key LIMIT $limit;";
         command.Parameters.AddWithValue("$parent", parent); command.Parameters.AddWithValue("$limit", limit);
         if (after is not null) command.Parameters.AddWithValue("$after", Encoding.BigEndianUnicode.GetBytes(after));

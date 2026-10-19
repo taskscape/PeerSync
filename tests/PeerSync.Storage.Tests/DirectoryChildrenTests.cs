@@ -41,7 +41,7 @@ public sealed class DirectoryChildrenTests : IDisposable
     }
 
     [Fact]
-    public async Task LogicalChildFilterKeepsLastReadyNeedsRescanButExcludesUnsupportedIgnoredAndWithheldRows()
+    public async Task LogicalChildFilterKeepsSignedUnavailableVersionsAndExcludesUnsupportedIgnoredDeletedOrUnsignedRows()
     {
         await using var index = await FolderIndex.OpenAsync(Database, Token);
         await index.LocalFiles.UpsertAsync([
@@ -50,7 +50,7 @@ public sealed class DirectoryChildrenTests : IDisposable
             Row("topic/deleted") with { Deleted = true }, Row("topic/unsigned") with { Record = null },
             Row("topic/unsupported") with { Type = 2, FileHash = null },
             Row("topic/directory") with { Type = 1, FileHash = null }, Row("topic/directory/deep")], Token);
-        Read(index, 2).Select(row => row.Path).ShouldBe(["topic/directory", "topic/needs-rescan", "topic/ready"]);
+        Read(index, 2).Select(row => row.Path).ShouldBe(["topic/directory", "topic/needs-rescan", "topic/ready", "topic/withheld"]);
         await index.LocalFiles.UpsertAsync([Row("topic/ready") with { Deleted = true }, Row("elsewhere/ready")], Token);
         Read(index, 2).Select(row => row.Path).ShouldNotContain("topic/ready");
         index.ReadDirectorySnapshotChildren("elsewhere").Rows.Single().Path.ShouldBe("elsewhere/ready");
@@ -65,7 +65,7 @@ public sealed class DirectoryChildrenTests : IDisposable
             await index.LocalFiles.UpsertAsync([Row("root"), Row("topic/\uE000"), Row("topic/\U00010000"), Row("topic/nested/a")], Token);
             high = index.ReadIndexHighWater(); before = index.LocalFiles.ReadAll().ToArray();
         }
-        Sql("DROP INDEX ix_local_directory_children; DROP INDEX ix_local_directory_sort_backfill; ALTER TABLE local_files DROP COLUMN parent_key; ALTER TABLE local_files DROP COLUMN path_sort_key; PRAGMA user_version=24;");
+        Sql("DROP TRIGGER directory_capture_insert; DROP TRIGGER directory_capture_update; DROP TRIGGER directory_capture_delete; DROP TABLE directory_capture_clock; ALTER TABLE directory_captures DROP COLUMN input_epoch; DROP INDEX ix_local_directory_children; DROP INDEX ix_local_directory_sort_backfill; ALTER TABLE local_files DROP COLUMN parent_key; ALTER TABLE local_files DROP COLUMN path_sort_key; PRAGMA user_version=24;");
         await using var upgraded = await FolderIndex.OpenAsync(Database, Token); upgraded.ReadIndexHighWater().ShouldBe(high);
         foreach (var old in before)
         {
