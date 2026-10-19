@@ -379,6 +379,11 @@ Otherwise reconstruct the authenticated bytes through the ordinary kind-4
 intent path, preserving the original observation time and current user files.
 Missing/corrupt blocks or invalid markers fail visibly with prior protection
 and any recovery intent intact. Bootstrap waits for pending application recovery.
+Reconstruction also reserves the archive metadata namespace: do not install at
+an already indexed path even when its file is absent. Index the invariant
+uppercase archive path, backfill older rows in bounded durable batches before
+opening the index, and keep the original spelling. This prevents ambiguous
+source accounting without quadratic archive enumeration or ASCII-only matching.
 Bind new archive retirement authorizations to stable provenance source IDs,
 so a completed witness cannot authorize a later archive row which reuses the
 same numeric ID and metadata. Legacy orphan protection, explicit private/public
