@@ -522,7 +522,7 @@ schema migration; existing databases are backed up by the migration runner.
 | Directory deleted remotely, new local files inside | Delete the known children. Keep the directory and the unknown files, which then sync back. |
 | A winning directory replaces a local file | Retain the file under the ordinary archive/oversize/keep-both policy, then install a guarded empty directory. |
 | A winning file replaces a local directory | Move the entire directory, including unknown children, to a no-overwrite sync-conflict sibling before installing the file. A directory tree is not a single file archive entry. RW peers scan/publish the preserved tree; RO peers retain it as a local copy. Preserve effective DACL access/protection and creation time; Windows normalizes directory-only ACL inheritance flags on a replacement file. The retained directory keeps its original ACL. |
-| Two remote names differ only by case | Keep the first. Rename the second with a `.case-conflict` suffix, as Resilio's `.Conflict` handling does. |
+| Concurrent live names differ only by leaf case | The existing deterministic conflict winner owns the original name. Preserve every other causally maximal version with a distinct leaf spelling under a stable `.case-conflict-<source-id>` sibling before merging its vector. |
 | Name invalid on Windows | Mark the record unsyncable here and show a warning. Don't block the rest of the folder. |
 
 Case handling must retain competing signed versions before a merged vector can
@@ -540,7 +540,41 @@ destinations without overwriting. Incoming signed paths cannot be rewritten:
 RW publication of a preserved copy requires an ordinary new local record; RO
 copies remain local. First-name ownership and subsequent suffix allocation
 must remain consistent across gossip/restart and preserve every source
-version. Complete that admission/recovery design before enabling case mutation.
+version. The user approved deterministic original-name ownership on 2026-10-19;
+literal per-computer packet arrival does not assign ownership. Source IDs hash
+the domain `PeerSync case source v1` followed by the original signed body and
+signature, independent of forwarding device and native root. Use the existing
+bounded sibling-name rules, adding a numeric collision suffix without replacing
+unknown objects. Parent-only spelling changes do not create child case copies.
+
+Admission adds immutable source envelopes to a root-bound preservation ledger
+in the same transaction as remote rows, needed work and receive cursor. A
+pure resolver may return preservation sources with its needed row; storage
+validates path/identity bounds, freezes buffers, rejects mismatched duplicate
+IDs and applies backpressure at 1,000 pending sources. Completed markers are
+separate from that pending limit. Replacing remote rows cannot release the
+ledger's original envelope. Accepted index updates and this ledger are FULL
+durable before acknowledgement; replay and failed admission cannot partly
+advance the cursor. Recompute must discover the same obligations idempotently.
+
+Pending sources hold authenticated block references even if their remote row
+is replaced. Pending original and reserved destination paths also inhibit
+staging expiry. Normal original-path application/vector merging must wait for
+the preservation barrier, including selection, final mutation and writer commit
+checks. An arrival while an old operation is in flight must defer or safely
+recover that operation without overwriting either version.
+
+Materialization reserves a no-overwrite destination and a kind-specific FULL
+root/source/destination/FID-bound intent, assembles and verifies independent
+blocks outside the reference gate, and installs only through guarded moves.
+Recover before scanning, preserving changed or foreign occupants. RW copies
+are ordinary scanner publications, never rewritten incoming signed paths; RO
+copies remain local. Guarded visible bytes and required local publication must
+be proven before completion releases the original-path barrier. Retain stable
+completed-source accounting to suppress duplicate gossip copies, with bounded
+eventual metadata retirement. Restart, source replacement, forwarding, occupied
+destinations, cancellation and reference/expiry races require tests. Directory
+and nested subtree mapping remain mandatory before the parent task closes.
 
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
 

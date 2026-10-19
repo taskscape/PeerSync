@@ -1,7 +1,8 @@
 # P1 case-clash original-name policy
 
-Status: proposal; the existing design's “Keep the first” requirement remains
-in force until this clarification is approved. No case mutation is enabled.
+Status: approved by the user on 2026-10-19: "Approve deterministic winner
+(Recommended)". The source design and plan now record this ownership policy.
+Implementation and recovery requirements below remain mandatory.
 
 The conflict table requires a visible `.case-conflict` copy. Four connected
 regressions now reproduce its absence. Two causal case-rename controls pass.
