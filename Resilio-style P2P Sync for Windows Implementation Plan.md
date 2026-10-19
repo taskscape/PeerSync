@@ -410,7 +410,9 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    parents shallowest first and bind the directory handle identity before
    setting metadata or requesting deletion. Never recursively delete a tree.
    Apply individual signed child tombstones through the regular file path
-   before the parent; a parent record is not a substitute child signature.
+   before the parent, after receiving the advertised sender index range; a
+   partially received index must not cause premature parent resurrection.
+   A parent record is not a substitute child signature.
    If a parent is still nonempty, keep it and its children, record the logical
    signed tombstone and request a normal scan. RW scanning then publishes the
    surviving directory and unknown children as local descendants; RO scanning
@@ -418,6 +420,10 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    nonempty checks protect a child created concurrently with deletion. A changed
    identity/type is preserved and rescanned. Recovery dispatches directory
    intents alongside file and restore operations before scans are permitted.
+   Parent-path case follows the corresponding directory records. Within an
+   already matched case-folded path key, only a change to the entry's own leaf
+   spelling is a case edit. Changing a directory's spelling must not invent
+   edits to unchanged descendants or rewrite their original signed bodies.
 
 ### Archive, ignore rules and special files
 

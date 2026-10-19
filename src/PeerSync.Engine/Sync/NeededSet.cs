@@ -132,7 +132,8 @@ public sealed class NeededSet
         if (!ContentMatches(local, winner)) return false;
         if (local is null || winner.Deleted) return true;
         var body = winner.ExportBody();
-        return (winner.Type == 1 || local.MtimeTicks == winner.MtimeTicks) && local.Path == winner.Path
+        return (winner.Type == 1 || local.MtimeTicks == winner.MtimeTicks)
+            && PathRules.Key(local.Path) == PathRules.Key(winner.Path) && PathSpelling.SameLeaf(local.Path, winner.Path)
             && (local.Attributes & (uint)(FileAttributes.ReadOnly | FileAttributes.Hidden)) == body.Attributes;
     }
     private static bool ContentMatches(LocalFileRow? local, VersionView winner) => winner.Deleted

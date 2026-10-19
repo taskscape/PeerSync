@@ -123,7 +123,13 @@ public sealed partial class FileApplier
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); int recovered = 0;
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
-            cancellationToken.ThrowIfCancellationRequested(); var state = ApplyState.Decode(intent, keys);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (intent.Payload.Length >= 4 && BinaryPrimitives.ReadInt32LittleEndian(intent.Payload) == 3)
+            {
+                var directories = new DirectoryApplier(rootPath, index, keys, ownDevice, settings, journal) { Checkpoint = Checkpoint };
+                await directories.RecoverIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue;
+            }
+            var state = ApplyState.Decode(intent, keys);
             if (!state.Root.AsSpan().SequenceEqual(tree.Identity)) throw new IOException("Recovery root identity changed.");
             Signal("recover-start", intent.Id);
             if (!state.Prepared)
