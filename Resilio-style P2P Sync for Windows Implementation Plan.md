@@ -390,6 +390,21 @@ same numeric ID and metadata. Legacy orphan protection, explicit private/public
 history policy release, owned-object grace/cap selection, FULL-durable deletion
 intents and recovery with fresh references remain required before enabling
 block sweeping. Unknown, changed, linked, locked or reparse objects are preserved.
+Policy reference retirement runs under both folder/reference gates after
+authenticated bootstrap and before a fresh snapshot. FULL-delete an exact
+accounted marker only after its observation window expires or its private
+source has a completed, source-bound policy witness no older than the hold.
+Public history additionally requires an authenticated published local row at
+its conflict location, proving that ordinary current/deletion tracking has
+observed that copy. An unobserved or unpublished public copy keeps its marker.
+Release a private provenance source only when no history holds remain and
+its age expires or a source-bound policy retirement completes; pending native
+retirements defer release. Record the root/source/policy authorization durably,
+including for detached sources. Absence alone and legacy unbound witnesses do
+not authorize release. New history reuse atomically cancels an earlier source
+release. Reference builders exclude explicitly released archive sources and
+their staged content, while independently preserving current/needed/history
+references. Policy retirement itself never deletes filesystem data.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
