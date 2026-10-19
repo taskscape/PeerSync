@@ -87,6 +87,71 @@ public sealed class CasePreservationTests : IDisposable
     }
 
     [Fact]
+    public async Task RetryDeadlinesSurviveRestartAndClockRollbackWithoutStarvingOtherSources()
+    {
+        const long now = 1000; CasePreservationRetry first;
+        await using (var index = await Open())
+        {
+            await Receive(index, [Source(1), Source(2)]); var a = index.ReadPendingCasePreservations().Single(row => row.Source.SourceId.SequenceEqual(Id(1)));
+            first = await index.RecordCasePreservationFailureAsync(a, now, Token); first.Attempts.ShouldBe(1); first.NextTicks.ShouldBe(now + 10 * TimeSpan.TicksPerSecond);
+            index.ReadDueCasePreservations(Root, now).Count.ShouldBe(1); index.ReadNextCasePreservationTicks(Root, now).ShouldBe(now);
+            var b = index.ReadPendingCasePreservations().Single(row => row.Source.SourceId.SequenceEqual(Id(2)));
+            await index.RecordCasePreservationFailureAsync(b, now + 1, Token); index.ReadNextCasePreservationTicks(Root, now + 1).ShouldBe(first.NextTicks);
+        }
+        await using var reopened = await FolderIndex.OpenAsync(Database, Token);
+        reopened.ReadCasePreservationRetry(Id(1)).ShouldBe(first); reopened.ReadDueCasePreservations(Root, first.NextTicks).Count.ShouldBe(1);
+        reopened.ReadDueCasePreservations(Root, now - 1).Count.ShouldBe(2);
+        var pending = reopened.ReadPendingCasePreservations().Single(row => row.Source.SourceId.SequenceEqual(Id(1)));
+        var reset = await reopened.RecordCasePreservationFailureAsync(pending, now - 1, Token); reset.Attempts.ShouldBe(1);
+        var retry = reset; for (int i = 0; i < 9; i++) retry = await reopened.RecordCasePreservationFailureAsync(pending, retry.NextTicks, Token);
+        retry.Attempts.ShouldBe(7); (retry.NextTicks - retry.FailedTicks).ShouldBe(600 * TimeSpan.TicksPerSecond);
+        var saturated = await reopened.RecordCasePreservationFailureAsync(pending, DateTime.MaxValue.Ticks, Token); saturated.NextTicks.ShouldBe(DateTime.MaxValue.Ticks);
+    }
+
+    [Fact]
+    public async Task CompletionCompactsOnlyAgedSameRootPayloadsAndKeepsPortableReplayWitnesses()
+    {
+        await using var index = await Open(); await Receive(index, [Source(1), Source(2), Source(3), Source(4)]);
+        const long completed = 100; long now = completed + TimeSpan.TicksPerDay;
+        foreach (int number in new[] { 1, 2, 3 })
+        {
+            var source = index.ReadPendingCasePreservations().Single(row => row.Source.SourceId.SequenceEqual(Id(number)));
+            var row = new LocalFileRow("copy" + number.ToString(System.Globalization.CultureInfo.InvariantCulture), 0, 1, 1, 0, false, 1, new byte[32],
+                new Dictionary<ulong, ulong> { [1] = 1 }, Record(1), new byte[16]) { ContentReady = true };
+            await index.LocalFiles.UpsertAsync([row], Token); var observed = index.LocalFiles.Find(row.Path)!;
+            await index.AccountObservedCaseCopyAsync(source, observed, Token);
+            source = index.ReadPendingCasePreservations().Single(item => item.Source.SourceId.SequenceEqual(Id(number)));
+            await index.CompleteCasePreservationAsync(source, observed.LocalSequence, true, number == 2 ? now + TimeSpan.TicksPerDay : completed, Token);
+        }
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()))
+        {
+            connection.Open(); using var command = connection.CreateCommand(); command.CommandText = "UPDATE case_preservations SET root_id=$root WHERE source_id=$id;";
+            command.Parameters.AddWithValue("$root", Enumerable.Repeat((byte)9, 24).ToArray()); command.Parameters.AddWithValue("$id", Id(3)); command.ExecuteNonQuery();
+        }
+        (await index.CompactCompletedCaseSourcesAsync(Root, now - 1, cancellationToken: Token)).ShouldBe(0);
+        (await index.CompactCompletedCaseSourcesAsync(Root, now, limit: 1, cancellationToken: Token)).ShouldBe(1);
+        (await index.CompactCompletedCaseSourcesAsync(Root, now, cancellationToken: Token)).ShouldBe(0);
+        index.ReadPendingCasePreservations().Single().Source.SourceId.ShouldBe(Id(4));
+        await index.RecomputeNeededAsync(["file"], snapshot => Needed(snapshot.PathKey, [Source(1)]), Token);
+        index.ReadPendingCasePreservations().Count.ShouldBe(1); // Compact completed ID cannot be re-admitted.
+        await Should.ThrowAsync<InvalidOperationException>(() => index.CompactCompletedCaseSourcesAsync(Enumerable.Repeat((byte)9, 24).ToArray(), now, cancellationToken: Token));
+    }
+
+    [Fact]
+    public async Task StalePublicationAndCancellationCannotCompleteOrDelayPendingSource()
+    {
+        await using var index = await Open(); await Receive(index, [Source(1)]); var source = index.ReadPendingCasePreservations().Single();
+        var row = new LocalFileRow("copy", 0, 1, 1, 0, false, 1, new byte[32], new Dictionary<ulong, ulong> { [1] = 1 }, Record(1), new byte[16]) { ContentReady = true };
+        await index.LocalFiles.UpsertAsync([row], Token); var old = index.LocalFiles.Find("copy")!;
+        await index.LocalFiles.UpsertAsync([row with { MtimeTicks = 2 }], Token);
+        await Should.ThrowAsync<IOException>(() => index.AccountObservedCaseCopyAsync(source, old, Token));
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token); stop.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(() => index.RecordCasePreservationFailureAsync(source, 100, stop.Token));
+        index.ReadCasePreservationRetry(source.Source.SourceId).ShouldBeNull(); index.ReadDueCasePreservations(Root, 100).Count.ShouldBe(1);
+        index.ReadPendingCasePreservations().Single().InstalledFileId.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task PendingCaseSourceProtectsUnneededStagingWithoutAnActiveApply()
     {
         await using var index = await Open(); await Receive(index, [Source(1)]); await index.Needed.DeleteAsync(["file"], Token);

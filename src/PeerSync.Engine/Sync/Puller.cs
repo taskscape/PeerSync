@@ -149,6 +149,8 @@ public sealed class Puller : IDisposable
             foreach (string path in casePaths)
                 if (index.Needed.Find(path)?.Work is { } descriptor) await index.ClearPullRetryAsync(path, descriptor.Fingerprint, token).ConfigureAwait(false);
         }
+        using (await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false))
+            await index.CompactCompletedCaseSourcesAsync(rootId!, Now, limit: 64, cancellationToken: token).ConfigureAwait(false);
         var work = index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
         foreach (var row in work)
         {
@@ -209,7 +211,7 @@ public sealed class Puller : IDisposable
             }
             else { nextStagingTicks = AddSeconds(Now, 3600); stagingRetryAttempt = 0; }
         }
-        long finished = Now; long? next = index.ReadNextScheduledPullTicks(rootId!, own, finished);
+        long finished = Now; long? next = NextWorkTicks(finished);
         return new(work.Count, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
     }
 
@@ -263,7 +265,7 @@ public sealed class Puller : IDisposable
                     {
                         await RunPassAsync(cancellationToken).ConfigureAwait(false); attempt = 0;
                         long now = Now; long scan = Volatile.Read(ref scanRequested) != 0 ? Math.Max(now, scanRetryTicks) : nextScanTicks;
-                        long next = Math.Min(scan, index.ReadNextScheduledPullTicks(rootId!, own, now) ?? DateTime.MaxValue.Ticks);
+                        long next = Math.Min(scan, NextWorkTicks(now) ?? DateTime.MaxValue.Ticks);
                         if (!neededRepairPending && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0) next = Math.Min(next, nextStagingTicks);
                         delay = TimeSpan.FromTicks(Math.Clamp(next - now, 0, 600 * TimeSpan.TicksPerSecond));
                     }
@@ -288,6 +290,11 @@ public sealed class Puller : IDisposable
     }
 
     private long Now => Math.Max(1, clock.GetUtcNow().UtcTicks);
+    private long? NextWorkTicks(long now)
+    {
+        long? pull = index.ReadNextScheduledPullTicks(rootId!, own, now), cases = index.ReadNextCasePreservationTicks(rootId!, now);
+        return pull is null ? cases : cases is null ? pull : Math.Min(pull.Value, cases.Value);
+    }
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);
     private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException
         || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 };

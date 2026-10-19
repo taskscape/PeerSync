@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Paths;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Native;
@@ -16,17 +17,19 @@ public sealed partial class FileApplier
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); bool readyForScan = false;
         if (index.ReadApplyIntents().Any()) return false;
-        foreach (var pending in index.ReadPendingCasePreservations())
+        foreach (var pending in index.ReadDueCasePreservations(tree.Identity.ToArray(), CaseNow))
         {
             token.ThrowIfCancellationRequested(); var source = OpenCaseSource(tree, pending);
-            if (source.Type != 0) continue; // Subtree mapping is a separate mandatory integration.
+            if (source.Type != 0)
+            { await RetryCaseAsync(pending, "case-subtree-pending", token).ConfigureAwait(false); continue; }
             try
             {
                 try { FileMetadata.ValidateMtime(source.MtimeTicks); }
-                catch (ArgumentOutOfRangeException error) { StagingProbeFailed("case-timestamp-blocked", Guid.NewGuid(), error); continue; }
+                catch (ArgumentOutOfRangeException error)
+                { StagingProbeFailed("case-timestamp-blocked", Guid.NewGuid(), error); await RetryCaseAsync(pending, "case-timestamp-blocked", token).ConfigureAwait(false); continue; }
                 if (pending.InstalledFileId is not null && CaseLocationMatches(tree, pending, source, token)) { readyForScan = true; continue; }
                 using var parent = tree.Directory(ApplyState.Parent(source.Path));
-                int collision = 1; string destination;
+                int collision = 1; string destination; bool observed = false;
                 for (;; collision++)
                 {
                     if (collision > 1000) throw new IOException("Case copy collision budget exceeded.");
@@ -34,8 +37,13 @@ public sealed partial class FileApplier
                     bool occupied;
                     try { using var node = parent.OpenMetadataNode(ApplyState.Name(destination)); occupied = true; }
                     catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { occupied = false; }
+                    catch (Win32Exception) { occupied = true; }
+                    catch (IOException) { occupied = true; } // Unclassifiable/reparse means occupied, never absent.
+                    if (occupied && await TryObserveCasePublicationAsync(pending, source, parent, destination, token).ConfigureAwait(false))
+                    { observed = true; readyForScan = true; break; }
                     if (!occupied && index.LocalFiles.Find(destination) is null) break;
                 }
+                if (observed) continue;
                 Guid session = Guid.NewGuid();
                 using var file = OpenTemporary(tree, parent, destination, out string temporary, out byte[] temporaryId, session: session, cancellationToken: token);
                 var state = new CaseCopyState { Root = tree.Identity.ToArray(), Source = source, SourceId = pending.Source.SourceId,
@@ -56,19 +64,23 @@ public sealed partial class FileApplier
                     FileMetadata.PrepareNewFile(parent, file); FileMetadata.SetMtime(file, source.MtimeTicks); RandomAccess.FlushToDisk(file);
                     state.TemporaryAttributes = (uint)FileSnapshot.Read(file).Attributes; state.Prepared = true;
                     intent = await index.RewriteApplyAsync(intent, state.Encode(), token).ConfigureAwait(false); Signal("case-prepared", session);
-                    readyForScan |= await InstallCaseCopyAsync(tree, pending, state, intent, parent, file, token).ConfigureAwait(false);
+                    bool installed = await InstallCaseCopyAsync(tree, pending, state, intent, parent, file, token).ConfigureAwait(false);
+                    readyForScan |= installed;
+                    if (!installed) await RetryCaseAsync(pending, "case-collision", token).ConfigureAwait(false);
                 }
                 catch (Exception error) when (error is IOException or InvalidDataException or Win32Exception or UnauthorizedAccessException or CryptographicException)
                 {
                     if (state.InstalledInThisCall) throw; // Preserve recovery proof after the native move.
                     await ParkAsync(tree, state.StagingState(), intent, token, file).ConfigureAwait(false);
                     await index.AbandonApplyAsync(intent, token).ConfigureAwait(false); StagingProbeFailed("case-deferred", session, error);
+                    await RetryCaseAsync(pending, error.GetType().Name, token).ConfigureAwait(false);
                 }
             }
             catch (Exception error) when (error is IOException or Win32Exception or UnauthorizedAccessException)
             {
                 if (index.ReadApplyIntents().Any()) throw;
                 StagingProbeFailed("case-source-deferred", Guid.NewGuid(), error);
+                await RetryCaseAsync(pending, error.GetType().Name, token).ConfigureAwait(false);
             }
         }
         return readyForScan;
@@ -78,25 +90,34 @@ public sealed partial class FileApplier
     {
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); var completed = new List<string>();
-        foreach (var pending in index.ReadPendingCasePreservations())
+        foreach (var pending in index.ReadDueCasePreservations(tree.Identity.ToArray(), CaseNow))
         {
             token.ThrowIfCancellationRequested(); var source = OpenCaseSource(tree, pending);
             if (source.Type != 0 || pending.DestinationPath is not { } destination || pending.InstalledFileId is null) continue;
-            using var parent = tree.Directory(ApplyState.Parent(destination)); using var file = TryOpen(parent, ApplyState.Name(destination));
-            if (file is null || !CaseMatches(file, pending.InstalledFileId, source, token)) continue;
-            using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
-            var local = index.LocalFiles.Find(destination);
-            if (local is not { Type: 0, Deleted: false, Flags: LocalFileState.None, FileId: not null, FileHash: not null }
-                || !local.FileId.AsSpan().SequenceEqual(pending.InstalledFileId) || local.Size != source.Size || !source.FileHash.SequenceEqual(local.FileHash)) continue;
-            if (keys.CanWrite)
+            try
             {
-                if (!local.ContentReady || local.Record is null) continue;
-                var published = VersionView.Open(local.Record, keys, ownDevice);
-                if (published.Deleted || published.Type != 0 || published.Path != local.Path || published.Size != source.Size || !published.FileHash.SequenceEqual(source.FileHash)) continue;
+                using var parent = tree.Directory(ApplyState.Parent(destination)); using var file = TryOpen(parent, ApplyState.Name(destination));
+                if (file is null || !CaseMatches(file, pending.InstalledFileId, source, token))
+                { await RetryCaseAsync(pending, "case-visible-changed", token).ConfigureAwait(false); continue; }
+                using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+                var local = index.LocalFiles.Find(destination);
+                if (local is not { Type: 0, Deleted: false, Flags: LocalFileState.None, FileId: not null, FileHash: not null }
+                    || !local.FileId.AsSpan().SequenceEqual(pending.InstalledFileId) || local.Size != source.Size || !source.FileHash.SequenceEqual(local.FileHash))
+                { await RetryCaseUnderReferenceAsync(pending, "case-observation-pending", token).ConfigureAwait(false); continue; }
+                if (keys.CanWrite)
+                {
+                    if (!local.ContentReady || local.Record is null)
+                    { await RetryCaseUnderReferenceAsync(pending, "case-publication-pending", token).ConfigureAwait(false); continue; }
+                    var published = VersionView.Open(local.Record, keys, ownDevice);
+                    if (published.Deleted || published.Type != 0 || published.Path != local.Path || published.Size != source.Size || !published.FileHash.SequenceEqual(source.FileHash))
+                    { await RetryCaseUnderReferenceAsync(pending, "case-publication-changed", token).ConfigureAwait(false); continue; }
+                }
+                Guid session = Guid.NewGuid(); Signal("case-before-completion", session);
+                await index.CompleteCasePreservationAsync(pending, local.LocalSequence, keys.CanWrite, CaseNow, token).ConfigureAwait(false);
+                completed.Add(pending.Source.PathKey); Signal("case-completed", session);
             }
-            Guid session = Guid.NewGuid(); Signal("case-before-completion", session);
-            await index.CompleteCasePreservationAsync(pending, local.LocalSequence, keys.CanWrite, token).ConfigureAwait(false);
-            completed.Add(pending.Source.PathKey); Signal("case-completed", session);
+            catch (Exception error) when (error is IOException or Win32Exception or UnauthorizedAccessException)
+            { await RetryCaseAsync(pending, error.GetType().Name, token).ConfigureAwait(false); }
         }
         return completed.AsReadOnly();
     }
@@ -151,6 +172,39 @@ public sealed partial class FileApplier
             || !CaseConflictPolicy.SourceId(source).AsSpan().SequenceEqual(pending.Source.SourceId)) throw new InvalidDataException("Case source proof changed.");
         return source;
     }
+
+    private long CaseNow => Math.Max(1, clock.GetUtcNow().UtcTicks);
+    private async Task RetryCaseAsync(PendingCasePreservation pending, string code, CancellationToken token)
+    {
+        using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+        await RetryCaseUnderReferenceAsync(pending, code, token).ConfigureAwait(false);
+    }
+    private async Task RetryCaseUnderReferenceAsync(PendingCasePreservation pending, string code, CancellationToken token)
+    {
+        var retry = await index.RecordCasePreservationFailureAsync(pending, CaseNow, token).ConfigureAwait(false);
+        journal?.TryWrite(new("apply.case-retry", "case") { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Debug, ErrorCode = code,
+            ItemsDeferred = 1, RetryInMilliseconds = (int)Math.Clamp((retry.NextTicks - retry.FailedTicks) / TimeSpan.TicksPerMillisecond, 0, 600000) });
+    }
+
+    private async Task<bool> TryObserveCasePublicationAsync(PendingCasePreservation pending, VersionView source, DirectoryLease parent, string destination, CancellationToken token)
+    {
+        var local = index.LocalFiles.Find(destination);
+        if (local is not { Type: 0, Deleted: false, Flags: LocalFileState.None, ContentReady: true, Record: not null, FileId: not null, FileHash: not null }
+            || local.Size != source.Size || !source.FileHash.SequenceEqual(local.FileHash)) return false;
+        var publication = VersionView.Open(local.Record, keys, ownDevice);
+        if (publication.Type != 0 || publication.Deleted || publication.Path != local.Path || publication.Size != source.Size
+            || !publication.FileHash.SequenceEqual(source.FileHash)) return false;
+        try
+        {
+            using var file = parent.OpenFile(ApplyState.Name(destination), mutation: true);
+            if (!CaseMatches(file, local.FileId, source, token)) return false;
+            using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+            await index.AccountObservedCaseCopyAsync(pending, local, token).ConfigureAwait(false);
+            Signal("case-observed-publication", Guid.NewGuid()); return true;
+        }
+        catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3 or 5 or 32 or 33) { return false; }
+        catch (IOException) { return false; }
+    }
     private static bool CaseMatches(SafeFileHandle file, byte[] identity, VersionView source, CancellationToken token)
     {
         var snapshot = FileSnapshot.Read(file);
@@ -160,7 +214,13 @@ public sealed partial class FileApplier
     private static bool CaseLocationMatches(SafeFileTree tree, PendingCasePreservation pending, VersionView source, CancellationToken token)
     {
         if (pending.DestinationPath is null || pending.InstalledFileId is null) return false;
-        using var parent = tree.Directory(ApplyState.Parent(pending.DestinationPath)); using var file = TryOpen(parent, ApplyState.Name(pending.DestinationPath));
-        return file is not null && CaseMatches(file, pending.InstalledFileId, source, token);
+        using var parent = tree.Directory(ApplyState.Parent(pending.DestinationPath));
+        try
+        {
+            using var file = TryOpen(parent, ApplyState.Name(pending.DestinationPath));
+            return file is not null && CaseMatches(file, pending.InstalledFileId, source, token);
+        }
+        catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3 or 5 or 32 or 33) { return false; }
+        catch (IOException) { return false; }
     }
 }
