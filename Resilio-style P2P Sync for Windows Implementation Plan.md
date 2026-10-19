@@ -699,6 +699,16 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    Recovery rechecks ownership and new needs. Delete only guarded exact files or
    empty owned directories, never recursively/by filename. Protect changed or
    foreign objects, preserve needed prefixes and bound each pass to 1,000 rows.
+   Persist a root-bound catalog cursor so needed/locked objects cannot starve
+   later entries. Scan at most 1,000 witnesses per pass, including skipped rows,
+   and request continuation when a page is full. Verify files outside the
+   reference gate while retaining native guards, then recheck age, current needs,
+   exact witness and absence of active apply in the FULL reservation. Prepared
+   retirements are recovered first. Inaccessible preparations may be canceled
+   durably without deleting bytes, retaining their witness for a later retry and
+   freeing bounded journal capacity. Confirmed absence can retire metadata only;
+   a foreign replacement is preserved. Protected/legacy objects never gain
+   deletion permission through enumeration or filename matching.
    Local index entries are hints: reject reparse traversal, verify the actual
    bytes and try at most 64 candidates per chunk before network fallback.
    Copy transport data into an owned, bounded chunk buffer before hashing it.
