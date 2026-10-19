@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | Scope hierarchy repair to a previously signed live file becoming a directory, including local snapshot publication. Absent parents have suspended no child work and retain ordinary no-extra-scan scheduling. | Applying remote changes: hierarchy integration |
 | 2026-10-20 | Suspend live child work below an installed signed regular-file ancestor using transaction-bound authenticated ancestor context; atomically withdraw live descendants on fresh file completion while retaining deletion stages, remote envelopes and case sources. Rebuild retained child work after applying a directory over an absent/file parent. Parent kind never creates child tombstones or bypasses snapshot/rebase proof. | Applying remote changes: hierarchy integration |
 | 2026-10-20 | Hand exhausted member attempts to verification without renewing their retry deadline; completion owns remaining backoff. Connected tests advance injected UTC to future scheduler deadlines while retaining all native/content/drain assertions. | Sync engine design: directory case snapshots |
 | 2026-10-20 | Wire an internal connected snapshot preview with one bounded publication pass, needed recomputation and durable wake deadlines before production activation. Preserve public constructor behavior until connected convergence passes. | Sync engine design: directory case snapshots |

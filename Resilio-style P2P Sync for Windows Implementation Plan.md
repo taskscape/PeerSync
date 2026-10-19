@@ -1053,9 +1053,11 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    case obligations; never manufacture descendant tombstones from the parent.
    Resolve the nearest such ancestor in the same needed-rewrite transaction and
    authenticate it in the engine. Fresh file completion withdraws live descendant
-   work atomically, retaining deletion stages. When application changes an absent
-   or regular-file parent into a live directory, rebuild needed work after the
-   required scan so retained child versions can resume normal conflict selection.
+   work atomically, retaining deletion stages. When application or local snapshot
+   publication changes a signed live regular-file parent into a live directory,
+   rebuild needed work after the required scan so retained child versions resume
+   normal conflict selection. A previously absent parent has suspended no child
+   work and does not require this extra scan/rebuild.
    Incoming snapshot equality/rebase requirements remain independent.
 
 ### Archive, ignore rules and special files
