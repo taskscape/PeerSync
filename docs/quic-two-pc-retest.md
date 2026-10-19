@@ -5,6 +5,11 @@ commands below from the extracted folder containing `QuicBasics.exe` and
 `Collect-Diagnostics.ps1`. Keep every runtime file; .NET installation is not
 required for this package. These are diagnostic probes, not a sync service.
 
+The dedicated retry ZIP puts both files in one folder. In the CI multi-probe
+bundle, use `.\QuicBasics\QuicBasics.exe` for the commands below and
+`.\QuicBasics\logs` for collection while keeping `.\Collect-Diagnostics.ps1`
+at the bundle root. Point the firewall rule at the actual EXE path as well.
+
 No manual TLS certificate creation or trust-store import is needed. The
 included development `.cer` is public and is only for optional Authenticode
 trust verification; it is not used to authenticate QUIC peers.

@@ -167,6 +167,12 @@ Open technical question: step 3 needs outgoing QUIC connections to leave from th
 
 P0 local result (2026-10-18): outgoing QUIC on the listener port failed with WSAEADDRINUSE on Windows build 26300, .NET 10.0.13 / MsQuic 2.5.11. Direct MsQuic with shared binding and TCP simultaneous open also failed locally. Provisionally retain direct QUIC/TCP for reachable endpoints and relay fallback after 5 seconds for hard NATs. Do not advertise coordinated punching until the physical NAT matrix confirms a supported option. See `docs/spikes/P0.2.2-quic-punch.md`; that matrix remains open.
 
+User-approved implementation baseline (2026-10-19): proceed with reachable
+direct QUIC/TCP connections and relay fallback after five seconds while the
+native NAT matrix is pending. Working coordinated punching is not claimed.
+The final native transport decision and full required matrix remain mandatory
+before the WAN gate, including a real relay fallback check.
+
 ## Sync engine design
 
 Each folder runs an independent loop: detect local changes, publish them as signed records, pull what remote peers have that is newer, and apply it safely. The model follows Resilio's (a database per share, watcher plus 600 s rescans, archive on overwrite) with version vectors added so concurrent edits are detected and the losing version is always archived.
@@ -480,6 +486,17 @@ In-box with no package: `System.Net.Quic`, `SslStream`, `HKDF`, `HMACSHA256`, `A
 ## Phased roadmap
 
 Version 1.0 (LAN and internet sync, the service, the WPF app and the installer) takes about 26 weeks for one senior .NET developer. Two developers can run phases 3 and 4 side by side and finish in about 20 weeks. No phase starts until the previous gate passes.
+
+User-approved external-validation phasing (2026-10-19): Gate P0 may pass with
+only P0.2.1's physical 1-Gbit LAN measurement and P0.2.2's native NAT matrix
+explicitly deferred. Their tasks stay unchecked and their acceptance criteria
+remain intact. The LAN measurement is mandatory before Gate P2; the same-LAN,
+full-cone, port-restricted and mobile/CGNAT matrix plus final transport decision
+are mandatory before Gate P4. All other P0 requirements must pass first.
+Existing Tailscale and public rendezvous-probe successes retain their actual
+scope. No unexecuted test is marked passed or dropped by this phasing change.
+All other phase gates, security, soak, installer and release checks remain
+unchanged.
 
 &#91;embedded content: phased roadmap · 7 phases, 7 gates\]
 

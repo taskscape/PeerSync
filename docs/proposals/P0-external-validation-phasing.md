@@ -1,8 +1,9 @@
-# Proposed P0 external-validation deferral
+# Approved P0 external-validation deferral
 
-Status: proposal only. It has not changed the effective design, checklist or
-phase gates. The user must choose whether to apply it because plan.md section
-0.1 currently requires every P0 gate before P1.
+Status: approved by the user on 2026-10-19: "Defer external checks to P2/P4 and
+continue implementation." The source design and checklist now record the
+changes below. P0.2.1/P0.2.2 remain unchecked; P0 still requires its other
+checks to pass and the code to be merged with green CI before P1 starts.
 
 ## Exact proposed changes
 
@@ -29,6 +30,6 @@ phase gates. The user must choose whether to apply it because plan.md section
    signing/installer and product requirement unchanged. In particular, this
    proposal does not make the service implemented or the full goal complete.
 
-If approved, update the source design first, record the user's decision in
-plan.md section 2, then apply these narrowly enumerated gate/checklist changes.
-If not approved, the current strict P0 gate remains in effect.
+Implementation order: source design updated first, user's decision recorded
+in plan.md section 2, then the narrowly enumerated gate/checklist changes.
+No other acceptance requirement or phase gate is waived.

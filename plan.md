@@ -55,7 +55,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
-| P0 Foundations and spikes | 1-3 | Local/VM work merged; two-PC overlay/public probes passed; physical LAN/NAT and CI signing pending | - |
+| P0 Foundations and spikes | 1-3 | CI signing/repair merge pending; physical LAN/NAT validation deferred to P2/P4 by user | - |
 | P1 Local sync engine | 4-8 | Not started | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
@@ -71,6 +71,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | User approved deferring only P0.2.1's physical LAN measurement to Gate P2 and P0.2.2's native NAT matrix/final decision to Gate P4. Keep both tasks unchecked, preserve all acceptance requirements, and permit Gate P0 after its other checks pass. Use direct QUIC/TCP plus relay after 5 s as the implementation baseline; no coordinated-punch success is claimed. | Phased roadmap; NAT traversal |
 | 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
 | 2026-10-18 | User requested deployment diagnostics: opt-in structured events, shared session correlation, native errors, safe log bundles, and a server/second-PC runbook. Windows-version and NAT evidence must be recorded separately; current Docker runs Linux containers. | Logging, metrics and upgrades |
 | 2026-10-18 | Two-PC troubleshooting: separate HRESULT/native/QUIC error codes, record phase/bytes/progress, reject metadata-only diagnostic bundles, and give the P0 transfer its own timeout after authentication. Existing Tailscale evidence remains separate from physical LAN and native NAT validation. | Logging, metrics and upgrades |
@@ -574,11 +575,11 @@ New P0 foundation requirement from the user (2026-10-18):
 
 Each spike ends with a write-up in `docs/spikes/` and a decision row in section 2 when it changes the design.
 
-- [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`) [BLOCKED: physical second-PC LAN measurement not available, since 2026-10-18]
+- [ ] **P0.2.1 QUIC between two devices with self-signed certificates** (`spikes/QuicBasics`) [DEFERRED validation to Gate P2: user approved 2026-10-19]
   - Done when: two processes exchange 1 GB over one QUIC connection, ALPN `psp/1`, with both certificates required and the DeviceId read from `RemoteCertificate` on both sides. Throughput on 1 Gbit LAN is recorded.
   - 2026-10-19: two physical PCs on different LANs passed 1 GiB over Tailscale in 220.78 s at 4.64 MiB/s. Receiver journal confirms matching session and bytes. [Evidence](docs/verification/P0-cross-network-2026-10-19.md). This is overlay throughput; the physical LAN criterion remains open.
   - Code: see 6.1.
-- [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`) [BLOCKED: physical LAN and home-NAT or CGNAT matrix not available, since 2026-10-18]
+- [ ] **P0.2.2 QUIC hole punching: dial out from the listener's UDP port** (`spikes/QuicPunch`) [DEFERRED validation to Gate P4: user approved 2026-10-19]
   - Question: can a `QuicConnection` use `LocalEndPoint` = the `QuicListener`'s port, so both directions share one NAT mapping?
   - Try, in order:
     - (a) `System.Net.Quic` with `LocalEndPoint` set
@@ -664,8 +665,8 @@ public static byte[] FromCertificate(X509Certificate cert)
 
 ### Gate P0
 
-- [ ] All P0 tasks ticked or explicitly dropped.
-- [ ] The transport decision (P0.2.2) is logged in section 2, and P4.2.3 is updated to match.
+- [ ] All P0 tasks ticked or explicitly dropped, except the user-approved P0.2.1 validation deferral to Gate P2 and P0.2.2 validation deferral to Gate P4. Both remain unchecked and mandatory at those gates.
+- [ ] The direct QUIC/TCP plus relay-after-5-s implementation baseline is logged in section 2 and P4.2.3 matches. P0.2.2's final transport decision remains mandatory at Gate P4 under the user-approved deferral.
 - [x] Performance targets confirmed or revised (P0.2.4), and the design doc's Testing section updated. Evidence: [spike report](docs/spikes/P0.2.4-chunking-hashing.md), merged in (#1).
 - [x] The device-certificate and control-pipe approaches work under the virtual account (P0.2.3, P0.2.5). Evidence: [green Server 2022/2025 CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283), merged in (#1).
 
@@ -1697,6 +1698,7 @@ The event source `PeerSync` is registered by `--init` (`EventLog.CreateEventSour
 
 ### Gate P2 (LAN beta)
 
+- [ ] Complete deferred P0.2.1: a 1 GiB mutual-certificate QUIC transfer with ALPN `psp/1`, certificate-derived DeviceIds and verified hash between physical PCs on a 1-Gbit LAN; record link speeds and throughput, then close P0.2.1 with the evidence.
 - [ ] Three physical PCs sync a 50 GB mixed corpus (large files, 100,000 small files, deep trees) over the LAN.
 - [ ] 72-hour soak with random operations, sleep/resume and Wi-Fi switching: zero data loss, and the hourly tree comparisons all match (attach the report).
 - [ ] The MITM and reflection tests from P2.2.3 pass in CI.
@@ -1914,7 +1916,7 @@ await tls.AuthenticateAsClientAsync(PeerTls.ClientOptions(deviceCert), ct);
   - Code: 10.3.
 - [ ] **P4.2.3 Hole punching** (`PeerSync.Net/Nat/Puncher.cs`)
   - Done when: it implements the option chosen in P0.2.2, and the NAT test matrix from P0.2.2 passes against the real server.
-  - P0 local outcome (2026-10-18): all three same-port options failed on the development PC. Provisionally use direct reachable endpoints followed by relay at 5 s, with no coordinated-punch claim. Final choice remains blocked on the required physical NAT matrix; see `docs/spikes/P0.2.2-quic-punch.md`.
+  - P0 local outcome (2026-10-18): all three same-port options failed on the development PC. User-approved baseline (2026-10-19): implement direct reachable endpoints followed by relay at 5 s, with no coordinated-punch claim. The deferred P0.2.2 physical NAT matrix and final choice remain mandatory at Gate P4; see `docs/spikes/P0.2.2-quic-punch.md`.
 - [ ] **P4.2.4 Relay client** (`PeerSync.Net/Relay/RelayClient.cs`)
   - Done when: after 5 s without a direct path, `RelayRequest`, then `Relay.Pipe`, then TLS inside (10.2), then the normal handshake. The UI shows "via relay" for that peer.
 - [ ] **P4.2.5 `psp.exe probe`** (`PeerSync.Cli/Probe.cs`)
@@ -1996,6 +1998,7 @@ psp probe sync.taskscape.com:99                     # TCP and UDP, plus the obse
 
 ### Gate P4 (WAN beta)
 
+- [ ] Complete deferred P0.2.2: record same-LAN, full-cone home NAT, port-restricted home NAT and mobile/CGNAT outcomes for the required binding alternatives, log the final transport decision and reconcile P4.2.3, then close P0.2.2. Tailscale and rendezvous reachability do not substitute for these checks.
 - [ ] Sync works between two home networks behind different NATs, and with one PC behind a mobile hotspot (CGNAT).
 - [ ] With direct paths blocked, the relay carries the sync. Its rate caps hold, and taskscape.com stays responsive (load test attached).
 - [ ] UDP 99 verified end to end, or the TCP-only outcome is logged with its impact.
