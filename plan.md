@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core types, chunk hashing and SQLite plumbing complete; folder/state storage and scanner implemented locally, CI promotion pending | - |
+| P1 Local sync engine | 4-8 | In progress: core, hashing, storage, scanning and needed computation merged with green CI; regular-file application/recovery in CI; conflict integration, pull scheduling, archive policy and simulations remain open | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -1091,15 +1091,16 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
 
 Review repairs for storage/settings, scanner role transitions, scheduling and
 conflict handling are tracked in [verification](docs/verification/P1-review-repairs-2026-10-19.md).
-Affected tasks remain unchecked until those repairs merge with green CI, even
-if their earlier foundation PR has already passed its checks.
+Those repairs and foundations are now merged with green CI in PRs #11–#20.
+See [the CI/merge audit](docs/verification/P1-foundations-ci-merge-2026-10-19.md).
+Only tasks whose complete acceptance criteria hold are ticked below.
 
 - [x] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) (#9)
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.
   - Merged as `06c48f568566dc30ba03e204aa60655f1f016228`; [required CI attempt 4](https://github.com/taskscape/PeerSync/actions/runs/39184897814/attempts/4) passed all five jobs, including 600 s fuzz (126,489 seeds, zero crashes). See [verification](docs/verification/P1.3.1-sqlite-plumbing-2026-10-19.md).
-- [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
+- [x] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`) (#11, #20)
   - Done when: the schema in 7.7 is created by migration 1. Repositories cover `local_files`, `remote_files`, `needed`, `chunks`, `devices`, `archive` and `meta`. Bulk updates commit in batches of 1,000 rows per transaction. Indexing 1M rows takes under 60 s on the reference SSD.
-- [ ] **P1.3.3 Central state database** (`PeerSync.Storage/StateDb/`) [WIP @Codex 2026-10-19]
+- [x] **P1.3.3 Central state database** (`PeerSync.Storage/StateDb/`) (#11, #20)
   - Done when: `peersync.db` has `folders` (id, path, access level, protected key, `settings_json`, paused), `devices`, `pending_approvals` and `audit_log`. Folder keys are stored only through `FolderKeyProtector`.
 
 ### 7.7 Code: SQLite setup and folder schema (P1.3)
@@ -1202,15 +1203,15 @@ PRAGMA user_version = 1;
 
 ### P1.4 Scanner and watcher
 
-- [ ] **P1.4.1 Scanner** (`PeerSync.Engine/Scanning/Scanner.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.4.1 Scanner** (`PeerSync.Engine/Scanning/Scanner.cs`) (#12, #20)
   - Done when: a full walk skips `.psp`, `*.!psp`, ignored paths and reparse points (recorded, not followed). Unchanged size, mtime, attributes and FileId mean no hashing. A rescan of 100k unchanged files takes under 10 s.
   - Code: 7.8 for the NTFS file id.
-  - Local evidence: [scanner verification and 100k-file benchmark](docs/verification/P1.4.1-scanner-2026-10-19.md). Billing is resolved; required integration CI and merge remain pending, so the task stays unchecked.
-- [ ] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`) [WIP @Codex 2026-10-19]
+  - Evidence: [scanner verification and 100k-file benchmark](docs/verification/P1.4.1-scanner-2026-10-19.md) and [green CI/merge audit](docs/verification/P1-foundations-ci-merge-2026-10-19.md), including role-transition and tombstone repairs.
+- [x] **P1.4.2 Watcher with debounce** (`PeerSync.Engine/Scanning/FolderWatcher.cs`) (#13, #20)
   - Done when: events are coalesced per path (quiet 2 s, or 30 s maximum). A buffer overflow triggers a full scan. Our own writes don't create new versions.
   - Code: 7.9.
-  - Local evidence: [watcher/scheduler verification](docs/verification/P1.4.2-3-watcher-scheduler-2026-10-19.md). Billing is resolved; required integration CI and merge remain pending.
-- [ ] **P1.4.3 Rescan scheduler** (`PeerSync.Engine/Scanning/RescanScheduler.cs`) [WIP @Codex 2026-10-19]
+  - Evidence: [watcher/scheduler verification](docs/verification/P1.4.2-3-watcher-scheduler-2026-10-19.md) and [green CI/merge audit](docs/verification/P1-foundations-ci-merge-2026-10-19.md). The native watcher test commits own-write metadata before debounce; production puller integration remains in P1.5.3.
+- [x] **P1.4.3 Rescan scheduler** (`PeerSync.Engine/Scanning/RescanScheduler.cs`) (#13, #20)
   - Done when: each folder rescans at start-up and every `RescanIntervalSeconds` (default 600), at most one folder hashes at a time per disk, and hashing runs at low I/O priority.
   - Local evidence: [watcher/scheduler verification](docs/verification/P1.4.2-3-watcher-scheduler-2026-10-19.md). The initial budget serializes folder scans process-wide, including across partitions and unknown mappings.
 
@@ -1331,9 +1332,9 @@ Our own writes need no special suppression: the puller records the new state in 
 
 ### P1.5 Sync logic
 
-- [ ] **P1.5.1 Needed-set computation** (`PeerSync.Engine/Sync/NeededSet.cs`) [WIP @Codex 2026-10-19]
+- [x] **P1.5.1 Needed-set computation** (`PeerSync.Engine/Sync/NeededSet.cs`) (#14, #20)
   - Done when: for each path, the winning version among local and all remote records is computed with 7.10. `needed` contains exactly the paths where the winner isn't the local version. Incremental updates on each `IndexUpdate` are covered by tests.
-  - Local foundation: verified candidate selection, atomic remote/cursor/needed updates, replay/cancellation and RO-policy tests are implemented. See [verification](docs/verification/P1.5.1-2-needed-conflicts-2026-10-19.md); billing is resolved, required integration CI and merge remain pending.
+  - Verified candidate selection, atomic remote/cursor/needed updates, replay/cancellation and RO-policy tests are merged. See [verification](docs/verification/P1.5.1-2-needed-conflicts-2026-10-19.md) and [green CI/merge audit](docs/verification/P1-foundations-ci-merge-2026-10-19.md), including RO causal-selection and unknown-field repairs.
 - [ ] **P1.5.2 Conflict resolution: latest version wins** (`PeerSync.Engine/Sync/ConflictResolver.cs`) [WIP @Codex 2026-10-19]
   - Done when: every row of the design doc's conflict table has a test, and every peer picks the same winner (live `mtime_ticks`, deletion `changed_ticks`, tie broken by the higher DeviceId).
     - A loser above `ArchiveMaxFileBytes`, or with "Keep both copies" on, becomes `name.sync-conflict-YYYYMMDD-HHMMSS-XXXX.ext`.
@@ -1345,9 +1346,9 @@ Our own writes need no special suppression: the puller records the new state in 
   - Safe mutation foundation: [root-relative handle and no-overwrite move checks](docs/verification/P1.5.3-4-safe-mutations-2026-10-19.md). Puller, durable apply/recovery, archive accounting and pruning remain unimplemented.
   - [Verified chunk assembly](docs/verification/P1.5.3-chunk-assembly-2026-10-19.md) reuses verified temporary/local chunks before network fallback, checks each chunk and the independent whole-file hash, and records safe diagnostic progress. It does not install a target or publish index metadata.
   - [Handle-based metadata preparation](docs/verification/P1.5.3-file-metadata-2026-10-19.md) preserves DACL/protection and creation time, validates representable mtimes and handles read-only archive moves. Coordinator/recovery and retries remain pending.
-  - [ ] **P1.5.3a Durable apply intent and index completion** (`PeerSync.Storage/FolderDb/ApplyJournal.cs`) [WIP @Codex 2026-10-19]
+  - [x] **P1.5.3a Durable apply intent and index completion** (`PeerSync.Storage/FolderDb/ApplyJournal.cs`) (#18)
     - Done when: migration 4 creates bounded per-path intents through the existing backup path; intent lifecycle and completion use FULL-synchronous serialized transactions. Completion atomically commits local/chunk/sequence/archive/needed state and removes the intent. Failure, cancellation and local-sequence races preserve recoverable intent; regression tests cover reopening and rollback.
-    - Local implementation and [verification](docs/verification/P1.5.3a-apply-journal-2026-10-19.md) are ready: 36 Storage cases, atomic rollback/reopening/race checks and a 5.75 s million-row indexing regression. Required CI and merge are pending; filesystem recovery/coordinator remain part of P1.5.3.
+    - Merged with [green CI/merge audit](docs/verification/P1-foundations-ci-merge-2026-10-19.md): 36 Storage cases at #18, atomic rollback/reopening/race checks and a 5.75 s million-row indexing regression. See [verification](docs/verification/P1.5.3a-apply-journal-2026-10-19.md). Filesystem recovery/coordinator remain part of P1.5.3.
   - [ ] **P1.5.3b Recoverable archival, atomic final installation and startup recovery** (`PeerSync.Engine/Sync/FileApplier.cs`) [WIP @Codex 2026-10-19]
     - Done when: verified assembly and metadata preparation feed a guarded old-handle move followed by atomic no-overwrite final installation, with durable root/file-bound recovery intent and safe restart recovery before scanning. The pair permits the user-approved brief missing-target interval visible to external apps. Unknown concurrent files are preserved; cancellation/failure and each mutation boundary have integration coverage. Parent scheduling/directory/conflict requirements remain mandatory.
     - [Shared folder gate and capability checks](docs/verification/P1.5.3b-folder-gate-2026-10-19.md) pass locally. Guarded POSIX replacement is unsupported on this local machine. The user approved [recoverable handle moves](docs/proposals/P1-atomic-replacement-recovery.md) on 2026-10-19; the coordinator is in progress.
