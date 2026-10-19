@@ -709,6 +709,12 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    freeing bounded journal capacity. Confirmed absence can retire metadata only;
    a foreign replacement is preserved. Protected/legacy objects never gain
    deletion permission through enumeration or filename matching.
+   Cold recovery revokes any unfinished staging deletion permissions before
+   application recovery/scanning; it does not delete using a possibly stale
+   needed set. A fresh successful scan/recompute precedes expiry. Missing rows
+   are reconciled afterward. Cursor pages include all parked rows and advance
+   across ineligible entries; completed cycles wait an hour, full pages continue
+   immediately and transient deferrals retry with the coordinator's backoff.
    Local index entries are hints: reject reparse traversal, verify the actual
    bytes and try at most 64 candidates per chunk before network fallback.
    Copy transport data into an owned, bounded chunk buffer before hashing it.
