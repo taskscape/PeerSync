@@ -667,6 +667,15 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    converge the signed deletion without attempting to create/traverse a parent
    file. Test this through connected production folder engines, including
    retained old child bytes and restart/concurrent parent changes.
+   Probe absence using the pinned root and no-reparse component handles. Only
+   missing components or ordinary-file ancestors establish absence; access,
+   sharing and reparse errors remain failures. Complete such tombstones through
+   the existing FULL intent/completion path without native deletion, holding
+   component guards and the range barrier. Re-probe on recovery and preserve a
+   concurrently created descendant using the ordinary changed-target path.
+   Request a fresh scan after metadata-only completion; it observes concurrent
+   creation without removing that new data. Retained originals still require
+   their existing identity/hash/accounting checks.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
 3. For each file, assemble it in an exclusively created hidden `GUID.!psp`
    sibling next to the target, from local chunks first, then network chunks.
