@@ -212,6 +212,13 @@ One SQLite file per folder at `%ProgramData%\PeerSync\state\folders\<FolderId>.d
 | `meta` | Schema version, folder settings, local sequence counter |
 
 Version vectors use an 8-byte short device id (the first 8 bytes of DeviceId) to keep records small.
+Missing counters are zero; canonical vectors omit zero entries. Incrementing
+an exhausted 64-bit counter fails instead of wrapping. The Core compact
+storage encoding is an unsigned LEB128 entry count followed by ascending
+unsigned device IDs (fixed 8-byte little endian) and unsigned LEB128 counters.
+Readers reject zero counters, duplicate/unsorted IDs, nonminimal/overflowing
+varints, truncation and trailing bytes. Protobuf records use the equivalent
+sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
 
 ### Detecting local changes
 

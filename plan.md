@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.1.2: canonical version vectors omit zero counters and reject increment overflow. Compact storage is count + sorted fixed64 little-endian device IDs + unsigned LEB128 counters, rejecting noncanonical and malformed encodings. Protobuf remains the record wire representation. | Sync engine design: metadata and version vectors |
 | 2026-10-19 | P1.1.1: use CRC-10/ATM for the two-character key checksum, preserving lengths and normalization, so every single Base32-symbol typo is detected. The draft's ten SHA bits admitted a reproduced single-symbol collision. HKDF/signing/security domains are unchanged; independent OpenSSL vectors and exhaustive typo tests cover the correction before any folder keys ship. | Protocol: Keys and identifiers |
 | 2026-10-19 | User approved deferring only P0.2.1's physical LAN measurement to Gate P2 and P0.2.2's native NAT matrix/final decision to Gate P4. Keep both tasks unchecked, preserve all acceptance requirements, and permit Gate P0 after its other checks pass. Use direct QUIC/TCP plus relay after 5 s as the implementation baseline; no coordinated-punch success is claimed. | Phased roadmap; NAT traversal |
 | 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
@@ -760,6 +761,10 @@ public sealed class FolderKeys
 Key text: prefix letter (`A` RW, `B` RO, `F` encrypted), then RFC 4648 Base32 without padding, then a 2-character CRC-10/ATM checksum over canonical uppercase ASCII prefix followed by raw payload (poly 0x233, init/xorout 0, no reflection; high five bits then low five bits). Reject nonzero unused padding bits. Decode ASCII letters case-insensitively and ignore whitespace/dashes so keys survive copy-paste. This corrects the draft's truncated-SHA checksum, which could not guarantee P1.1.1's single-character typo rejection.
 
 ### 7.2 Code: version vector (P1.1.2)
+
+Superseded by `src/PeerSync.Core/Sync/VersionVector.cs`, which additionally
+normalizes zero entries, checks increment overflow, and implements strict,
+canonical compact serialization (count + sorted fixed64-LE/ULEB128 entries).
 
 ```csharp
 // src/PeerSync.Core/Sync/VersionVector.cs
