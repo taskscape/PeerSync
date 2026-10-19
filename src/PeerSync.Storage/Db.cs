@@ -66,6 +66,7 @@ public sealed class Db : IAsyncDisposable
         }
     }
 
+    /// <summary>Materialize results within the callback; Db owns the connection/transaction and commits it.</summary>
     public async Task<T> WriteAsync<T>(Func<SqliteConnection, SqliteTransaction, T> operation,
         CancellationToken cancellationToken = default)
     {
@@ -80,7 +81,10 @@ public sealed class Db : IAsyncDisposable
     public SqliteConnection OpenReader()
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
-        return OpenConnection(readerConnectionString, writer: false);
+        var connection = OpenConnection(readerConnectionString, writer: false);
+        if (Volatile.Read(ref disposed) == 0) return connection;
+        connection.Dispose();
+        throw new ObjectDisposedException(nameof(Db));
     }
 
     public ValueTask DisposeAsync()
@@ -96,11 +100,15 @@ public sealed class Db : IAsyncDisposable
         finally
         {
             // Clear only this database's two pools, never unrelated databases.
-            using var writer = new SqliteConnection(writerConnectionString);
-            using var reader = new SqliteConnection(readerConnectionString);
-            SqliteConnection.ClearPool(writer);
-            SqliteConnection.ClearPool(reader);
-            Owners.TryRemove(Path, out _);
+            try
+            {
+                using var writer = new SqliteConnection(writerConnectionString);
+                using var reader = new SqliteConnection(readerConnectionString);
+                SqliteConnection.ClearPool(writer);
+                SqliteConnection.ClearPool(reader);
+                _ = ready.Task.Exception; // Observe a startup fault even if its caller cancelled waiting.
+            }
+            finally { Owners.TryRemove(Path, out _); }
         }
     }
 
