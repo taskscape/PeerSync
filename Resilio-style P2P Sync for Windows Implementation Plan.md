@@ -677,6 +677,15 @@ complete-but-unpublished drafts block fresh sweeping until publication or safe
 expiry; one row per parent and bounded 24-hour retirement limit abandoned state.
 See docs/proposals/P1-directory-capture-continuation.md. Scanner publication
 must validate the native binding and atomically release the draft with its row.
+For scanner integration retain the previous signed directory row and stage
+metadata privately until exact child publications and a replacement root are
+ready. Use indexed parent keys, UTF-16BE ordinal sort keys and row/byte-bounded
+child batches. Advance trusted local-index drafts between full scans with a
+local-index change witness; revalidate changed inputs without discarding an
+identical manifest. Keep arbitrary enumerable capture on its two-pass path.
+Pending-publication dependencies/barriers and bounded coordinator continuation
+are detailed in docs/proposals/P1-directory-scanner-publication.md; they must
+prevent mtime/vector feedback and pass convergence before activation.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
