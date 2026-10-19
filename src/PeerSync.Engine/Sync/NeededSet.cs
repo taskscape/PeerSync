@@ -14,8 +14,9 @@ public sealed record NeededDecision(VersionView? Winner, Envelope? DesiredRecord
     IReadOnlyDictionary<ulong, ulong> Vector, bool RequiresApply, bool RequiresContent,
     LoserFate LocalLoserFate, string? BlockedReason = null);
 
-/// <summary>Verified, incremental selection. The caller serializes filesystem apply/scans;
-/// index receive and affected needed rows are committed by the database writer atomically.</summary>
+/// <summary>Verified incremental selection, serialized with reference
+/// maintenance but available during downloads. Dispatch block responses independently of a waiting index handler.
+/// Index receive and affected needed rows commit atomically in the DB writer.</summary>
 public sealed class NeededSet
 {
     private readonly FolderIndex index;
@@ -43,10 +44,12 @@ public sealed class NeededSet
         ArgumentNullException.ThrowIfNull(sourceDevice);
         sourceDevice = sourceDevice.ToArray();
         if (records.Count > 1000) throw new ArgumentException("Remote index batch exceeds 1000 records.", nameof(records));
+        records = records.ToArray();
         Guid session = Guid.NewGuid();
         var stopwatch = Stopwatch.StartNew();
         try
         {
+            using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
             var rows = new List<RemoteFileRow>(records.Count);
             foreach (var record in records)
             {
@@ -67,14 +70,19 @@ public sealed class NeededSet
         }
     }
 
-    public Task<int> RecomputeAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
-        index.RecomputeNeededAsync(paths, ToNeededRow, cancellationToken);
-
-    public Task<int> RebuildAsync(CancellationToken cancellationToken = default)
+    public async Task<int> RecomputeAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(paths); string[] requested = paths.ToArray();
+        using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
+        return await index.RecomputeNeededAsync(requested, ToNeededRow, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<int> RebuildAsync(CancellationToken cancellationToken = default)
+    {
+        using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         var paths = index.LocalFiles.ReadAll().Select(r => r.Path).Where(PathRules.IsValid)
             .Concat(index.RemoteFiles.ReadAll().Select(r => r.PathKey)).Concat(index.Needed.ReadAll().Select(r => r.PathKey));
-        return RecomputeAsync(paths, cancellationToken);
+        return await index.RecomputeNeededAsync(paths, ToNeededRow, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Use a current transaction snapshot when making a decision that will be committed.</summary>

@@ -124,6 +124,7 @@ public sealed partial class FileApplier
     {
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); int recovered = 0;
+        await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -289,7 +290,8 @@ public sealed partial class FileApplier
         if (!version.Deleted && version.Type == 0)
         {
             using var blocks = new PublishedBlocks(tree);
-            blocks.CaptureFile(installed!, version, token);
+            try { blocks.CaptureFile(installed!, version, token); }
+            finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
         }
         FileSnapshot? actual = installed is null ? null : FileSnapshot.Read(installed);
         var chunks = new List<LocalChunk>(); long offset = 0;
@@ -297,7 +299,8 @@ public sealed partial class FileApplier
         var row = new LocalFileRow(version.Path, version.Type, version.Size, version.MtimeTicks,
             actual is null ? body.Attributes : (uint)actual.Value.Attributes, version.Deleted, version.ChangedTicks,
             version.Deleted || version.Type == 1 ? null : version.FileHash.ToArray(), state.Vector, version.Record,
-            actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks, ContentReady = !version.Deleted && version.Type == 0 };
+            actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks, ContentReady = !version.Deleted && version.Type == 0,
+                ChangeFileTime = actual?.Changed };
         Signal("before-commit", intent.Id);
         if (state.OriginalIsDirectory && state.Retained.Length != 0)
             await index.CommitMovedDirectoryApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);

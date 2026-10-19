@@ -275,6 +275,15 @@ sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
   how that hint is honored. A rejected hint is reported as a deferred read.
 - **Hashing:** a changed file is streamed once through FastCDC and BLAKE3, on a bounded worker pool (default: cores − 1, low I/O priority). Each pass is bounded to the original length. Compare open-handle size, last-write/change timestamps, attributes and volume/file identity before and after reading, then reopen the path to check it still names that file. Detected edits, growth/truncation, removal or replacement return "retry later". This is metadata-based change detection, not an atomic filesystem snapshot; ordinary writer sharing remains allowed. Progress reports contain only byte/chunk counts. Reparse points are not hashed.
 - **New record:** increment this device's counter in the version vector, bump the local sequence, sign (RW folders only), then push `IndexUpdate` to connected peers.
+- **Unchanged-file cache:** persist the native change timestamp alongside size,
+  last-write time, attributes and file identity for regular files. A missing or
+  changed stamp requires hashing, including after upgrade/restart, so ordinary
+  same-length writes which restore last-write time are detected. A cache-only
+  refresh with the same authenticated bytes/synchronized metadata preserves the
+  signed body/vector and original chunk partition. Incoming application records
+  its final native stamp. Directory child changes do not create directory
+  versions. Renames must verify the whole file under a read guard before reusing
+  a previous signed partition; identity/mtime alone do not prove unchanged bytes.
 - **Published content:** before publishing a live file, retain every verified chunk as independent bytes in a root-bound `.psp/blocks/<prefix>/<BLAKE3>` store. Copy during the hashing pass, flush before no-overwrite installation, verify existing entries, and never hardlink mutable user data. File metadata alone is not a stable source for an already advertised version. A durable per-row readiness bit withholds legacy/missing-capture live records until capture; metadata-only upgrades keep signed edit counters/bodies unchanged. Incoming verified files populate the same store before publication. Block serving/reuse verifies length/hash under no-write/no-delete-sharing read guards. Failures defer publication, without logging names or hashes. Old observed versions must subsequently be materialized into the archive/conflict policy before their final references are released; reference-aware orphan retention/cleanup is mandatory before P1's no-lost-version gate. Unobserved writes between scans are not snapshots.
 - **Local supersession:** before committing a content-changing edit, deletion or file-to-directory change, reconstruct the prior authenticated live-file snapshot from independent blocks. Apply the same archive/oversize/keep-both policy. A bounded kind-4 intent binds the root, source record, expected local sequence, staging identity and no-overwrite destination. FULL-durable completion accounts for the retained version and an exact-source marker without changing the user's current file. Interrupted work recovers before scanning; a completed marker prevents duplicate histories when the later scan commit fails. Keep the authenticated manifest with its retained location for reference-aware block retention and recovery. RW conflict copies enter ordinary scanning; RO copies remain local. Missing/unverified historical bytes fail visibly rather than inventing an archive or discarding the old record. Metadata-only changes with unchanged bytes need no duplicate content archive.
   Reuse an already indexed, verified archive for the exact source path/size/hash,
@@ -283,6 +292,50 @@ sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
   Bind the reused location in a FULL-durable source marker without changing its
   metadata. Index archive lookups by original path/hash/size. Changed or
   unverified destinations remain protected; reconstruct another independent copy.
+
+Published block ownership is persistent. Before writing a new staging blob,
+flush a bounded local capture proof binding the root, proof/data file identities,
+expected hash/length, capture time and canonical GUID. A checksum detects torn
+proofs; it is local recovery metadata, not network authorization. After installing
+and verifying a blob, FULL-durable catalog registration precedes any live-file
+readiness/publication. Recovery can finish complete owned staging, reconcile
+installed captures after a crash, and preserve unknown, changed or invalid
+objects. Valid proof cleanup follows catalog durability. Existing verified bytes
+matching a caller-owned capture can be registered without rewriting them.
+The subsequent reference sweep must protect current/needed/history data and wait
+for pending application work; orphan expiry must not infer ownership from a
+filename alone. All reference-changing engine entry points must serialize with
+the folder sweep, and cleanup must verify root/file identity, length/hash and
+independent-file state under native guards before deleting known objects.
+Before policy pruning an indexed archive, FULL-durably record its exact archive
+row, bound root/file identity, hash/length and expiry/cap reason under the verified
+file guard. After native deletion is proven complete, atomically remove the
+unchanged row and complete that retirement witness. On restart, finish only a
+matching verified object or an already absent prepared target; preserve changed,
+replaced, linked, locked and reparse objects. Unexpected missing archives without
+such a witness may reconcile their rows, but do not authorize releasing history
+references. Reference retention consumes completed witnesses or the explicit age
+policy, never absence alone. Pending application still blocks policy maintenance.
+Build persistent block-reference snapshots under the filesystem folder gate and
+a separate per-index reference/index-mutation gate. Acquire the filesystem gate
+first, then the index gate; index receive/recompute takes only the latter and
+never waits for filesystem work. Application can therefore receive newer index
+information during a download, while reference maintenance excludes both kinds
+of mutation. Include all local chunk hints
+and authenticated local live-file manifests (including withheld rows), every
+candidate at a needed path, and authenticated root-bound history manifests.
+Stage bounded batches in a separate snapshot and activate it with a FULL
+transaction only after validation finishes; failure/cancellation keeps the
+previous active snapshot. Never use an incomplete or stale snapshot to authorize
+deletion. Unmanifested retained archives prevent sweeping until their content
+references are captured, and policy retirement/reference release remains a
+separate required step. Future transport dispatch must handle block responses
+independently of a waiting serialized index handler.
+Snapshot coverage alone is not deletion authorization. Archive creation and
+missing-row reconciliation must retain provenance before removing their last
+metadata, and upgrades must protect older cataloged objects whose historical
+references cannot be reconstructed. The sweep must establish that protection,
+refresh references under both gates, and hold them through verified deletion.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
@@ -788,6 +841,19 @@ The engine's correctness matters more than its speed: every phase gate includes 
 P0.2.4 local measurement (2026-10-18): a sequential 10 GiB file pass performing FastCDC plus both chunk and whole-file BLAKE3 reached 1.051 decimal GB/s with `Blake3.Native` 3.0.2, versus 0.887 GB/s with managed `Blake3`, on the recorded Ryzen 7600X / Crucial NVMe workstation after reducing buffer copies. Hashes matched across both implementations. This is a warm-cache, repeated-4-MiB-block corpus; it does not establish cold-disk, other hardware or LAN throughput. The 1 GB/s target is retained; see `docs/spikes/P0.2.4-chunking-hashing.md`.
 
 **CI:** GitHub Actions on `windows-latest` builds, runs unit and loopback integration tests, a 10-minute fuzz smoke test, and builds the signed x64 and Arm64 installers with ISCC on every main-branch commit.
+
+Run the complete required workflow on pull-request updates, pushes to `main`
+and explicit manual dispatch. Do not also run it for feature-branch pushes:
+the same update otherwise starts independent push and PR matrices, and
+per-ref concurrency cannot cancel that duplication. Keep every required job,
+the full fuzz duration, publishing and evidence. Combine related local work
+before submitting a new head, and inspect the causal failure before retrying.
+P0 diagnostic bundles use self-contained JIT publication for both architectures.
+Do not spend each CI job compiling six temporary probes into ReadyToRun images:
+those bundles exercise protocol/diagnostic behavior, and can use the included
+.NET runtime on a test PC without installing the SDK. Keep locked restore,
+all probe outputs, signatures and native runtime checks. Production service,
+app and CLI installer packaging retains its ReadyToRun requirement below.
 
 ## Packaging and deployment
 

@@ -43,6 +43,11 @@ internal sealed class NativeRoot : IDisposable
     {
         using var directory = relativeDirectory.Length == 0 ? null : Open(relativeDirectory, directory: true);
         SafeFileHandle handle = directory ?? root;
+        foreach (var entry in EnumerateHandle(handle, cancellationToken)) yield return entry;
+    }
+
+    internal static IEnumerable<NativeEntry> EnumerateHandle(SafeFileHandle handle, CancellationToken cancellationToken)
+    {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(65536);
         try
         {

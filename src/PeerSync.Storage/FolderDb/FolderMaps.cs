@@ -8,7 +8,7 @@ namespace PeerSync.Storage.FolderDb;
 internal static class FolderMaps
 {
     private const SqliteType Text = SqliteType.Text, Integer = SqliteType.Integer, Blob = SqliteType.Blob;
-    public const string LocalColumns = "path_key,path,type,size,mtime_ticks,attributes,deleted,changed_ticks,file_hash,vv,record_body,signature,ntfs_file_id,local_seq,flags,content_ready";
+    public const string LocalColumns = "path_key,path,type,size,mtime_ticks,attributes,deleted,changed_ticks,file_hash,vv,record_body,signature,ntfs_file_id,local_seq,flags,content_ready,change_filetime";
     public static RowMap<LocalFileRow> Local { get; } = new("local_files", ["path_key"],
     [
         new("path_key", Text, r => r.Path.ToUpperInvariant()), new("path", Text, r => r.Path),
@@ -20,6 +20,7 @@ internal static class FolderMaps
         new("ntfs_file_id", Blob, r => r.FileId), new("local_seq", Integer, r => r.LocalSequence),
         new("flags", Integer, r => (int)r.Flags),
         new("content_ready", Integer, r => r.ContentReady ? 1 : 0),
+        new("change_filetime", Integer, r => r.ChangeFileTime),
     ], ReadLocal, ValidateLocal, (c, t) => new LocalBatch(c, t));
 
     public static RowMap<RemoteFileRow> Remote { get; } = new("remote_files", ["device_id", "path_key"],
@@ -71,7 +72,7 @@ internal static class FolderMaps
         return new(reader.GetString(1), reader.GetFieldValue<uint>(2), reader.GetInt64(3), reader.GetInt64(4),
             reader.GetFieldValue<uint>(5), reader.GetBoolean(6), reader.GetInt64(7), OptionalBytes(reader, 8),
             VersionVector.Deserialize(reader.GetFieldValue<byte[]>(9)), body is null ? null : new(body, signature!, checked((ulong)sequence)),
-            OptionalBytes(reader, 12), sequence, (LocalFileState)reader.GetInt32(14)) { ContentReady = reader.GetBoolean(15) };
+            OptionalBytes(reader, 12), sequence, (LocalFileState)reader.GetInt32(14)) { ContentReady = reader.GetBoolean(15), ChangeFileTime = reader.IsDBNull(16) ? null : reader.GetInt64(16) };
     }
 
     public static void RequireBytes(byte[] value, int length)
@@ -98,6 +99,7 @@ internal static class FolderMaps
         if (row.Type > 2 || ((int)row.Flags & ~7) != 0) throw new ArgumentException("Invalid file type/state.");
         ArgumentOutOfRangeException.ThrowIfNegative(row.Size);
         RequireTicks(row.MtimeTicks); RequireTicks(row.ChangedTicks);
+        if (row.ChangeFileTime is < 0) throw new ArgumentOutOfRangeException(nameof(row));
         ArgumentNullException.ThrowIfNull(row.Vector);
         if (row.FileHash is not null) RequireBytes(row.FileHash, 32);
         if (row.FileId is not null) RequireBytes(row.FileId, 16);

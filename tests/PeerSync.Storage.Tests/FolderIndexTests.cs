@@ -17,6 +17,21 @@ public sealed class FolderIndexTests : IDisposable
     public FolderIndexTests() => Directory.CreateDirectory(root);
 
     [Fact]
+    public async Task NativeChangeCacheRoundTripsAndCompareAndSwapNeverChangesPublicationMetadata()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        await index.LocalFiles.UpsertAsync([Row("file") with { FileId = new byte[16], ChangeFileTime = 1 }], TestContext.Current.CancellationToken);
+        var before = index.LocalFiles.Find("file")!; before.ChangeFileTime.ShouldBe(1);
+        (await index.UpdateNativeChangeTimesAsync([new("file", before.LocalSequence + 1, new byte[16], 2)], TestContext.Current.CancellationToken)).ShouldBe(0);
+        (await index.UpdateNativeChangeTimesAsync([new("file", before.LocalSequence, Enumerable.Repeat((byte)1, 16).ToArray(), 2)], TestContext.Current.CancellationToken)).ShouldBe(0);
+        (await index.UpdateNativeChangeTimesAsync([new("file", before.LocalSequence, new byte[16], 2)], TestContext.Current.CancellationToken)).ShouldBe(1);
+        var after = index.LocalFiles.Find("file")!; after.ChangeFileTime.ShouldBe(2); after.LocalSequence.ShouldBe(before.LocalSequence);
+        after.Record!.Body.ToArray().ShouldBe(before.Record!.Body.ToArray()); after.Vector.ShouldBe(before.Vector);
+        await Should.ThrowAsync<ArgumentException>(() => index.UpdateNativeChangeTimesAsync([new("file", 1, new byte[16], -1)], TestContext.Current.CancellationToken));
+        index.LocalFiles.Find("file")!.ChangeFileTime.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task LocalRowsRoundTripExactEnvelopesVectorsAndUnicodeKeysWithAllocatedSequences()
     {
         await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
@@ -60,11 +75,15 @@ public sealed class FolderIndexTests : IDisposable
         Directory.GetFiles(root, "*.pre-v3-to-v4-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v4-to-v5-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v5-to-v6-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v6-to-v7-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v7-to-v8-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v8-to-v9-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v9-to-v10-*.bak").Length.ShouldBe(1);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        ((long)command.ExecuteScalar()!).ShouldBe(6);
+        ((long)command.ExecuteScalar()!).ShouldBe(10);
         command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
         command.Parameters.AddWithValue("$path", "FILE");
         var details = new List<string>();

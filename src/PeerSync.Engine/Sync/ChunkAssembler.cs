@@ -29,9 +29,9 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         Guid session = Guid.NewGuid(); var stopwatch = Stopwatch.StartNew();
         long offset = 0, temporaryBytes = 0, localBytes = 0, remoteBytes = 0;
         int verified = 0;
+        using var blocks = new PublishedBlocks(tree);
         try
         {
-            using var blocks = new PublishedBlocks(tree);
             using var whole = Blake3.Hasher.New();
             journal?.TryWrite(new("assembly.started", "assembly") { SessionId = session, Bytes = version.Size, ItemsVisited = body.Chunks.Count });
             foreach (var chunk in body.Chunks)
@@ -92,7 +92,11 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }
-        finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
+        finally
+        {
+            try { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
+            finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
+        }
     }
 
     private bool TryLocal(byte[] hash, Memory<byte> bytes, CancellationToken cancellationToken)

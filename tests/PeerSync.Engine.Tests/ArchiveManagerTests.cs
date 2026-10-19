@@ -72,6 +72,8 @@ public sealed class ArchiveManagerTests : IDisposable
         result.Removed.ShouldBe(2); result.IndexedBytesRemaining.ShouldBe(Content.Length);
         File.Exists(Disk(oldest.ArchivePath)).ShouldBeFalse(); File.Exists(Disk(second.ArchivePath)).ShouldBeFalse();
         File.ReadAllBytes(Disk(newest.ArchivePath)).ShouldBe(Content);
+        index.ReadArchiveRetirements().Count().ShouldBe(2);
+        index.ReadArchiveRetirements().All(r => r.Reason == ArchiveRetirementReason.Capacity && r.CompletedTicks is not null).ShouldBeTrue();
     }
 
     [Fact]
@@ -92,6 +94,7 @@ public sealed class ArchiveManagerTests : IDisposable
     public async Task ReplacedRootIsRejectedBeforePruningAnyOldOrNewRootFiles()
     {
         await using var index = await PrepareAsync(); var row = await AddAsync(index, "original", 31);
+        await PrepareRetirementAsync(index);
         string previous = Path.Combine(fixture, "previous"); Directory.Move(Root, previous); Directory.CreateDirectory(Root);
         string replacement = Disk(row.ArchivePath); Directory.CreateDirectory(Path.GetDirectoryName(replacement)!); File.WriteAllBytes(replacement, Content);
         await Should.ThrowAsync<IOException>(() => Manager(index).PruneAsync(cancellationToken: Token));
@@ -108,6 +111,132 @@ public sealed class ArchiveManagerTests : IDisposable
         var manager = new ArchiveManager(Root, index, clock: clock) { CapacityOverride = () => (ulong)Content.Length * 10 };
         var result = await manager.PruneAsync(cancellationToken: Token);
         result.Missing.ShouldBe(1); result.Removed.ShouldBe(0); File.ReadAllBytes(Disk(retained.ArchivePath)).ShouldBe(Content);
+        index.ReadArchiveRetirements().ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("retirement-prepared")]
+    [InlineData("before-delete")]
+    [InlineData("data-deleted")]
+    [InlineData("before-retirement-commit")]
+    [InlineData("retirement-committed")]
+    public async Task PolicyWitnessRecoversAtEveryDurableBoundaryAfterDatabaseReopening(string boundary)
+    {
+        ArchiveRow row;
+        await using (var index = await PrepareAsync())
+        {
+            row = await AddAsync(index, "interrupted-policy", 31);
+            var manager = new ArchiveManager(Root, index, clock: clock) { CapacityOverride = () => ulong.MaxValue,
+                Checkpoint = stage => { if (stage == boundary) throw new InvalidOperationException("process boundary"); } };
+            await Should.ThrowAsync<InvalidOperationException>(() => manager.PruneAsync(cancellationToken: Token));
+            index.ReadArchiveRetirements().Single().Reason.ShouldBe(ArchiveRetirementReason.Age);
+        }
+        await using var reopened = await FolderIndex.OpenAsync(Database, Token); await Manager(reopened).PruneAsync(cancellationToken: Token);
+        File.Exists(Disk(row.ArchivePath)).ShouldBeFalse(); reopened.Archive.Count().ShouldBe(0);
+        reopened.ReadArchiveRetirements().Single().CompletedTicks.ShouldNotBeNull();
+        (await Manager(reopened).PruneAsync(force: true, cancellationToken: Token)).Removed.ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChangedOrReplacedPreparedArchivesCannotBeDeletedEvenWhenReplacementHashMatches(bool replace)
+    {
+        await using var index = await PrepareAsync(); var row = await AddAsync(index, "changed-policy", 31);
+        await PrepareRetirementAsync(index); string path = Disk(row.ArchivePath);
+        if (replace) { File.Move(path, path + ".unknown"); File.WriteAllBytes(path, Content); }
+        else using (var edit = new FileStream(path, FileMode.Open, FileAccess.Write)) edit.WriteByte(0);
+        byte[] expected = File.ReadAllBytes(path); var result = await Manager(index).PruneAsync(cancellationToken: Token);
+        result.Deferred.ShouldBe(1); File.ReadAllBytes(path).ShouldBe(expected); index.Archive.Count().ShouldBe(1);
+        index.ReadArchiveRetirements().Single().CompletedTicks.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LinkedArchivesArePreservedBeforeAndAfterPolicyPreparation(bool prepared)
+    {
+        await using var index = await PrepareAsync(); var row = await AddAsync(index, "linked-policy", 31);
+        if (prepared) await PrepareRetirementAsync(index);
+        using (var tree = new SafeFileTree(Root))
+        using (var parent = tree.Directory(".psp/archive", privatePath: true))
+        using (var root = tree.Directory(""))
+        using (var file = parent.OpenFile(Path.GetFileName(row.ArchivePath), mutation: true)) root.LinkHere(file, "unknown-link");
+        (await Manager(index).PruneAsync(cancellationToken: Token)).Deferred.ShouldBe(1);
+        File.ReadAllBytes(Disk("unknown-link")).ShouldBe(Content); File.ReadAllBytes(Disk(row.ArchivePath)).ShouldBe(Content);
+        File.Delete(Disk("unknown-link")); (await Manager(index).PruneAsync(cancellationToken: Token)).Removed.ShouldBe(1);
+        index.ReadArchiveRetirements().Single().CompletedTicks.ShouldNotBeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedPolicyPreparationOrCompletionCannotLoseItsRecoveryEvidence(bool completion)
+    {
+        await using var index = await PrepareAsync(); var row = await AddAsync(index, "database-policy", 31);
+        PolicySql(completion
+            ? "CREATE TRIGGER reject_policy BEFORE UPDATE ON archive_retirements BEGIN SELECT RAISE(ABORT,'test completion failure'); END;"
+            : "CREATE TRIGGER reject_policy BEFORE INSERT ON archive_retirements BEGIN SELECT RAISE(ABORT,'test preparation failure'); END;");
+        await Should.ThrowAsync<SqliteException>(() => Manager(index).PruneAsync(cancellationToken: Token));
+        File.Exists(Disk(row.ArchivePath)).ShouldBe(!completion); index.Archive.Count().ShouldBe(1);
+        if (completion) index.ReadArchiveRetirements().Single().CompletedTicks.ShouldBeNull(); else index.ReadArchiveRetirements().ShouldBeEmpty();
+        PolicySql("DROP TRIGGER reject_policy;"); await Manager(index).PruneAsync(cancellationToken: Token);
+        index.Archive.Count().ShouldBe(0); index.ReadArchiveRetirements().Single().CompletedTicks.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task PreparedRetirementRecoversBeforeDailyScheduleAndCancellationPreservesTheGuardedFile()
+    {
+        await using var index = await PrepareAsync(); await Manager(index).PruneAsync(cancellationToken: Token);
+        var row = await AddAsync(index, "daily-policy", 31);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        var manager = new ArchiveManager(Root, index, clock: clock) { CapacityOverride = () => ulong.MaxValue,
+            Checkpoint = stage => { if (stage == "retirement-prepared") stop.Cancel(); } };
+        await Should.ThrowAsync<OperationCanceledException>(() => manager.PruneAsync(force: true, cancellationToken: stop.Token));
+        File.ReadAllBytes(Disk(row.ArchivePath)).ShouldBe(Content); index.ReadArchiveRetirements().Single().CompletedTicks.ShouldBeNull();
+        var result = await Manager(index).PruneAsync(cancellationToken: Token); result.Removed.ShouldBe(1); result.NotDue.ShouldBeTrue();
+        index.ReadArchiveRetirements().Single().CompletedTicks.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task PreparedPolicyReparseParentIsPreservedWithoutDeletingOutsideData()
+    {
+        await using var index = await PrepareAsync(); var row = await AddAsync(index, "reparse-policy", 31); await PrepareRetirementAsync(index);
+        string parent = Disk(".psp/archive"), outside = Path.Combine(fixture, "outside-policy"); Directory.Move(parent, outside);
+        Directory.CreateSymbolicLink(parent, outside); links.Add(parent);
+        (await Manager(index).PruneAsync(cancellationToken: Token)).Deferred.ShouldBe(1);
+        File.ReadAllBytes(Path.Combine(outside, Path.GetFileName(row.ArchivePath))).ShouldBe(Content);
+        index.ReadArchiveRetirements().Single().CompletedTicks.ShouldBeNull(); index.Archive.Count().ShouldBe(1);
+    }
+
+    private async Task PrepareRetirementAsync(FolderIndex index)
+    {
+        var manager = new ArchiveManager(Root, index, clock: clock) { CapacityOverride = () => ulong.MaxValue,
+            Checkpoint = stage => { if (stage == "retirement-prepared") throw new InvalidOperationException("process boundary"); } };
+        await Should.ThrowAsync<InvalidOperationException>(() => manager.PruneAsync(force: true, cancellationToken: Token));
+    }
+
+    [Fact]
+    public async Task RetirementLogsCorrelatePreparedAndRecoveredWitnessWithoutPrivateData()
+    {
+        await using var index = await PrepareAsync(); var row = await AddAsync(index, "private-policy-name", 31);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "policy-logs"), "policy", debugEnabled: true);
+        var first = new ArchiveManager(Root, index, clock: clock, journal: journal) { CapacityOverride = () => ulong.MaxValue,
+            Checkpoint = stage => { if (stage == "retirement-prepared") throw new InvalidOperationException("fault"); } };
+        await Should.ThrowAsync<InvalidOperationException>(() => first.PruneAsync(cancellationToken: Token));
+        Guid id = index.ReadArchiveRetirements().Single().Id;
+        var second = new ArchiveManager(Root, index, clock: clock, journal: journal) { CapacityOverride = () => ulong.MaxValue };
+        await second.PruneAsync(cancellationToken: Token);
+        string log = File.ReadAllText(Path.Combine(fixture, "policy-logs", "debug.jsonl"));
+        var lines = log.Split('\n').Where(l => l.Contains("archive.retirement_", StringComparison.Ordinal)).ToArray();
+        lines.Length.ShouldBe(2); lines.All(l => l.Contains(id.ToString(), StringComparison.Ordinal)).ShouldBeTrue();
+        log.ShouldNotContain("private-policy-name"); log.ShouldNotContain(Root); log.ShouldNotContain(Convert.ToHexString(row.FileHash!));
+        log.ShouldNotContain(Encoding.UTF8.GetString(Content));
+    }
+    private void PolicySql(string sql)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()); connection.Open();
+        using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 
     [Fact]

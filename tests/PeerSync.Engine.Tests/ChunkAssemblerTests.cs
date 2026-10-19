@@ -27,7 +27,7 @@ public sealed class ChunkAssemblerTests : IDisposable
     {
         byte[][] chunks = ["temporary chunk"u8.ToArray(), "local chunk"u8.ToArray(), "remote chunk"u8.ToArray()];
         var version = Version(chunks);
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         File.WriteAllBytes(Path.Combine(Root, "source"), [0, 0, 0, .. chunks[1]]);
         await index.Chunks.UpsertAsync([new(Hash(chunks[1]), "source", 3, chunks[1].Length)], Token);
         using var tree = new SafeFileTree(Root);
@@ -48,7 +48,7 @@ public sealed class ChunkAssemblerTests : IDisposable
     public async Task CorruptAndMissingIndexedCandidatesAreHintsAndAnIntactLaterCandidateAvoidsNetwork()
     {
         byte[] bytes = "a valid local chunk"u8.ToArray();
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         File.WriteAllBytes(Path.Combine(Root, "a-corrupt"), new byte[bytes.Length]);
         File.WriteAllBytes(Path.Combine(Root, "c-valid"), bytes);
         await index.Chunks.UpsertAsync([new(Hash(bytes), "a-corrupt", 0, bytes.Length),
@@ -67,7 +67,7 @@ public sealed class ChunkAssemblerTests : IDisposable
         string outside = Path.Combine(fixture, "outside"); Directory.CreateDirectory(outside);
         File.WriteAllBytes(Path.Combine(outside, "source"), bytes);
         Directory.CreateSymbolicLink(Path.Combine(Root, "link"), outside);
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         await index.Chunks.UpsertAsync([new(Hash(bytes), "link/source", 0, bytes.Length)], Token);
         using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
         temporary.Write(new byte[bytes.Length]);
@@ -86,7 +86,7 @@ public sealed class ChunkAssemblerTests : IDisposable
     public async Task RemoteLengthOrHashFailureCannotProduceASuccessfulAssembly(bool wrongLength)
     {
         byte[] bytes = "verified bytes"u8.ToArray();
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
         byte[] corrupt = new byte[bytes.Length + (wrongLength ? 1 : 0)];
         var error = await Record.ExceptionAsync(() => new ChunkAssembler(tree, index).AssembleAsync(Version([bytes]), temporary,
@@ -99,7 +99,7 @@ public sealed class ChunkAssemblerTests : IDisposable
     public async Task WholeFileHashIsIndependentAndDiagnosticsContainOnlyCountsAndCodes()
     {
         byte[] bytes = "secret filename and payload"u8.ToArray();
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
         using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "assembly", debugEnabled: true);
         var assembler = new ChunkAssembler(tree, index, journal);
@@ -119,7 +119,7 @@ public sealed class ChunkAssemblerTests : IDisposable
     public async Task CancellationAfterAnUncooperativeFetchStopsBeforeWritingTheChunk()
     {
         byte[] bytes = "cancelled chunk"u8.ToArray();
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
         await Should.ThrowAsync<OperationCanceledException>(() => new ChunkAssembler(tree, index).AssembleAsync(Version([bytes]), temporary,
@@ -130,11 +130,21 @@ public sealed class ChunkAssemblerTests : IDisposable
     [Fact]
     public async Task EmptyFileVerifiesItsHashAndDoesNotFetchOrRetainOldTemporaryData()
     {
-        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        await using var index = await OpenBoundIndexAsync();
         using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream(); temporary.WriteByte(42);
         var result = await new ChunkAssembler(tree, index).AssembleAsync(Version([]), temporary,
             (_, _, _) => throw new InvalidOperationException(), Token);
         result.ShouldBe(new(0, 0, 0, 0)); temporary.Length.ShouldBe(0);
+    }
+
+    private async Task<FolderIndex> OpenBoundIndexAsync()
+    {
+        var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "index.db"), Token);
+        try
+        {
+            using var tree = new SafeFileTree(Root); await index.Meta.UpsertAsync([new("_root-identity", tree.Identity.ToArray())], Token); return index;
+        }
+        catch { await index.DisposeAsync(); throw; }
     }
 
     private VersionView Version(byte[][] chunks, bool wrongWholeHash = false)
