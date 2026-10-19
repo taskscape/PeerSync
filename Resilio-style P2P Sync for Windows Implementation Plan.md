@@ -1394,6 +1394,11 @@ stdout/stderr/TRX and both exit results, bound waits, and terminate the owned
 test process on failure/cancellation. Keep all checks, 600-second fuzz and
 15-minute limits. This avoids exhausting the budget on serial setup/probes
 before native Engine tests start; do not blindly rerun timed-out old heads.
+Native probe clients must wait for actual server readiness rather than fixed
+startup sleeps. Bind a fresh readiness file to the server PID and retain strict
+connection/RPC deadlines and identity checks. A deliberately delayed real pipe
+server must reproduce the old race and pass the readiness-based path. Record
+bounded sanitized RPC/native causes so a later failure is diagnosable.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included
