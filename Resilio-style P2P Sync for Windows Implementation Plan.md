@@ -688,8 +688,8 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    Parked staging uses a FULL-durable catalog tied to the live apply intent,
    root/file identity, original target, GUID sibling name, first parked time,
    kind, native change stamp and exact file length/hash. Capture under the
-   existing exclusive handle or a verified reopened guard. Re-parking unchanged
-   bytes preserves age; newly written bytes get a new grace period. Resume only
+   existing exclusive handle or a verified reopened guard. Re-parking an unchanged
+   fingerprint preserves age; newly settled bytes/native changes get a new grace period. Resume only
    unchanged cataloged objects; changed/foreign objects are preserved. Legacy
    unaged pointers remain compatible for verified reuse but never authorize age
    cleanup until adopted under a verified apply/recovery context.
@@ -894,6 +894,11 @@ Resilio's power-user list is the reference. Every setting is changed live throug
 - **Low impact:** hashing runs at below-normal priority with low I/O priority hints. Battery saver can pause hashing as an option.
 
 ### Logging, metrics and upgrades
+
+Diagnostic probes may append to a PID-named log folder after Windows reuses a
+process ID. Verification must select the exact invocation using process lifetime,
+role and run ID; historical events must neither satisfy nor fail its assertions.
+Keep earlier logs for diagnosis and retain the existing timeout/progress checks.
 
 - **Logs:** Serilog rolling files, 7 days and 100 MB total (Resilio's defaults). Warnings and errors also go to the Windows Event Log. Keys and file contents are never logged.
 - **Metrics:** `System.Diagnostics.Metrics` counters (bytes up and down, peers, queue depth, hashing rate), streamed to the UI.
