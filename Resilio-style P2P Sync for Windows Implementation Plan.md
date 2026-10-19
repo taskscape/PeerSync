@@ -1013,6 +1013,41 @@ gRPC over the named pipe `\\.\pipe\PeerSync.Control`. The service hosts it with 
 
 The app shows a "Service not running" banner with a Start button (through an elevated helper) when the pipe is unreachable, and reconnects automatically.
 
+The clock-status slice implements GetStatus plus status-bearing WatchEvents
+before the remaining control operations. Frames carry a service-instance ID,
+monotonic sequence, explicit production-sync availability, folder/device/session
+identities, connection state, clock reason and optional signed offset ticks.
+Bound each response to 1,000 clock rows and 256 KiB, signal truncation, and bound
+concurrent event subscriptions. Slow consumers await transport backpressure;
+cancellation releases subscriptions. The source is the runtime's actual
+TransportFolder snapshots; an empty runtime must not invent peers or imply
+production sync is available.
+
+Only the server identity receives CreateNewInstance on the pipe; Administrators
+and the installed PeerSync Users group receive client read/write rights. Inspect
+the caller's identified Windows token for every RPC. The client verifies the
+pipe owner against the configured service account and the kernel-reported
+pipe-server PID against the running SCM service PID. Owner SID alone cannot
+authenticate an extra server instance sharing the pipe descriptor. Reject an
+identity mismatch before sending RPC data. Fixture endpoints may supply their
+known process/SID directly; the production app resolves them through SCM and
+exposes no arbitrary endpoint/owner override.
+
+The app initially queries status, then consumes WatchEvents and reconnects after
+disconnect. Bind updates to the current client generation and service instance,
+ignore stale sequences, and never preserve an old success after a connection
+failure. Render clock reasons and numeric minutes from typed status, including
+missing/invalid samples and disconnected failures, and clear warnings on fresh
+accepted state. Test actual local named-pipe identity, stream lifecycle and
+runtime snapshots, then render the real WPF controls and retain images for
+inspection. Service installation/configuration, full production engine hosting
+and the rest of the control API remain their required later tasks.
+
+The named-pipe configuration follows the installed .NET 10/Grpc 2.84 packages
+and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0),
+including separate server-instance and client rights. Kernel PID verification
+also protects the local client from additional-instance impersonation.
+
 ## Central rendezvous server
 
 One small ASP.NET Core service, `PeerSync.Rendezvous`, runs the tracker and the relay on the existing taskscape.com server. It is a Windows service listening on port 99, TCP and UDP, while the website keeps ports 80 and 443. It keeps only in-memory sightings ("device D, holding folder F, is reachable at these addresses"), and stores no files, keys or folder names. Without it, LAN and predefined-host sync keep working, as Resilio does with its tracker turned off.
