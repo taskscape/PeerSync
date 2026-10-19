@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.2.3/P1.2.4: capture immutable verified chunk bytes during hashing and before live record publication, persist readiness (withhold uncaptured legacy rows), and reuse/serve only verified root-bound blocks. Do not hardlink user originals. Local supersession archiving and reference-aware retention/cleanup remain mandatory follow-up work for the no-lost-version gate. | Detecting local changes: Published content |
 | 2026-10-19 | P1.5.3d: use the guarded installer for file/directory type transitions. Files retain the configured archive/conflict policy; entire directory losers move to no-overwrite public conflict siblings so unknown children survive. Bind node kinds/identities, stage empty directories, and atomically withhold stale descendants/remove their needed work until rescan. RW publishes preserved copies normally; RO retains local copies. | Version vectors and conflicts; Applying remote changes |
 | 2026-10-19 | Reproduced an own-write child version after a directory case change. For an already matched canonical path key, compare the entry's own leaf spelling; parent case follows directory records. Preserve descendant signed bytes/counters and still detect actual leaf case edits. | Applying remote changes, step 6 |
 | 2026-10-19 | P1.5.3c: apply directory metadata/creation and nonrecursive deletion with a signed, root/directory-bound recovery intent. Process individual signed child tombstones before parents; a nonempty parent is physically retained, logically tombstoned and rescanned so unknown children survive and RW/RO behavior follows normal scanning. Preserve changed identities/types. | Applying remote changes, step 6 |
@@ -961,6 +962,10 @@ public static class PathRules
 - [x] **P1.2.2 Streaming file hasher** (`PeerSync.Engine/Hashing/FileHasher.cs`) (#8)
   - Done when: one sequential read produces chunk hashes and the whole-file hash. A file modified during hashing returns "retry later" rather than a wrong record. Files locked by other apps are opened with `FileShare.ReadWrite | FileShare.Delete`.
   - P1.2 evidence: [golden vectors, 1.078 GB/s benchmark and mutation checks](docs/verification/P1.2-chunk-hashing-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39183549325). Merged tree equals the tested head.
+- [ ] **P1.2.3 Immutable published content** (`PeerSync.Engine/Hashing/PublishedBlocks.cs`) [WIP @Codex 2026-10-19]
+  - Done when: hashing captures independent verified chunks before publication; rooted no-overwrite installation flushes bytes, persisted readiness withholds uncaptured legacy live records, and serving/reuse verifies bytes under proper read guards. Incoming files capture before completion. Mutation, reopening, cancellation, corrupt/unknown/reparse cache entries, deduplication, readiness migration/backfill and unchanged-version preservation have integration tests. This is a prerequisite for P1.6's real engine simulations, not a simulation-only archive shortcut.
+- [ ] **P1.2.4 Superseded published version history and bounded block retention** (`PeerSync.Engine/Hashing/`, `PeerSync.Engine/Archive/`)
+  - Done when: locally superseded observed/published snapshots can be materialized under the normal archive/conflict policy from immutable blocks, preserving version bytes through crash/restart. Reference-aware retention/cleanup never removes current/needed/history blocks prematurely, safely handles unreferenced interrupted captures, and follows archive expiry/cap policy. Real simulation invariants exercise these production paths before Gate P1.
 
 ### 7.5 Code: FastCDC (P1.2.1)
 
