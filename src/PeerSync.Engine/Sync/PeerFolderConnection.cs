@@ -49,7 +49,11 @@ public sealed class PeerFolderConnection : IAsyncDisposable
                 session.RequireClock(); var page = await transport.ReadIndexAsync(cursor, 1000, token).ConfigureAwait(false);
                 if (page.AfterSequence != cursor || page.LastSequence <= cursor) throw new InvalidDataException("Index response did not advance.");
                 if (page.LastSequence > target)
-                { target = page.LastSequence; await session.AnnounceAsync(target, token).ConfigureAwait(false); }
+                {
+                    long currentTarget = await transport.ReadIndexTargetAsync(token).ConfigureAwait(false);
+                    if (currentTarget < page.LastSequence) throw new InvalidDataException("Sender target precedes its page cursor.");
+                    target = currentTarget; await session.AnnounceAsync(target, token).ConfigureAwait(false);
+                }
                 var result = await session.ReceiveAsync(page, token).ConfigureAwait(false); cursor = result.LastSequence; pages++;
             }
             return new(pages, cursor, cursor >= target);

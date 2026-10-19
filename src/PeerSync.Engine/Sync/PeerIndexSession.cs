@@ -32,18 +32,18 @@ public sealed class PeerIndexSession
 
     public long ReadIndexTarget()
     {
-        clock.RequireIndexExchangeAllowed(); long target = index.ReadIndexHighWater();
-        clock.RequireIndexExchangeAllowed(); return target;
+        long admission = clock.CaptureIndexAdmission(); long target = index.ReadIndexHighWater();
+        clock.RequireIndexAdmission(admission); return target;
     }
 
     public async Task<RemoteIndexResult> ReceiveAsync(PeerIndexPage page, CancellationToken cancellationToken = default)
     {
         using var activity = new Activity("PeerSync.PeerIndexReceive").SetIdFormat(ActivityIdFormat.W3C).Start();
-        clock.RequireIndexExchangeAllowed(); ArgumentNullException.ThrowIfNull(page);
+        long admission = clock.CaptureIndexAdmission(); ArgumentNullException.ThrowIfNull(page);
         try
         {
             var result = await needed.ApplyAdmittedIndexUpdateAsync(peer, page.AfterSequence, page.LastSequence, page.Records,
-                clock.RequireIndexExchangeAllowedWithoutDiagnostics, cancellationToken).ConfigureAwait(false);
+                () => clock.RequireIndexExchangeAllowedWithoutDiagnostics(admission), cancellationToken).ConfigureAwait(false);
             owner.NotifyWorkAvailable();
             journal?.TryWrite(new(result.Applied ? "peer.index_receive_complete" : "peer.index_replay", "index")
             { SessionId = session, ItemsVisited = page.Records.Count, ItemsChanged = result.AffectedPaths });
@@ -55,11 +55,11 @@ public sealed class PeerIndexSession
     public async Task<RemoteIndexRange> AnnounceAsync(long targetSequence, CancellationToken cancellationToken = default)
     {
         using var activity = new Activity("PeerSync.PeerIndexRange").SetIdFormat(ActivityIdFormat.W3C).Start();
-        clock.RequireIndexExchangeAllowed();
+        long admission = clock.CaptureIndexAdmission();
         try
         {
             var result = await needed.AnnounceAdmittedIndexRangeAsync(peer, targetSequence,
-                clock.RequireIndexExchangeAllowedWithoutDiagnostics, cancellationToken).ConfigureAwait(false);
+                () => clock.RequireIndexExchangeAllowedWithoutDiagnostics(admission), cancellationToken).ConfigureAwait(false);
             owner.NotifyWorkAvailable(); return result;
         }
         catch (Exception error) { if (error is PeerClockException) _ = clock.GetStatus(); Failure("peer.index_range_failed", error); throw; }
@@ -68,12 +68,12 @@ public sealed class PeerIndexSession
     public PeerIndexPage ReadIndex(long afterSequence, int limit = 1000)
     {
         using var activity = new Activity("PeerSync.PeerIndexRead").SetIdFormat(ActivityIdFormat.W3C).Start();
-        clock.RequireIndexExchangeAllowed();
+        long admission = clock.CaptureIndexAdmission();
         try
         {
             var batch = index.ReadIndexBatch(afterSequence, limit);
             var page = new PeerIndexPage(afterSequence, batch.LastSequence, batch.Records.Select(row => row.Record!.WithLocalSequence((ulong)row.LocalSequence)).ToArray());
-            clock.RequireIndexExchangeAllowed();
+            clock.RequireIndexAdmission(admission);
             journal?.TryWrite(new("peer.index_ready", "index") { SessionId = session, ItemsVisited = page.Records.Count });
             return page;
         }

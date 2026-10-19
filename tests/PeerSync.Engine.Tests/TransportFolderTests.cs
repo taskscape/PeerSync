@@ -182,6 +182,111 @@ public sealed class TransportFolderTests : IDisposable
         b.Index.Archive.ReadAll().Any(row => File.ReadAllText(Path.Combine(b.Root, row.ArchivePath.Replace('/', Path.DirectorySeparatorChar))) == "old child bytes").ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task GrowingSenderTargetIsRereadBeforeBoundedPageCompletesRange()
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2);
+        File.WriteAllBytes(Path.Combine(b.Root, "item-0000"), []); await Scan(b); int targets = 0;
+        var network = new InMemoryNetwork(); var ea = network.Register(a.Id, a.Engine.CreateHandler);
+        network.Register(b.Id, id =>
+        {
+            var inner = b.Engine.CreateHandler(id);
+            return new ControlledHandler(inner) { Target = async token =>
+            {
+                long target = await inner.ReadIndexTargetAsync(token);
+                if (++targets == 1)
+                {
+                    for (int i = 1; i < 1500; i++) File.WriteAllBytes(Path.Combine(b.Root, "item-" + i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)), []);
+                    await Scan(b);
+                }
+                return target;
+            } };
+        });
+        await using var peer = await a.Engine.ConnectAsync(ea.Connect(b.Id), Token);
+        var first = await peer.SynchronizeAsync(1, Token); first.LastSequence.ShouldBe(1000); first.Complete.ShouldBeFalse();
+        var range = a.Index.ReadRemoteIndexRange(b.Id)!; range.TargetSequence.ShouldBe(1500); range.ReceivedSequence.ShouldBe(1000); range.Complete.ShouldBeFalse();
+        (await peer.SynchronizeAsync(1, Token)).Complete.ShouldBeTrue(); a.Index.RemoteFiles.Count().ShouldBe(1500);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task PeerFailureDuringReadRetriesItemAndPreservesIndependentWorkAndCallerCancellation(bool disposedError, bool callerCancellation)
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2); await using var c = await NodeAsync(3);
+        File.WriteAllText(Path.Combine(b.Root, "first"), "blocked peer bytes"); await Scan(b);
+        File.WriteAllText(Path.Combine(c.Root, "second"), "independent peer bytes"); await Scan(c);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var network = new InMemoryNetwork(); var ea = network.Register(a.Id, a.Engine.CreateHandler); network.Register(c.Id, c.Engine.CreateHandler);
+        network.Register(b.Id, id => new ControlledHandler(b.Engine.CreateHandler(id)) { Block = async (_, _, token) =>
+        { entered.SetResult(); ObjectDisposedException.ThrowIf(disposedError, "peer"); await Task.Delay(Timeout.InfiniteTimeSpan, token); return ReadOnlyMemory<byte>.Empty; } });
+        await using var ab = await a.Engine.ConnectAsync(ea.Connect(b.Id), Token); await using var ac = await a.Engine.ConnectAsync(ea.Connect(c.Id), Token);
+        await ab.SynchronizeAsync(cancellationToken: Token); await ac.SynchronizeAsync(cancellationToken: Token);
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Token); var pass = a.Engine.RunPassAsync(cancel.Token);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
+            if (callerCancellation) cancel.Cancel(); else await ab.DisposeAsync();
+            if (callerCancellation) await Should.ThrowAsync<OperationCanceledException>(() => pass);
+            else
+            {
+                var result = await pass; result.Failed.ShouldBe(1); result.Applied.ShouldBe(1); a.Index.Needed.Count().ShouldBe(1);
+                File.ReadAllText(Path.Combine(a.Root, "second")).ShouldBe("independent peer bytes");
+            }
+            File.Exists(Path.Combine(a.Root, "first")).ShouldBeFalse();
+        }
+        finally { cancel.Cancel(); try { await pass; } catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException) { } }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EveryFolderDisposalCallerAwaitsDrainAndObservesFailure(bool failDisposal)
+    {
+        var a = await NodeAsync(1); await using var b = await NodeAsync(2);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var network = new InMemoryNetwork(); var ea = network.Register(a.Id, a.Engine.CreateHandler);
+        network.Register(b.Id, id =>
+        {
+            var inner = b.Engine.CreateHandler(id);
+            return new ControlledHandler(inner) { Close = async () =>
+            { entered.SetResult(); await release.Task; await inner.DisposeAsync(); if (failDisposal) throw new IOException("Handler teardown failure"); } };
+        });
+        await a.Engine.ConnectAsync(ea.Connect(b.Id), Token);
+        try
+        {
+            var first = a.Engine.DisposeAsync().AsTask(); await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Token);
+            var second = a.Engine.DisposeAsync().AsTask();
+            try { second.IsCompleted.ShouldBeFalse(); } finally { release.TrySetResult(); }
+            if (failDisposal)
+            {
+                var firstError = await Should.ThrowAsync<IOException>(() => first); var secondError = await Should.ThrowAsync<IOException>(() => second);
+                ReferenceEquals(firstError, secondError).ShouldBeTrue();
+            }
+            else await Task.WhenAll(first, second);
+        }
+        finally
+        {
+            release.TrySetResult(); try { await a.Engine.DisposeAsync(); } catch (IOException) when (failDisposal) { }
+            await a.Index.DisposeAsync();
+        }
+    }
+
+    private sealed class ControlledHandler(IPeerRequestHandler inner) : IPeerRequestHandler
+    {
+        public Func<CancellationToken, ValueTask<long>>? Target { get; init; }
+        public Func<ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>>? Block { get; init; }
+        public Func<ValueTask>? Close { get; init; }
+        public ValueTask<Hello> ExchangeHelloAsync(Hello hello, CancellationToken cancellationToken) => inner.ExchangeHelloAsync(hello, cancellationToken);
+        public ValueTask<long> ReadIndexTargetAsync(CancellationToken cancellationToken) => Target?.Invoke(cancellationToken) ?? inner.ReadIndexTargetAsync(cancellationToken);
+        public ValueTask<PeerIndexPage> ReadIndexAsync(long afterSequence, int limit, CancellationToken cancellationToken) => inner.ReadIndexAsync(afterSequence, limit, cancellationToken);
+        public ValueTask<ReadOnlyMemory<byte>> ReadBlockAsync(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellationToken)
+            => Block?.Invoke(hash, length, cancellationToken) ?? inner.ReadBlockAsync(hash, length, cancellationToken);
+        public ValueTask DisposeAsync() => Close?.Invoke() ?? inner.DisposeAsync();
+    }
+
     private async Task<Node> NodeAsync(ulong identity, TimeProvider? time = null)
     {
         string directory = Path.Combine(fixture, identity.ToString(System.Globalization.CultureInfo.InvariantCulture)); string root = Path.Combine(directory, "tree"); Directory.CreateDirectory(root);

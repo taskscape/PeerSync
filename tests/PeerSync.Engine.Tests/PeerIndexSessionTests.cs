@@ -88,7 +88,23 @@ public sealed class PeerIndexSessionTests : IDisposable
         {
             pending=peer.ReceiveAsync(new(0,1,[Record()]),Token); pending.IsCompleted.ShouldBeFalse(); peer.Disconnect();
         }
-        await Should.ThrowAsync<PeerClockException>(()=>pending); index.Devices.Count().ShouldBe(0);
+        await Should.ThrowAsync<PeerSessionExpiredException>(()=>pending); index.Devices.Count().ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FreshHelloCannotReviveOperationQueuedBeforeDisconnect(bool announce)
+    {
+        await using var index=await FolderIndex.OpenAsync(Database,Token); var clock=new SessionClock(); using var puller=Coordinator(index,clock);
+        var peer=puller.OpenPeerIndexSession(Peer); peer.ObserveHello(new Hello { UtcTicks=clock.UtcTicks }); Task pending;
+        using(await FolderReferenceGate.AcquireAsync(index,Token))
+        {
+            pending=announce?peer.AnnounceAsync(1,Token):peer.ReceiveAsync(new(0,1,[Record()]),Token);
+            pending.IsCompleted.ShouldBeFalse(); peer.Disconnect(); peer.ObserveHello(new Hello { UtcTicks=clock.UtcTicks });
+        }
+        await Should.ThrowAsync<IOException>(()=>pending); index.Devices.Count().ShouldBe(0); index.RemoteFiles.Count().ShouldBe(0);
+        await peer.ReceiveAsync(new(0,1,[Record()]),Token); index.RemoteFiles.Count().ShouldBe(1);
     }
 
     [Fact]
@@ -102,6 +118,45 @@ public sealed class PeerIndexSessionTests : IDisposable
         peer.ReadIndex(page.LastSequence).Records.ShouldBeEmpty();
         int reads=0; clock.OnUtcRead=()=>{ if(++reads==2) clock.Jump(TimeSpan.FromMinutes(11)); };
         Should.Throw<PeerClockException>(()=>peer.ReadIndex(0)); reads.ShouldBe(2);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FreshHelloCannotReviveOperationQueuedInWriterBeforeDisconnect(bool announce)
+    {
+        await using var index=await FolderIndex.OpenAsync(Database,Token); var clock=new SessionClock(); using var puller=Coordinator(index,clock);
+        var peer=puller.OpenPeerIndexSession(Peer); peer.ObserveHello(new Hello { UtcTicks=clock.UtcTicks });
+        using var release=new ManualResetEventSlim(); var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var blocker=index.RecomputeNeededAsync(["blocker"],_=>{ entered.SetResult(); if(!release.Wait(TimeSpan.FromSeconds(15))) throw new TimeoutException(); return null; },Token);
+        Task? pending=null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10),Token);
+            pending=announce?peer.AnnounceAsync(1,Token):peer.ReceiveAsync(new(0,1,[Record()]),Token);
+            pending.IsCompleted.ShouldBeFalse(); peer.Disconnect(); peer.ObserveHello(new Hello { UtcTicks=clock.UtcTicks });
+        }
+        finally { release.Set(); }
+        await blocker; await Should.ThrowAsync<PeerSessionExpiredException>(()=>pending!);
+        index.Devices.Count().ShouldBe(0); index.RemoteFiles.Count().ShouldBe(0);
+        await peer.ReceiveAsync(new(0,1,[Record()]),Token); index.RemoteFiles.Count().ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OutgoingHandoffCannotSurviveDisconnectAndFreshHello(bool targetOnly)
+    {
+        File.WriteAllText(Path.Combine(Root,"local"),"published"); await using var index=await FolderIndex.OpenAsync(Database,Token);
+        var clock=new SessionClock(); using var puller=Coordinator(index,clock); await puller.RunPassAsync(Token);
+        var peer=puller.OpenPeerIndexSession(Peer); peer.ObserveHello(new Hello { UtcTicks=clock.UtcTicks }); int reads=0;
+        clock.OnUtcRead=()=>
+        {
+            if(++reads==2) { clock.OnUtcRead=null; peer.Disconnect(); peer.ObserveHello(new Hello { UtcTicks=clock.UtcTicks }); }
+        };
+        if(targetOnly) Should.Throw<PeerSessionExpiredException>(()=>peer.ReadIndexTarget());
+        else Should.Throw<PeerSessionExpiredException>(()=>peer.ReadIndex(0));
+        peer.ReadIndex(0).Records.Count.ShouldBe(1);
     }
 
     [Fact]

@@ -1068,7 +1068,14 @@ latency, deterministic drops and partitions on request and response delivery.
 Requests run independently with a bounded outstanding limit, so an index wait
 cannot block a chunk response. Disconnect cancels and drains requests before
 disposing that connection's handler. This trusted simulation identity context
-does not replace P2 TLS identity or folder authentication. Clock admission is
+does not replace P2 TLS identity or folder authentication. Index pages that
+advance beyond the previously announced target require a fresh sender high-water
+announcement before commit; a bounded page cursor is not the sender's range end.
+Disconnect invalidates an admission generation, so a fresh Hello cannot revive
+queued work from an older session. Treat connection-local cancellation/disposal
+as a retryable source failure while preserving caller cancellation and folder
+shutdown, and make every concurrent disposal caller await the same drain task.
+Clock admission is
 checked by both engine endpoints, including immediately before index commits
 and block/page handoff. Existing callback-based appliers remain local primitives;
 the connected engine path routes remote bytes through the transport interface.
