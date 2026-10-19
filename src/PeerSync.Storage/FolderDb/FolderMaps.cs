@@ -21,6 +21,8 @@ internal static class FolderMaps
         new("flags", Integer, r => (int)r.Flags),
         new("content_ready", Integer, r => r.ContentReady ? 1 : 0),
         new("change_filetime", Integer, r => r.ChangeFileTime),
+        new("parent_key", Text, r => LocalParentKey(r.Path.ToUpperInvariant())),
+        new("path_sort_key", Blob, r => Encoding.BigEndianUnicode.GetBytes(r.Path.ToUpperInvariant())),
     ], ReadLocal, ValidateLocal, (c, t) => new LocalBatch(c, t));
 
     public static RowMap<RemoteFileRow> Remote { get; } = new("remote_files", ["device_id", "path_key"],
@@ -94,6 +96,8 @@ internal static class FolderMaps
     private static byte[]? OptionalBytes(SqliteDataReader reader, int column) => reader.IsDBNull(column) ? null : reader.GetFieldValue<byte[]>(column);
     private static void RequirePath(string path) { if (!PathRules.IsValid(path)) throw new ArgumentException("Invalid record path.", nameof(path)); }
     private static void RequireTicks(long ticks) { if (ticks < 0 || ticks > DateTime.MaxValue.Ticks) throw new ArgumentOutOfRangeException(nameof(ticks)); }
+
+    private static string LocalParentKey(string path) { int separator = path.LastIndexOf('/'); return separator < 0 ? "" : path[..separator]; }
 
     private static void ValidateLocal(LocalFileRow row)
     {
