@@ -628,6 +628,19 @@ progress when unavailable older sources leave fewer than a batch's free slots.
 Remote receipt remains whole-batch atomic with its cursor. Other resolver
 failures or cancellation roll back the current entire recomputation batch.
 
+Directory case preservation requires a signed description of descendants.
+Add an optional directory_snapshot_hash to live directory bodies, binding a
+Merkle snapshot of exact original signed child envelopes and nested directory
+roots. Missing legacy hashes never prove emptiness. Capture bottom-up after
+children publish, retain the complete graph in reference coverage and keep
+original-path merging blocked until guarded copied members are visibly complete.
+Native child-caused directory mtime alone remains ignored; an authenticated
+child-manifest change now advances the directory's vector/hash. This extends
+the earlier metadata-only publication rule without signing incidental native
+mtime changes. Require convergence/crash tests before enabling mutations.
+The bounded canonical node/envelope encoding, migration limits and staged
+acceptance are specified in docs/proposals/P1-directory-snapshot-protocol.md.
+
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
 same exact signed envelope, try another forwarding device and retain the
