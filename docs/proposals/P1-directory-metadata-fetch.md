@@ -14,7 +14,7 @@ Add persistent metadata-source work bound to physical root, exact original root
 envelope/source CID, authenticated snapshot hash/exact length and route hint.
 It represents authenticated metadata availability, not native ownership or a
 new file version. Sources include signed local directories, needed remote
-directories, pending cases, retained RO originals and saved directory history.
+directories, pending cases and retained RO directory history in the case ledger.
 Admit the original envelope durably before source replacement can drop it.
 Startup/reference reconciliation must recover older protected sources too.
 
@@ -48,7 +48,9 @@ selected original/desired and case directory sources atomically. Source IDs bind
 exact original body/signature; snapshot/path/hint fields are immutable bindings
 apart from a successful routing-hint update. Legacy absent snapshot pairs do not
 enter this queue. References and bounded saved-history discovery reconcile older
-protected sources. Capacity leaves the enclosing index cursor/rows unchanged.
+protected sources. Existing `_history-` markers are strictly file-only; recover
+retained directory originals from the completed RO case ledger. Capacity leaves
+the enclosing index cursor/rows unchanged.
 
 Queue ordering uses a durable monotonic run ordinal, independent of frozen or
 rolled-back UTC. Read at most 32 sources/8 MiB per worker pass (one oversized
@@ -63,8 +65,8 @@ queue entries expire in bounded batches after 24 hours without a new protected
 source request. Expiry never removes signed current/needed/case/history owners,
 native data or graph references. A still-required incomplete graph remains a GC
 barrier and its owner re-admits metadata work during reconciliation. New history
-roots are retained through the ordinary pre-replacement source admission;
-root-bound, cursor/byte-limited history pages recover pre-schema-32 markers.
+roots are retained through ordinary pre-replacement source admission;
+root-bound, source-ID/byte-limited case-ledger pages recover retained originals.
 The public cache-fetch path may run without enabling snapshot publication.
 
 Required checks include source replacement/restart, atomic admission rollback,

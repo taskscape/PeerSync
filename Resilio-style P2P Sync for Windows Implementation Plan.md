@@ -790,8 +790,9 @@ Schema 32 bounds source envelopes at 4096 per folder and admits old local,
 selected original/desired and case roots with needed/index updates. Use durable
 run ordinals for fair 32-source/8-MiB/1000-graph-unit passes, persistent retry and
 24-hour unrequested metadata-work expiry. Signed source owners remain separate;
-required missing graphs continue to block GC and re-admit work. Recover older
-history through bounded rooted pages, and release completed queue entries only
+required missing graphs continue to block GC and re-admit work. Recover retained
+RO directory originals through bounded rooted case-ledger pages; existing
+`_history-` markers remain file-only. Release completed queue entries only
 against the exact complete non-retiring graph. See the proposal for transitions.
 
 The immutable source's first forwarding device is only a routing hint. If it
