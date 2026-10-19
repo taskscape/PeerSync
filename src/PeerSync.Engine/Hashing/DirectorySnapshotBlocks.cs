@@ -36,6 +36,22 @@ internal sealed class DirectorySnapshotBlocks : IDisposable
         }
         return await PutAsync(DirectorySnapshotNode.Record(fragments, envelope.Length), token).ConfigureAwait(false);
     }
+    internal async Task<DirectorySnapshotLink> CaptureDirectoryAsync(string parentPath, IEnumerable<SignedRecord> children, CancellationToken token)
+    {
+        _ = PathRules.Key(parentPath); ArgumentNullException.ThrowIfNull(children);
+        var builder = new DirectorySnapshotBuilder(PutAsync); string? previous = null;
+        foreach (var child in children)
+        {
+            token.ThrowIfCancellationRequested(); var member = VersionView.Open(child, keys, peer); RequireMember(parentPath, member);
+            string key = PathRules.Key(member.Path);
+            if (previous is not null && StringComparer.Ordinal.Compare(previous, key) >= 0)
+                throw new InvalidDataException("Directory snapshot members are duplicated or out of order.");
+            previous = key;
+            await builder.AddAsync(await CaptureMemberAsync(parentPath, member.Record, token).ConfigureAwait(false), token).ConfigureAwait(false);
+        }
+        var root = await builder.CompleteAsync(token).ConfigureAwait(false);
+        await FlushAsync(token).ConfigureAwait(false); return root;
+    }
     internal async Task<DirectorySnapshotLink> PutAsync(DirectorySnapshotNode node, CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(node); token.ThrowIfCancellationRequested(); byte[] bytes = node.Encode();

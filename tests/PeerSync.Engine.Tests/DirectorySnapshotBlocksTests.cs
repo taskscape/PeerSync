@@ -21,6 +21,45 @@ public sealed class DirectorySnapshotBlocksTests : IDisposable
     private readonly byte[] device = [1, .. new byte[31]];
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(128)]
+    [InlineData(129)]
+    public async Task StreamingCaptureFlushesDeterministicRootAndAllAuthenticatedChildren(int count)
+    {
+        await using var index = await BindAsync("source"); using var blocks = Store("source", index);
+        IEnumerable<SignedRecord> Children(ulong sequence)
+        {
+            for (int value = 0; value < count; value++) yield return Sign("topic/child" + value.ToString("D4", System.Globalization.CultureInfo.InvariantCulture), 0).WithLocalSequence(sequence);
+        }
+        var root = await blocks.CaptureDirectoryAsync("topic", Children(1), Token);
+        int objects = index.ReadBlockObjects().Count();
+        (await blocks.CaptureDirectoryAsync("TOPIC", Children(99), Token)).Hash.ShouldBe(root.Hash);
+        index.ReadBlockObjects().Count().ShouldBe(objects);
+        var work = new Stack<DirectorySnapshotLink>(); work.Push(root); var names = new HashSet<string>(StringComparer.Ordinal);
+        while (work.TryPop(out var link))
+        {
+            var page = await blocks.ReadNodeAsync(link, NoFetch, Token);
+            foreach (var child in page.Links)
+                if (page.Kind == DirectorySnapshotNodeKind.Entries) names.Add((await blocks.ReadMemberAsync("TOPIC", child, NoFetch, Token)).Path).ShouldBeTrue();
+                else { page.Kind.ShouldBe(DirectorySnapshotNodeKind.Branch); work.Push(child); }
+        }
+        names.Count.ShouldBe(count);
+        Directory.EnumerateFiles(Path.Combine(Root("source"), BlockCaptureProof.Directory)).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("topic/CHILD", "topic/child")]
+    [InlineData("topic/z", "topic/a")]
+    public async Task StreamingCaptureRejectsDuplicateOrDescendingCanonicalChildKeys(string first, string second)
+    {
+        await using var index = await BindAsync("source"); using var blocks = Store("source", index);
+        await Should.ThrowAsync<InvalidDataException>(() => blocks.CaptureDirectoryAsync("topic", [Sign(first, 0), Sign(second, 0)], Token));
+        // Partial captures are not a completed graph or publication authority.
+        index.ReadIndexBatch(0).Records.ShouldBeEmpty(); await blocks.FlushAsync(Token);
+    }
+
     [Fact]
     public async Task CapturedOriginalEnvelopesAndRootSurviveReopeningWithoutNetworkOrMutableFiles()
     {
