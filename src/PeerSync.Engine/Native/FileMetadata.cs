@@ -8,6 +8,14 @@ namespace PeerSync.Engine.Native;
 
 internal static class FileMetadata
 {
+    /// <summary>Reset metadata on reused staging for a new destination. Borrow
+    /// inheritance/creation from a fresh sibling, automatically removed on close.</summary>
+    internal static void PrepareNewFile(DirectoryLease parent, SafeFileHandle temporary)
+    {
+        using var reference = parent.CreateInheritedMetadataReference();
+        CopyReplacementMetadata(reference, temporary);
+    }
+
     /// <summary>Prepare the new file before moving the old one: preserve its DACL,
     /// inheritance protection and creation time. Owner/group/audit data are not copied.</summary>
     public static void CopyReplacementMetadata(SafeFileHandle original, SafeFileHandle temporary)

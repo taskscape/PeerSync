@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core, hashing, storage, scanning, needed computation and regular-file application/recovery merged with green CI; archive retention implemented locally; conflict integration, pull scheduling, restores and simulations remain open | - |
+| P1 Local sync engine | 4-8 | In progress: core, hashing, storage, scanning, needed computation, regular-file application/recovery and archive retention merged with green CI; restores implemented locally; conflict integration, pull scheduling and simulations remain open | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | Reproduced reused staging retaining a former target's protected DACL. For a new destination, refresh staging DACL/inheritance and creation time from an exclusive, empty sibling metadata reference with native delete-on-close, for both remote installation and local restore. Existing targets still supply replacement metadata. | Archive, ignore rules and special files; Applying remote changes |
 | 2026-10-19 | P1.5.4b: restore verified archive bytes through owned staging and the approved recoverable installer. Use a distinct unsigned local intent format, preserve current/unscanned targets, refuse occupied copy destinations, and complete via durable archive accounting plus stale-local suppression. The ordinary scanner creates the new RW version or RO local edit; archived signatures are never forwarded as a restoration. | Archive, ignore rules and special files |
 | 2026-10-19 | P1.5.4: prune indexed, size/hash-verified archives oldest first for age and the actual hosting-volume cap. Share the folder gate, wait for recovery, pin ancestors and preserve changed/locked/reparse paths. Delete data before metadata, reconcile missing rows, persist daily success and retry deferrals at 10–600 s. Restore remains a local edit and is a separate child task. | Archive, ignore rules and special files |
 | 2026-10-19 | P1.5.3b: assemble in exclusively created GUID sibling temporaries with persisted root/file ownership. Park staging ownership for verified restart reuse. Keep retained-file and ancestor guards through durable completion; concurrent targets trigger atomic archive accounting and stale-record suppression until rescan. | Sync engine design: Applying remote changes, steps 3 and 5 |
@@ -1357,11 +1358,12 @@ Our own writes need no special suppression: the puller records the new state in 
     - Regular-file installation/deletion, verified staging reuse, metadata-only/case changes and startup recovery are merged in (#21) with [local and CI evidence](docs/verification/P1.5.3b-recoverable-install-2026-10-19.md). Directory/type/conflict coordination, scheduling and stale-temp retention/cleanup still belong to the parent integration; the task remains unchecked pending those checks.
 - [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) [WIP @Codex 2026-10-19]
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
-  - [ ] **P1.5.4a Archive placement and retention** (`PeerSync.Engine/Archive/ArchiveManager.cs`) [WIP @Codex 2026-10-19]
+  - [x] **P1.5.4a Archive placement and retention** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23)
     - Done when: the file applier uses the shared mirrored archive naming/collision policy; guarded indexed cleanup applies age and hosting-volume cap, reconciles interrupted missing rows, preserves unknown/changed/locked/reparse files, waits for recovery and schedules daily success with bounded failure retries. A blocked oldest version defers cap-only eviction of newer versions. Tests exercise native deletion, interruption and restart, capacity accounting, time boundaries and redacted diagnostics.
-    - Implemented with [local verification](docs/verification/P1.5.4a-archive-retention-2026-10-19.md): 27 archive cases and all 180 Engine cases pass. Required CI and merge remain pending; restores remain a separate incomplete requirement.
+    - Merged with [local and CI verification](docs/verification/P1.5.4a-archive-retention-2026-10-19.md): 27 archive cases and all 180 Engine cases pass, plus all five required CI jobs. Restores remain a separate incomplete requirement.
   - [ ] **P1.5.4b Restore through the local-change path** (`PeerSync.Engine/Archive/ArchiveRestorer.cs`, shared `Sync/FileApplier.cs`) [WIP @Codex 2026-10-19]
     - Done when: restore and restore-as-copy preserve current versions, use recoverable no-overwrite installation and re-enter local version generation, including RO policy; archived signatures are not republished as a fresh local edit. Actual UI remains P5.5. Failure/restart and concurrent target changes are covered by integration tests.
+    - Implemented with [local verification](docs/verification/P1.5.4b-archive-restore-2026-10-19.md): 32 restore cases, normal RW/RO scanning and shared remote/local recovery pass; a reused-staging inheritance regression is fixed. Required CI and merge remain pending.
 - [ ] **P1.5.5 Clock-skew guard** (`PeerSync.Engine/Sync/ClockGuard.cs`)
   - Done when: `Hello` carries UTC time. A peer more than 10 minutes off exchanges no index updates and shows "clock differs by N minutes" in the UI.
 
