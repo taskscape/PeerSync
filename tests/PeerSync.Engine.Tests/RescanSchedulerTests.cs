@@ -2,6 +2,7 @@ using PeerSync.Crypto;
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Settings;
 using PeerSync.Engine.Scanning;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
@@ -236,6 +237,47 @@ public sealed class RescanSchedulerTests : IDisposable
         var other = new RescanScheduler([new(healthy, WatchChanges: false)]);
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token); Task running = other.RunAsync(stopping.Token);
         try { (await Next(other)).Result!.Updated.ShouldBe(1); }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
+    }
+
+    [Fact]
+    public async Task PublicHistoryCopiesReceiveAFollowupScanWithoutWaitingForWatcherOrPeriodicTimer()
+    {
+        string root = Tree("history"); File.WriteAllText(Path.Combine(root, "file"), "old published bytes");
+        using var keys = FolderKeys.CreateNew(); await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "history.db"), Token);
+        using var scanner = new Scanner(root, index, keys, new byte[32], settings: new FolderSettings { KeepBothCopies = true });
+        await scanner.ScanAsync(Token); File.WriteAllText(Path.Combine(root, "file"), "longer changed user bytes");
+        var scheduler = new RescanScheduler([new(scanner, WatchChanges: false)]); using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        Task running = scheduler.RunAsync(stopping.Token);
+        try
+        {
+            (await Next(scheduler)).Result!.RequiresFollowupScan.ShouldBeTrue();
+            var followup = await Next(scheduler); followup.Result!.RequiresFollowupScan.ShouldBeFalse();
+            string copy = Directory.GetFiles(root, "*.sync-conflict-*").Single(); File.ReadAllText(copy).ShouldBe("old published bytes");
+            index.LocalFiles.Find(Path.GetFileName(copy))!.Record.ShouldNotBeNull(); index.Archive.Count().ShouldBe(0);
+        }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
+    }
+
+    [Fact]
+    public async Task PublishedContentVerificationFailureBacksOffAndReleasesBudgetForOtherFolders()
+    {
+        string badRoot = Tree("bad-content"), goodRoot = Tree("good-content");
+        using var keys = FolderKeys.CreateNew(); await using var badIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "bad.db"), Token);
+        await using var goodIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "good.db"), Token);
+        using var bad = new Scanner(badRoot, badIndex, keys, new byte[32]); using var good = new Scanner(goodRoot, goodIndex, keys, new byte[32]);
+        await bad.ScanAsync(Token); byte[] bytes = "content with corrupt cache"u8.ToArray(); string hash = Convert.ToHexString(Blake3.Hasher.Hash(bytes).AsSpan());
+        string parent = Path.Combine(badRoot, ".psp", "blocks", hash[..2]); Directory.CreateDirectory(parent);
+        File.WriteAllBytes(Path.Combine(parent, hash), new byte[bytes.Length]); File.WriteAllBytes(Path.Combine(badRoot, "file"), bytes);
+        File.WriteAllText(Path.Combine(goodRoot, "file"), "good folder bytes");
+        var scheduler = new RescanScheduler([new(bad, WatchChanges: false), new(good, WatchChanges: false)]);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token); Task running = scheduler.RunAsync(stopping.Token);
+        try
+        {
+            var outcomes = new[] { await Next(scheduler), await Next(scheduler) };
+            outcomes.Single(o => o.Scanner == bad).RetryInSeconds.ShouldBe(10);
+            outcomes.Single(o => o.Scanner == good).Result!.Updated.ShouldBe(1); running.IsCompleted.ShouldBeFalse();
+        }
         finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
     }
 

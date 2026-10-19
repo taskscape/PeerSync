@@ -127,6 +127,11 @@ public sealed partial class FileApplier
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (HistoryState.IsHistory(intent))
+            {
+                var history = new SnapshotHistory(index, keys, ownDevice, settings, journal, clock) { Checkpoint = Checkpoint };
+                await history.RecoverIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue;
+            }
             if (intent.Payload.Length >= 4 && BinaryPrimitives.ReadInt32LittleEndian(intent.Payload) == 3)
             {
                 var directories = new DirectoryApplier(rootPath, index, keys, ownDevice, settings, journal) { Checkpoint = Checkpoint };
