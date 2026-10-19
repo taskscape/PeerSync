@@ -120,6 +120,54 @@ public sealed class DbTests : IDisposable
     }
 
     [Fact]
+    public async Task FreshSchemaCommitsAllStepsWithoutIntermediateBackups()
+    {
+        DbMigration[] steps = [.. V1, new(2, "ALTER TABLE counter ADD COLUMN extra INTEGER NOT NULL DEFAULT 7;")];
+        await using var database = await Db.OpenAsync(DatabasePath, steps, TestContext.Current.CancellationToken);
+        using var reader = database.OpenReader();
+        Number(Scalar(reader, "PRAGMA user_version;")).ShouldBe(2);
+        Number(Scalar(reader, "SELECT extra FROM counter;")).ShouldBe(7);
+        Directory.GetFiles(root, "*.bak").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task FailedFreshInitializationRollsBackEveryStepAndCanReopen()
+    {
+        DbMigration[] bad = [.. V1, new(2, "CREATE TABLE partial(id INTEGER); INSERT INTO missing VALUES(1);")];
+        await Should.ThrowAsync<SqliteException>(() => Db.OpenAsync(DatabasePath, bad, TestContext.Current.CancellationToken));
+        using (var empty = OpenDirect(DatabasePath))
+        {
+            Number(Scalar(empty, "PRAGMA user_version;")).ShouldBe(0);
+            Number(Scalar(empty, "SELECT count(*) FROM sqlite_schema;")).ShouldBe(0);
+        }
+        Directory.GetFiles(root, "*.bak").ShouldBeEmpty();
+        await using var reopened = await Db.OpenAsync(DatabasePath, V1, TestContext.Current.CancellationToken);
+        using var reader = reopened.OpenReader();
+        Number(Scalar(reader, "SELECT value FROM counter;")).ShouldBe(0);
+        Directory.GetFiles(root, "*.pre-v0-to-v1-*.bak").Length.ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingVersionZeroFilesAlwaysRetainBackups(bool hasData)
+    {
+        using (var existing = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = DatabasePath, Pooling = false }.ToString()))
+        {
+            existing.Open();
+            if (hasData) Execute(existing, "CREATE TABLE prior(value INTEGER); INSERT INTO prior VALUES(43);");
+        }
+        await using var database = await Db.OpenAsync(DatabasePath, V1, TestContext.Current.CancellationToken);
+        using var backup = OpenDirect(Directory.GetFiles(root, "*.pre-v0-to-v1-*.bak").Single());
+        Number(Scalar(backup, "PRAGMA user_version;")).ShouldBe(0);
+        if (hasData) Number(Scalar(backup, "SELECT value FROM prior;")).ShouldBe(43);
+        using var reader = database.OpenReader();
+        Number(Scalar(reader, "SELECT value FROM counter;")).ShouldBe(0);
+        if (hasData) Number(Scalar(reader, "SELECT value FROM prior;")).ShouldBe(43);
+    }
+
+    [Fact]
     public async Task MigrationBacksUpCommittedWalAndUpdatesSchemaAtomically()
     {
         var database = await Db.OpenAsync(DatabasePath, V1, TestContext.Current.CancellationToken);
