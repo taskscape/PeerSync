@@ -230,7 +230,7 @@ public sealed class ApplyJournalTests : IDisposable
     }
 
     private static LocalFileRow Row(byte[] hash) => new("file", 0, 3, 0, 0, false, 0, hash, new Dictionary<ulong, ulong> { [1] = 1 },
-        new(hash, new byte[64]), new byte[16]) { IndexedChunks = [new(0, 3, hash)] };
+        new(hash, new byte[64]), new byte[16]) { IndexedChunks = [new(0, 3, hash)], ContentReady = true };
     private static ArchiveRow Archive() => new(0, "file", ".psp/archive/file~20261019-120000", DateTime.UtcNow.Ticks, 3, OldHash);
     private static async Task PrepareAsync(FolderIndex index)
     {

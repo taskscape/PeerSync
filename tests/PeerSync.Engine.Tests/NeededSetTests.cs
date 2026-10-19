@@ -229,7 +229,7 @@ public sealed class NeededSetTests : IDisposable
     {
         var view = VersionView.Open(record, keys, Device(9)); var body = view.ExportBody();
         return new(body.Path, body.Type, (long)body.Size, body.MtimeTicks, body.Attributes, body.Deleted, body.ChangedTicks,
-            body.FileHash.Length == 0 ? null : body.FileHash.ToByteArray(), vector ?? view.Vector, record, new byte[16]);
+            body.FileHash.Length == 0 ? null : body.FileHash.ToByteArray(), vector ?? view.Vector, record, new byte[16]) { ContentReady = true };
     }
     private static FolderPathSnapshot Snapshot(FolderIndex index) => new("FILE", index.LocalFiles.Find("file"), index.RemotesForPath("file").ToArray());
     private static byte[] Device(ulong value) { byte[] bytes = new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(bytes, value); return bytes; }

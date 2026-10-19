@@ -8,7 +8,7 @@ namespace PeerSync.Storage.FolderDb;
 internal static class FolderMaps
 {
     private const SqliteType Text = SqliteType.Text, Integer = SqliteType.Integer, Blob = SqliteType.Blob;
-    public const string LocalColumns = "path_key,path,type,size,mtime_ticks,attributes,deleted,changed_ticks,file_hash,vv,record_body,signature,ntfs_file_id,local_seq,flags";
+    public const string LocalColumns = "path_key,path,type,size,mtime_ticks,attributes,deleted,changed_ticks,file_hash,vv,record_body,signature,ntfs_file_id,local_seq,flags,content_ready";
     public static RowMap<LocalFileRow> Local { get; } = new("local_files", ["path_key"],
     [
         new("path_key", Text, r => r.Path.ToUpperInvariant()), new("path", Text, r => r.Path),
@@ -19,6 +19,7 @@ internal static class FolderMaps
         new("record_body", Blob, r => r.Record?.Body.ToArray()), new("signature", Blob, r => r.Record?.Signature.ToArray()),
         new("ntfs_file_id", Blob, r => r.FileId), new("local_seq", Integer, r => r.LocalSequence),
         new("flags", Integer, r => (int)r.Flags),
+        new("content_ready", Integer, r => r.ContentReady ? 1 : 0),
     ], ReadLocal, ValidateLocal, (c, t) => new LocalBatch(c, t));
 
     public static RowMap<RemoteFileRow> Remote { get; } = new("remote_files", ["device_id", "path_key"],
@@ -70,7 +71,7 @@ internal static class FolderMaps
         return new(reader.GetString(1), reader.GetFieldValue<uint>(2), reader.GetInt64(3), reader.GetInt64(4),
             reader.GetFieldValue<uint>(5), reader.GetBoolean(6), reader.GetInt64(7), OptionalBytes(reader, 8),
             VersionVector.Deserialize(reader.GetFieldValue<byte[]>(9)), body is null ? null : new(body, signature!, checked((ulong)sequence)),
-            OptionalBytes(reader, 12), sequence, (LocalFileState)reader.GetInt32(14));
+            OptionalBytes(reader, 12), sequence, (LocalFileState)reader.GetInt32(14)) { ContentReady = reader.GetBoolean(15) };
     }
 
     public static void RequireBytes(byte[] value, int length)

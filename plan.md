@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core, hashing, storage, scanning, needed computation, regular-file application/recovery and archives/restores merged with green CI; directory application implemented locally; type/case conflicts, pull scheduling and simulations remain open | - |
+| P1 Local sync engine | 4-8 | In progress: core, hashing, storage, scanning, needed computation, file/directory application/recovery and archives/restores merged with green CI; immutable published content implemented locally; case conflicts, pull scheduling, clock guard, published history/retention and simulations remain open | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.2.3/P1.2.4: capture immutable verified chunk bytes during hashing and before live record publication, persist readiness (withhold uncaptured legacy rows), and reuse/serve only verified root-bound blocks. Do not hardlink user originals. Local supersession archiving and reference-aware retention/cleanup remain mandatory follow-up work for the no-lost-version gate. | Detecting local changes: Published content |
 | 2026-10-19 | P1.5.3d: use the guarded installer for file/directory type transitions. Files retain the configured archive/conflict policy; entire directory losers move to no-overwrite public conflict siblings so unknown children survive. Bind node kinds/identities, stage empty directories, and atomically withhold stale descendants/remove their needed work until rescan. RW publishes preserved copies normally; RO retains local copies. | Version vectors and conflicts; Applying remote changes |
 | 2026-10-19 | Reproduced an own-write child version after a directory case change. For an already matched canonical path key, compare the entry's own leaf spelling; parent case follows directory records. Preserve descendant signed bytes/counters and still detect actual leaf case edits. | Applying remote changes, step 6 |
 | 2026-10-19 | P1.5.3c: apply directory metadata/creation and nonrecursive deletion with a signed, root/directory-bound recovery intent. Process individual signed child tombstones before parents; a nonempty parent is physically retained, logically tombstoned and rescanned so unknown children survive and RW/RO behavior follows normal scanning. Preserve changed identities/types. | Applying remote changes, step 6 |
@@ -961,6 +962,11 @@ public static class PathRules
 - [x] **P1.2.2 Streaming file hasher** (`PeerSync.Engine/Hashing/FileHasher.cs`) (#8)
   - Done when: one sequential read produces chunk hashes and the whole-file hash. A file modified during hashing returns "retry later" rather than a wrong record. Files locked by other apps are opened with `FileShare.ReadWrite | FileShare.Delete`.
   - P1.2 evidence: [golden vectors, 1.078 GB/s benchmark and mutation checks](docs/verification/P1.2-chunk-hashing-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39183549325). Merged tree equals the tested head.
+- [ ] **P1.2.3 Immutable published content** (`PeerSync.Engine/Hashing/PublishedBlocks.cs`) [WIP @Codex 2026-10-19]
+  - Done when: hashing captures independent verified chunks before publication; rooted no-overwrite installation flushes bytes, persisted readiness withholds uncaptured legacy live records, and serving/reuse verifies bytes under proper read guards. Incoming files capture before completion. Mutation, reopening, cancellation, corrupt/unknown/reparse cache entries, deduplication, readiness migration/backfill and unchanged-version preservation have integration tests. This is a prerequisite for P1.6's real engine simulations, not a simulation-only archive shortcut.
+  - Implemented with [verification](docs/verification/P1.2.3-published-blocks-2026-10-19.md): 22 content cases, readiness/v4 migration checks and all 493 local cases pass. The unchanged 100k-file scan passes in 0.61 s with no hashes/updates. The canonical native/probe/publishing runner passes in 99.97 s, exit 0, explicitly skipping separate CI fuzz. CI and merge remain pending; history/retention remains P1.2.4.
+- [ ] **P1.2.4 Superseded published version history and bounded block retention** (`PeerSync.Engine/Hashing/`, `PeerSync.Engine/Archive/`)
+  - Done when: locally superseded observed/published snapshots can be materialized under the normal archive/conflict policy from immutable blocks, preserving version bytes through crash/restart. Reference-aware retention/cleanup never removes current/needed/history blocks prematurely, safely handles unreferenced interrupted captures, and follows archive expiry/cap policy. Real simulation invariants exercise these production paths before Gate P1.
 
 ### 7.5 Code: FastCDC (P1.2.1)
 
@@ -1346,10 +1352,10 @@ Our own writes need no special suppression: the puller records the new state in 
     - A loser above `ArchiveMaxFileBytes`, or with "Keep both copies" on, becomes `name.sync-conflict-YYYYMMDD-HHMMSS-XXXX.ext`.
     - Only RW peers publish the merged record. RO peers apply the same rule locally and never publish.
   - Ref: Sync engine design, Version vectors and conflicts.
-  - Local foundation: deterministic causal/concurrent selection, signed vector merges, loser fate and bounded conflict names are tested. Directory/unknown-child and case-clash filesystem preservation still require P1.5.3 integration; this task remains incomplete.
+  - Local foundation: deterministic causal/concurrent selection, signed vector merges, loser fate and bounded conflict names are tested. Directory application and file/directory preservation are merged. Full sender-index barriers/unknown-child coordination and case-clash preservation still require puller integration; this task remains incomplete.
 - [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`) [WIP @Codex 2026-10-19]
   - Done when: directories are created first, then files in priority order, then deletions, deepest directory last. Files are assembled from local chunks before network chunks, verified, and swapped in with 7.11. A locked target retries with backoff (10 s up to 10 min).
-  - Safe mutation foundation: [root-relative handle and no-overwrite move checks](docs/verification/P1.5.3-4-safe-mutations-2026-10-19.md). Puller, durable apply/recovery, archive accounting and pruning remain unimplemented.
+  - Safe mutation foundation: [root-relative handle and no-overwrite move checks](docs/verification/P1.5.3-4-safe-mutations-2026-10-19.md). Durable file/directory application/recovery, archive accounting and pruning are merged; pull ordering, retries, case coordination and stale-temporary retention/cleanup remain incomplete.
   - [Verified chunk assembly](docs/verification/P1.5.3-chunk-assembly-2026-10-19.md) reuses verified temporary/local chunks before network fallback, checks each chunk and the independent whole-file hash, and records safe diagnostic progress. It does not install a target or publish index metadata.
   - [Handle-based metadata preparation](docs/verification/P1.5.3-file-metadata-2026-10-19.md) preserves DACL/protection and creation time, validates representable mtimes and handles read-only archive moves. Coordinator/recovery and retries remain pending.
   - [x] **P1.5.3a Durable apply intent and index completion** (`PeerSync.Storage/FolderDb/ApplyJournal.cs`) (#18)
@@ -1362,9 +1368,9 @@ Our own writes need no special suppression: the puller records the new state in 
   - [x] **P1.5.3c Directory application and nonrecursive deletion** (`PeerSync.Engine/Sync/DirectoryApplier.cs`) (#25)
     - Done when: signed directory versions create/update directories and remove only empty directories through pinned handles, durable identity-bound intents and unified recovery before scanning. Unknown/concurrent children survive and are rescanned with RW/RO policy. Failure/reopening, metadata, root/reparse and identity/type races are tested. File/directory transitions, case-clash preservation and ordering/retries remain parent/conflict requirements.
     - Merged with [local and CI verification](docs/verification/P1.5.3c-directory-application-2026-10-19.md): 27 directory cases, all 239 Engine cases on local/Server 2022/2025, all five required jobs and 115,434 boundary seeds pass. Includes a reproduced/fixed own-write case regression; tested/prospective/actual merge trees match.
-  - [ ] **P1.5.3d Recoverable file/directory transitions** (`PeerSync.Engine/Sync/FileApplier.cs`) [WIP @Codex 2026-10-19]
+  - [x] **P1.5.3d Recoverable file/directory transitions** (`PeerSync.Engine/Sync/FileApplier.cs`) (#26)
     - Done when: both type transitions preserve the old file/tree, including unknown children, through durable kind/identity-bound staging and no-overwrite moves. Completion withholds stale descendant publication/work until normal scanning. Restart, cancellation, metadata, collisions, changed nodes/reparse paths and RW/RO behavior have integration coverage. General case-clash mapping and pull scheduling remain parent requirements.
-    - Implemented with [verification](docs/verification/P1.5.3d-type-transitions-2026-10-19.md): 43 transition cases, three descendant transaction cases and all 469 unit cases pass locally. Canonical native/probe/publishing runner passes in 102.14 s, exit 0, explicitly skipping separate CI fuzz. Required CI and merge remain pending.
+    - Merged with [verification](docs/verification/P1.5.3d-type-transitions-2026-10-19.md): 43 transition cases, three descendant transaction cases and all 469 unit cases pass locally. All five required CI jobs pass, including native Server 2022/2025 and 125,657 boundary seeds; tested/prospective/actual merge trees match. Canonical local native/probe/publishing runner passed in 102.14 s, exit 0, explicitly skipping separate CI fuzz.
 - [x] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23, #24)
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
   - [x] **P1.5.4a Archive placement and retention** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23)

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Engine.Native;
+using PeerSync.Engine.Hashing;
 using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Sync;
@@ -30,6 +31,7 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         int verified = 0;
         try
         {
+            using var blocks = new PublishedBlocks(tree);
             using var whole = Blake3.Hasher.New();
             journal?.TryWrite(new("assembly.started", "assembly") { SessionId = session, Bytes = version.Size, ItemsVisited = body.Chunks.Count });
             foreach (var chunk in body.Chunks)
@@ -48,9 +50,10 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
                 if (resumed) temporaryBytes += length;
                 else
                 {
-                    if (TryLocal(chunk.Hash.ToByteArray(), bytes, cancellationToken))
+                    bool published = blocks.TryRead(chunk.Hash.Span, bytes.Span, cancellationToken);
+                    if (published || TryLocal(chunk.Hash.ToByteArray(), bytes, cancellationToken))
                     {
-                        localBytes += length; origin = "assembly.local_reused";
+                        localBytes += length; origin = published ? "assembly.published_reused" : "assembly.local_reused";
                     }
                     else
                     {
@@ -67,6 +70,7 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
                     await destination.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
                 }
                 whole.Update(bytes.Span);
+                blocks.Put(bytes.Span, chunk.Hash.Span, cancellationToken);
                 offset = checked(offset + length); verified++;
                 journal?.TryWrite(new(origin, "assembly") { SessionId = session, Level = DiagnosticLevel.Debug,
                     Bytes = offset, ItemsVisited = verified, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });

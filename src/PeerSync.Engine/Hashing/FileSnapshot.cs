@@ -20,6 +20,20 @@ internal readonly record struct FileSnapshot(long Length, long LastWrite, long C
 
 internal static partial class NativeFileInfo
 {
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
+    internal struct StandardInfo
+    {
+        [FieldOffset(0)] public long AllocationSize;
+        [FieldOffset(8)] public long EndOfFile;
+        [FieldOffset(16)] public uint NumberOfLinks;
+        [FieldOffset(20)] public byte DeletePending;
+        [FieldOffset(21)] public byte Directory;
+    }
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetStandard(SafeFileHandle handle, int informationClass, out StandardInfo info, uint size);
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct BasicInfo
     {

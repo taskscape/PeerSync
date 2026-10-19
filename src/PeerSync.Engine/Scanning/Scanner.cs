@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
 using PeerSync.Core.Diagnostics;
@@ -72,6 +73,7 @@ public sealed class Scanner : IDisposable
             if (index.ReadApplyIntents().Any())
                 throw new IOException("Pending file application must be recovered before scanning.");
             using var root = new NativeRoot(rootPath);
+            using var blocks = keys.CanWrite ? new PublishedBlocks(root) : null;
             byte[]? identity = index.Meta.Find(RootIdentityKey)?.Value;
             if (identity is not null && !identity.AsSpan().SequenceEqual(root.Identity))
                 throw new IOException("Sync root identity changed; the existing index cannot be reused.");
@@ -156,7 +158,7 @@ public sealed class Scanner : IDisposable
                     return;
                 }
                 if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry)
-                    && (!keys.CanWrite || old.Record is not null))
+                    && (!keys.CanWrite || old.Record is not null && (old.Type != 0 || old.ContentReady)))
                 { Interlocked.Increment(ref unchanged); return; }
                 try
                 {
@@ -170,7 +172,7 @@ public sealed class Scanner : IDisposable
                     {
                         var source = candidates.FirstOrDefault(r => r.Size == entry.Native.Length
                             && r.MtimeTicks == entry.Native.MtimeTicks && r.Attributes == (uint)entry.Native.Attributes);
-                        if (source is not null && SignedRecordFactory.TryOpen(source.Record!, keys, out var body)
+                        if (source is { ContentReady: true } && SignedRecordFactory.TryOpen(source.Record!, keys, out var body)
                             && !body.Deleted && body.Type == 0 && body.Size == (ulong)entry.Native.Length)
                         {
                             var vector = VersionVector.Merge(old?.Vector ?? EmptyVector, source.Vector);
@@ -195,16 +197,22 @@ public sealed class Scanner : IDisposable
                             }
                         }
                     }
-                    var result = await FileHasher.HashRelativeAsync(root, entry.Path, cancellationToken: token).ConfigureAwait(false);
+                    var result = await FileHasher.HashRelativeAsync(root, entry.Path, cancellationToken: token,
+                        capture: blocks is null ? null : (bytes, hash) => blocks.Put(bytes, hash, token)).ConfigureAwait(false);
                     Interlocked.Increment(ref hashed);
                     if (result is null || result.Length != entry.Native.Length || result.MtimeUtc.Ticks != entry.Native.MtimeTicks
                         || result.Attributes != entry.Native.Attributes || result.Volume != root.Volume
                         || !entry.Native.FileId.AsSpan().SequenceEqual(result.FileId))
                     { Defer(entry.Path, old, "changed-during-read", null); return; }
-                    updates.Add(CreateVersion(entry, old, result));
+                    // Legacy readiness backfill is not a new user edit. Preserve
+                    // exact signed bytes/vector while allocating a fresh publication sequence.
+                    if (keys.CanWrite && old is { Flags: LocalFileState.None, Record: not null, ContentReady: false, FileHash: not null }
+                        && MetadataEqual(old, entry) && old.FileHash.AsSpan().SequenceEqual(result.WholeHash))
+                        updates.Add(old with { ContentReady = true, IndexedChunks = result.Chunks.Select(c => new LocalChunk(c.Offset, c.Length, c.Hash)).ToArray() });
+                    else updates.Add(CreateVersion(entry, old, result));
                 }
                 catch (Exception error) when (IsFileError(error))
-                { Defer(entry.Path, old, "read-failed", NativeCode(error)); }
+                { Defer(entry.Path, old, error is CryptographicException ? "published-content-verification-failed" : "read-failed", NativeCode(error)); }
             }).ConfigureAwait(false);
 
             foreach (var old in previous.Values)
@@ -283,6 +291,7 @@ public sealed class Scanner : IDisposable
         var row = Metadata(entry, old, LocalFileState.None) with
         {
             FileHash = hash?.WholeHash,
+            ContentReady = keys.CanWrite && hash is not null,
             Vector = keys.CanWrite ? VersionVector.Increment(inherited ?? old?.Vector ?? EmptyVector, deviceShort) : old?.Vector ?? EmptyVector,
             IndexedChunks = hash is null ? [] : hash.Chunks.Select(c => new LocalChunk(c.Offset, c.Length, c.Hash)).ToArray(),
         };
@@ -332,7 +341,7 @@ public sealed class Scanner : IDisposable
 
     internal static bool IsInternal(string path) => path.Split('/').Any(p => p.Equals(".psp", StringComparison.OrdinalIgnoreCase)
         || p.EndsWith(".!psp", StringComparison.OrdinalIgnoreCase));
-    private static bool IsFileError(Exception error) => error is IOException or UnauthorizedAccessException or Win32Exception;
+    private static bool IsFileError(Exception error) => error is IOException or UnauthorizedAccessException or Win32Exception or CryptographicException;
     private static int? NativeCode(Exception error) => error is Win32Exception native ? native.NativeErrorCode : null;
     private sealed record WalkEntry(string Path, NativeEntry Native, bool Unsyncable);
 }

@@ -6,6 +6,8 @@ using PeerSync.Engine.Native;
 
 namespace PeerSync.Engine.Hashing;
 
+internal delegate void CaptureChunk(ReadOnlySpan<byte> bytes, ReadOnlySpan<byte> hash);
+
 public sealed record ChunkInfo(long Offset, int Length, byte[] Hash);
 public sealed record FileHash(long Length, DateTime MtimeUtc, uint ChunkClass,
     IReadOnlyList<ChunkInfo> Chunks, byte[] WholeHash)
@@ -39,16 +41,16 @@ public static class FileHasher
     }
 
     internal static async Task<FileHash?> HashRelativeAsync(NativeRoot root, string relativePath,
-        IProgress<FileHashProgress>? progress = null, CancellationToken cancellationToken = default)
+        IProgress<FileHashProgress>? progress = null, CaptureChunk? capture = null, CancellationToken cancellationToken = default)
     {
         using var handle = root.OpenFile(relativePath);
         FileIoPriority.SetVeryLow(handle);
         await using var file = new FileStream(handle, FileAccess.Read, 0, isAsync: false);
-        return await HashOpenedAsync(file, () => root.OpenFile(relativePath), progress, cancellationToken).ConfigureAwait(false);
+        return await HashOpenedAsync(file, () => root.OpenFile(relativePath), progress, cancellationToken, capture).ConfigureAwait(false);
     }
 
     private static async Task<FileHash?> HashOpenedAsync(FileStream file, Func<SafeFileHandle> reopen,
-        IProgress<FileHashProgress>? progress, CancellationToken cancellationToken)
+        IProgress<FileHashProgress>? progress, CancellationToken cancellationToken, CaptureChunk? capture = null)
     {
         var before = FileSnapshot.Read(file.SafeFileHandle);
         if ((before.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
@@ -63,6 +65,7 @@ public static class FileHasher
         {
             whole.Update(chunk);
             var digest = Blake3.Hasher.Hash(chunk);
+            capture?.Invoke(chunk, digest.AsSpan());
             chunks.Add(new(offset, chunk.Length, digest.AsSpan().ToArray()));
             offset = checked(offset + chunk.Length);
             progress?.Report(new(offset, before.Length, chunks.Count));
