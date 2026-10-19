@@ -1325,9 +1325,9 @@ Our own writes need no special suppression: the puller records the new state in 
     - Only RW peers publish the merged record. RO peers apply the same rule locally and never publish.
   - Ref: Sync engine design, Version vectors and conflicts.
   - Local foundation: deterministic causal/concurrent selection, signed vector merges, loser fate and bounded conflict names are tested. Directory/unknown-child and case-clash filesystem preservation still require P1.5.3 integration; this task remains incomplete.
-- [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`)
+- [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`) [WIP @Codex 2026-10-19]
   - Done when: directories are created first, then files in priority order, then deletions, deepest directory last. Files are assembled from local chunks before network chunks, verified, and swapped in with 7.11. A locked target retries with backoff (10 s up to 10 min).
-- [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`)
+- [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) [WIP @Codex 2026-10-19]
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
 - [ ] **P1.5.5 Clock-skew guard** (`PeerSync.Engine/Sync/ClockGuard.cs`)
   - Done when: `Hello` carries UTC time. A peer more than 10 minutes off exchanges no index updates and shows "clock differs by N minutes" in the UI.
