@@ -1153,6 +1153,17 @@ accepted state. Test actual local named-pipe identity, stream lifecycle and
 runtime snapshots, then render the real WPF controls and retain images for
 inspection. Service installation/configuration, full production engine hosting
 and the rest of the control API remain their required later tasks.
+The initial WPF status view owns one cancellable reconnect loop and marshals
+all model updates onto its dispatcher. Each attempt clears prior successful
+rows and assigns a new client generation; its first valid snapshot binds the
+service epoch, subsequent snapshots must keep that epoch and increase sequence.
+Late results or errors from old attempts cannot change the active view. Stream
+completion is a disconnect, including an empty clean completion. Retry failures
+with a bounded delay and release the channel/stream on cancellation or close.
+Present clock reasons, signed numeric minutes (peer UTC minus local UTC),
+connected/disconnected peer state, truncation and explicit production availability.
+Render and inspect actual WPF controls for skew, recovery and service failure;
+internal test factories must not expose a production arbitrary endpoint switch.
 
 The named-pipe configuration follows the installed .NET 10/Grpc 2.84 packages
 and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0),
