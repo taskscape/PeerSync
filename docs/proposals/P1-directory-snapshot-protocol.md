@@ -89,6 +89,19 @@ graph advancement. A newly needed retiring graph returns pending until bounded
 cleanup finishes, then rebuilds; partially retired coverage is never readable.
 Cache retirement alone never deletes native content-addressed bytes.
 
+Resumable capture uses a local builder checkpoint: `PSDB`, version 1, byte
+level count, UInt16 partial Record count, UInt64 accepted member count (at most
+Int64.MaxValue), then UInt16 counts for each carry level and 36-byte links for
+Records followed by each level. Integers are little-endian; no trailing bytes.
+Counts are the canonical base-128 digits of the accepted member count. Every
+buffer contains at most 127 links; the highest existing level is nonempty.
+Record links have valid 48–624-byte Record-node lengths; carry links refer to
+full 4620-byte pages. Ten levels and a 50328-byte overall bound are enforced.
+Only checkpoint successful additions after metadata flush; discard a failed
+builder and resume its last durable state. The eventual durable capture journal
+must also bind root, parent, ordered input manifest and cursor before enabling
+scanner publication. This local codec alone is not a complete tree proof.
+
 ## Materialization and acceptance
 
 Admit a directory root/source proof before normal original-path merging.

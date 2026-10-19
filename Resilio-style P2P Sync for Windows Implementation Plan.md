@@ -662,6 +662,13 @@ a persistent retiring flag. Resume existing retirements before graph work;
 a newly needed retiring graph waits for bounded cleanup and rebuilds from
 its signed root. Never expose partially retired coverage or delete native
 blocks merely because graph cache metadata expires.
+Resumable capture retains a bounded builder checkpoint containing the accepted
+member count, partial Record links and full-page carry links. Validate canonical
+base-128 count distribution, link lengths and exact state size before restore.
+Only checkpoint successful additions after owned metadata flush; a failed
+addition discards the in-memory builder. Bind the eventual durable checkpoint
+to root, parent, ordered input manifest and continuation cursor before scanner
+activation. Builder checkpoints alone are not complete subtree proofs.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
