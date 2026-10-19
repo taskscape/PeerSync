@@ -655,6 +655,13 @@ atomically only after independent metadata bytes are durably accounted. Work
 budgets return pending, resume after reopening and never activate partial
 reference coverage. Missing metadata, invalid kinds/signatures/parents,
 duplicate keys and excessive page nesting retain fail-closed protection.
+Touch graph caches when their source is encountered. After a complete fresh
+reference activation, mark only caches unused for 24 hours for retirement.
+Delete at most 1000 continuation/member/reference/job rows per refresh, using
+a persistent retiring flag. Resume existing retirements before graph work;
+a newly needed retiring graph waits for bounded cleanup and rebuilds from
+its signed root. Never expose partially retired coverage or delete native
+blocks merely because graph cache metadata expires.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

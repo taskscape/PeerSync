@@ -81,7 +81,13 @@ Large record chunk lists append references in batches of at most 1000 before
 that commit. Replays are idempotent for references; duplicate graph structure
 or child keys fail. Incomplete jobs never supply reference coverage. Completed
 immutable graph references can stream from SQLite without loading the whole
-tree. Job retirement must be bounded before the lifecycle task is completed.
+tree. Touch caches whenever their source is encountered. After complete fresh
+reference activation, mark only caches unused for 24 hours for retirement.
+A persistent retiring flag permits at most 1000 work/member/reference/job row
+deletions or retirement marks per refresh. Resume existing retirements before
+graph advancement. A newly needed retiring graph returns pending until bounded
+cleanup finishes, then rebuilds; partially retired coverage is never readable.
+Cache retirement alone never deletes native content-addressed bytes.
 
 ## Materialization and acceptance
 
