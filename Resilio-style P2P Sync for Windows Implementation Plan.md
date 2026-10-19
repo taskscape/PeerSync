@@ -372,6 +372,13 @@ file's metadata. Age selection and capacity ordering use that effective
 retention time. Do not attach a new hold to an archive already reserved for
 policy deletion; retain another verified copy instead. Existing history markers
 must receive equivalent authenticated/root-bound accounting before pruning.
+Legacy history bootstrap authenticates each exact marker and checks the pinned
+root. Reuse a matching identity/hash/length under a held native guard when its
+private source is still retainable, then FULL-account the unchanged marker.
+Otherwise reconstruct the authenticated bytes through the ordinary kind-4
+intent path, preserving the original observation time and current user files.
+Missing/corrupt blocks or invalid markers fail visibly with prior protection
+and any recovery intent intact. Bootstrap waits for pending application recovery.
 Bind new archive retirement authorizations to stable provenance source IDs,
 so a completed witness cannot authorize a later archive row which reuses the
 same numeric ID and metadata. Legacy orphan protection, explicit private/public
