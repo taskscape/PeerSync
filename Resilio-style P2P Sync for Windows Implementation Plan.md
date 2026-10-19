@@ -693,6 +693,12 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    unchanged cataloged objects; changed/foreign objects are preserved. Legacy
    unaged pointers remain compatible for verified reuse but never authorize age
    cleanup until adopted under a verified apply/recovery context.
+   Every recovery/defer branch that already owns the temporary handle must
+   pass that handle into fingerprint/protection capture; an exclusive reopen
+   would fail sharing and must not downgrade edited prepared bytes to legacy
+   reuse. Reusing a cataloged case-alias sibling keeps its native identity and
+   catalog spelling, but records the new intent's temporary path under the
+   current target-parent spelling so the strict recovery format remains valid.
    Expiry requires at least 24 hours, no needed work for the target and no active
    apply. Stream verification outside the reference gate, then recheck under
    filesystem/reference gates before a FULL deletion intent and native removal.
