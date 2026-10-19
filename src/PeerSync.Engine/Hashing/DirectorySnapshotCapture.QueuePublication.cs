@@ -16,7 +16,7 @@ internal sealed partial class DirectorySnapshotCapture
     internal async Task<DirectoryPublicationCommit> CommitQueuedUnderGateAsync(DirectoryPublication queued, DirectoryCaptureState draft,
         LocalFileRow? publication, long nowTicks, CancellationToken token)
     {
-        Guid session = Guid.NewGuid(); string stage = "verify-template";
+        Guid session = queued?.Version ?? Guid.NewGuid(); string stage = "verify-template";
         try
         {
             ArgumentNullException.ThrowIfNull(queued); ArgumentNullException.ThrowIfNull(draft);

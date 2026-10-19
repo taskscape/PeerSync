@@ -64,26 +64,49 @@ public sealed partial class DirectorySnapshotCaptureTests
         await Should.ThrowAsync<OperationCanceledException>(() => Worker(index).RunAsync(token: cancelled.Token));
         index.ReadDirectoryPublication("topic")!.Attempts.ShouldBe(before.Attempts);
     }
-    [Fact]
-    public async Task WorkerCanReconstructReadonlyButCannotSignAMismatchedRoot()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerCanReconstructReceivedRootsButCannotRewriteTheirPrivateTemplate(bool readOnly)
     {
         WriteFiles("a"); await using var index = await Open(); await QueueForWorker(index, "topic");
         (await Worker(index).RunAsync(token: Token)).ChangedPaths.ShouldBe(["topic"]);
         var original = index.LocalFiles.Find("topic")!; long high = index.ReadIndexHighWater();
         await QueueForWorker(index, "topic", receivedTemplate: true);
         using var access = FolderKeys.FromText(keys.ExportReadOnlyText());
-        var same = await Worker(index, access).RunAsync(token: Token); same.ChangedPaths.ShouldBeEmpty(); same.Deferred.ShouldBe(0); index.ReadIndexHighWater().ShouldBe(high);
+        var same = await Worker(index, readOnly ? access : keys).RunAsync(token: Token); same.ChangedPaths.ShouldBeEmpty(); same.Deferred.ShouldBe(0); index.ReadIndexHighWater().ShouldBe(high);
         // A newly signed logical child changes the captured root. RO must keep
         // the authenticated current root and queue instead of inventing one.
         var body = VersionView.Open(index.LocalFiles.Find("topic/a")!.Record!, keys, device).ExportBody(); body.ChangedTicks++;
         var child = index.LocalFiles.Find("topic/a")!;
         await index.LocalFiles.UpsertAsync([child with { Record = SignedRecordFactory.Create(body, keys), ChangedTicks = body.ChangedTicks }], Token);
         await QueueForWorker(index, "topic", receivedTemplate: true);
-        var pending = await Worker(index, access).RunAsync(token: Token); pending.Deferred.ShouldBe(1); pending.ChangedPaths.ShouldBeEmpty();
+        var pending = await Worker(index, readOnly ? access : keys).RunAsync(token: Token); pending.Deferred.ShouldBe(1); pending.ChangedPaths.ShouldBeEmpty();
         index.LocalFiles.Find("topic")!.Record!.Body.ToArray().ShouldBe(original.Record!.Body.ToArray()); index.HasDirectoryCaptures().ShouldBeTrue();
     }
     private DirectoryPublicationWorker Worker(FolderIndex index, FolderKeys? access = null, Action<string>? checkpoint = null) =>
         new(Root, index, access ?? keys, device, new FolderSettings(), TimeProvider.System) { Checkpoint = checkpoint };
+
+    [Fact]
+    public async Task WorkerRejectsAnInventoryMutationBeforeBindingAndKeepsTheQueueForRetry()
+    {
+        WriteFiles("a"); await using var index = await Open(); var queued = await QueueForWorker(index, "topic");
+        var worker = Worker(index, checkpoint: stage => { if (stage == "before-key-bind") Sql("UPDATE local_files SET flags=4 WHERE path_key='TOPIC/A';"); });
+        var result = await worker.RunAsync(token: Token); result.ChangedPaths.ShouldBeEmpty(); result.Deferred.ShouldBe(1);
+        var pending = index.ReadDirectoryPublication("topic")!; pending.Version.ShouldBe(queued.Version); pending.KeysEpoch.ShouldBeNull(); pending.Attempts.ShouldBe(1);
+        index.HasDirectoryCaptures().ShouldBeFalse(); index.ReadDirectoryPublicationCache("topic").ShouldBeNull();
+    }
+    [Fact]
+    public async Task WorkerInterruptionAfterAtomicCommitReplaysWithoutAnotherPublication()
+    {
+        WriteFiles("a"); await using var index = await Open(); await QueueForWorker(index, "topic");
+        var worker = Worker(index, checkpoint: stage => { if (stage == "queue-published") throw new Stop(); });
+        await Should.ThrowAsync<Stop>(() => worker.RunAsync(token: Token));
+        index.HasPendingDirectoryPublications().ShouldBeFalse(); index.HasDirectoryCaptures().ShouldBeFalse(); index.ReadDirectoryPublicationCache("topic").ShouldNotBeNull();
+        var prior = index.LocalFiles.Find("topic")!; long high = index.ReadIndexHighWater();
+        var replay = await Worker(index).RunAsync(token: Token); replay.Visited.ShouldBe(0); replay.ChangedPaths.ShouldBeEmpty(); index.ReadIndexHighWater().ShouldBe(high);
+        index.LocalFiles.Find("topic")!.Record!.Body.ToArray().ShouldBe(prior.Record!.Body.ToArray());
+    }
     private async Task<DirectoryPublication> QueueForWorker(FolderIndex index, string path, bool wrongMembership = false, bool receivedTemplate = false)
     {
         var row = index.LocalFiles.Find(path)!; var inventory = index.ReadDirectoryChildInventory(path, Token);

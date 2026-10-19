@@ -121,6 +121,26 @@ public sealed class DirectoryPublicationTests : IDisposable
         index.LocalFiles.Count().ShouldBe(0); index.ReadIndexHighWater().ShouldBe(0); seed.Template.Body.ToArray().ShouldBe(new byte[] { 2 });
     }
     private static DirectoryPublication Spec(string path) => new(Guid.NewGuid(), path, Root, new byte[16], 0, 16, new SignedRecord([2], new byte[64]), new byte[32], 2, Now, Now);
+    [Fact]
+    public async Task MetadataReconciliationReadsPausedAndBackedOffPathsAndAtomicallyDiscardsOnlyTheExpectedVersion()
+    {
+        await using var index = await Open(); var first = await index.StageDirectoryPublicationAsync(Spec("topic"), Token);
+        await index.BeginDirectoryCaptureAsync("topic", Root, new byte[16], new byte[32], 0, new byte[16], Token);
+        await index.PauseDirectoryPublicationAsync(first, true, Now, Token);
+        var other = await index.StageDirectoryPublicationAsync(Spec("zebra"), Token); await index.RetryDirectoryPublicationAsync(other, Now, Token);
+        index.ReadDueDirectoryPublications(Now).ShouldBeEmpty(); index.ReadDirectoryPublicationPaths(limit: 1).ShouldBe(["TOPIC"]);
+        index.ReadDirectoryPublicationPaths("topic", 1).ShouldBe(["ZEBRA"]); index.ReadDirectoryPublicationPaths("zebra", 1).ShouldBeEmpty();
+        var replacement = await index.StageDirectoryPublicationAsync(first with { Version = Guid.NewGuid() }, Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => index.DiscardDirectoryPublicationAsync(first, Token));
+        index.HasDirectoryCaptures().ShouldBeTrue();
+        using (var connection = Connect()) using (var trigger = connection.CreateCommand())
+        { trigger.CommandText = "CREATE TRIGGER fail_discard BEFORE DELETE ON directory_publications BEGIN SELECT RAISE(ABORT,'discard failure'); END;"; trigger.ExecuteNonQuery(); }
+        await Should.ThrowAsync<SqliteException>(() => index.DiscardDirectoryPublicationAsync(replacement, Token));
+        index.ReadDirectoryCapture("topic").ShouldNotBeNull(); index.ReadDirectoryPublication("topic").ShouldNotBeNull();
+        using (var connection = Connect()) using (var trigger = connection.CreateCommand()) { trigger.CommandText = "DROP TRIGGER fail_discard;"; trigger.ExecuteNonQuery(); }
+        await index.DiscardDirectoryPublicationAsync(replacement, Token); index.ReadDirectoryCapture("topic").ShouldBeNull(); index.ReadDirectoryPublication("topic").ShouldBeNull();
+        index.ReadDirectoryPublication("zebra").ShouldNotBeNull(); index.ReadIndexHighWater().ShouldBe(0); index.LocalFiles.Count().ShouldBe(0);
+    }
     private async Task<FolderIndex> Open()
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

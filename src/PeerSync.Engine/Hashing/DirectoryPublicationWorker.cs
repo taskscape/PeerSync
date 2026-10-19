@@ -31,7 +31,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
         foreach (var initial in index.ReadDueDirectoryPublications(clock.GetUtcNow().UtcTicks, maximumDirectories))
         {
             if (remaining == 0) break;
-            token.ThrowIfCancellationRequested(); visited++; Guid session = Guid.NewGuid(); string stage = "dependencies";
+            token.ThrowIfCancellationRequested(); visited++; Guid session = initial.Version; string stage = "dependencies";
             var queued = initial;
             try
             {
@@ -52,7 +52,12 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 // pass is bounded even if no new member bytes were captured.
                 long accepted = before is not null && before.InputHash.AsSpan().SequenceEqual(draft.InputHash) ? before.Accepted : 0;
                 remaining -= (int)Math.Clamp(draft.Accepted - accepted, 1, remaining);
-                if (draft.Hash is null) continue;
+                if (draft.Hash is null)
+                {
+                    journal?.TryWrite(new("directory.publication_pending", "directory-publication") { SessionId = session, Level = DiagnosticLevel.Debug,
+                        ItemsVisited = draft.Accepted, ItemsChanged = Math.Max(0, draft.Accepted - accepted) });
+                    continue;
+                }
                 stage = "publication";
                 var previous = index.LocalFiles.Find(queued.Path); var template = VersionView.Open(queued.Template, keys, source);
                 LocalFileRow? publication = null;
@@ -66,7 +71,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 }
                 if (!identical)
                 {
-                    if (!keys.CanWrite) { await Retry(null).ConfigureAwait(false); continue; }
+                    if (!keys.CanWrite || template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
                     var body = template.ExportBody(); body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
                     var record = SignedRecordFactory.Create(body, keys);
                     publication = new(queued.Path, 1, 0, body.MtimeTicks, queued.Attributes, false, body.ChangedTicks, null,

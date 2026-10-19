@@ -5,6 +5,29 @@ namespace PeerSync.Storage.FolderDb;
 
 public sealed partial class FolderIndex
 {
+    public IReadOnlyList<string> ReadDirectoryPublicationPaths(string? afterKey = null, int limit = 1000)
+    {
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        string? after = afterKey is null ? null : PathRules.Key(afterKey);
+        using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT path_key FROM directory_publications " + (after is null ? "" : "WHERE path_key>$after ") + "ORDER BY path_key LIMIT $limit;";
+        command.Parameters.AddWithValue("$limit", limit); if (after is not null) command.Parameters.AddWithValue("$after", after);
+        var paths = new List<string>(); using var reader = command.ExecuteReader(); while (reader.Read()) paths.Add(reader.GetString(0)); return paths.AsReadOnly();
+    }
+    /// <summary>Caller proved this private work obsolete through a complete
+    /// native scan. Discards metadata only, never native bytes or signed rows.</summary>
+    public Task DiscardDirectoryPublicationAsync(DirectoryPublication expected, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected); var row = FreezePublication(expected); ValidatePublication(row);
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            RequireBlockReferenceRoot(connection, transaction, row.RootId); RequirePublicationExpected(connection, transaction, row);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "DELETE FROM directory_captures WHERE parent_key=$key AND root_id=$root; DELETE FROM directory_publications WHERE path_key=$key AND version=$version;";
+            command.Parameters.AddWithValue("$key", PathRules.Key(row.Path)); command.Parameters.AddWithValue("$root", row.RootId);
+            command.Parameters.AddWithValue("$version", row.Version.ToString("N")); command.ExecuteNonQuery(); return 0;
+        }, cancellationToken);
+    }
     public Task<bool> PauseDirectoryPublicationAsync(DirectoryPublication expected, bool paused, long nowTicks, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(expected); var row = FreezePublication(expected); ValidatePublication(row);
