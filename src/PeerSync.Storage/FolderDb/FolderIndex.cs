@@ -1,0 +1,91 @@
+using System.Buffers.Binary;
+using Microsoft.Data.Sqlite;
+using PeerSync.Core.Paths;
+
+namespace PeerSync.Storage.FolderDb;
+
+public sealed record IndexBatch(IReadOnlyList<LocalFileRow> Records, long LastSequence);
+
+public sealed class FolderIndex : IAsyncDisposable
+{
+    internal const string SequenceKey = "_local-sequence";
+    private readonly Db database;
+
+    private FolderIndex(Db database)
+    {
+        this.database = database;
+        LocalFiles = new(database, FolderMaps.Local);
+        RemoteFiles = new(database, FolderMaps.Remote);
+        Needed = new(database, FolderMaps.Needed);
+        Chunks = new(database, FolderMaps.Chunks);
+        Devices = new(database, FolderMaps.Devices);
+        Archive = new(database, FolderMaps.Archive);
+        Meta = new(database, FolderMaps.Meta);
+    }
+
+    public RowRepository<LocalFileRow> LocalFiles { get; }
+    public RowRepository<RemoteFileRow> RemoteFiles { get; }
+    public RowRepository<NeededRow> Needed { get; }
+    public RowRepository<ChunkRow> Chunks { get; }
+    public RowRepository<DeviceRow> Devices { get; }
+    public RowRepository<ArchiveRow> Archive { get; }
+    public RowRepository<MetaRow> Meta { get; }
+
+    public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
+    {
+        using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations.0001_initial.sql")
+            ?? throw new InvalidOperationException("Missing folder schema resource.");
+        using var reader = new StreamReader(resource);
+        string sql = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        var database = await Db.OpenAsync(path, [new(1, sql)], cancellationToken).ConfigureAwait(false);
+        try { return new(database); }
+        catch { await database.DisposeAsync().ConfigureAwait(false); throw; }
+    }
+
+    /// <summary>Read records and the cursor in one snapshot, including safe advancement over unpublished sequence gaps.</summary>
+    public IndexBatch ReadIndexBatch(long afterSequence, int limit = 1000)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(afterSequence);
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var connection = database.OpenReader();
+        using var transaction = connection.BeginTransaction(deferred: true);
+        long highWater = ReadSequence(connection, transaction);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE local_seq>$after AND local_seq<=$high AND flags=0 AND record_body IS NOT NULL ORDER BY local_seq LIMIT $limit;";
+        command.Parameters.AddWithValue("$after", afterSequence);
+        command.Parameters.AddWithValue("$high", highWater);
+        command.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<LocalFileRow>();
+        using (var reader = command.ExecuteReader()) while (reader.Read()) rows.Add(FolderMaps.ReadLocal(reader));
+        long cursor = rows.Count == limit ? rows[^1].LocalSequence : Math.Max(afterSequence, highWater);
+        transaction.Commit();
+        return new(rows.AsReadOnly(), cursor);
+    }
+
+    public IEnumerable<ChunkRow> FindChunks(byte[] hash)
+    {
+        FolderMaps.RequireBytes(hash, 32);
+        return Chunks.ReadWhere("hash=$k0 ORDER BY path_key,file_offset", hash);
+    }
+
+    public IEnumerable<RemoteFileRow> RemotesForPath(string recordPath) =>
+        RemoteFiles.ReadWhere("path_key=$k0", PathRules.Key(recordPath));
+
+    public IEnumerable<NeededRow> NeededByPriority() => Needed.ReadWhere("1=1 ORDER BY priority DESC,path_key");
+    public ValueTask DisposeAsync() => database.DisposeAsync();
+
+    internal static long ReadSequence(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT value FROM meta WHERE key=$key;";
+        command.Parameters.AddWithValue("$key", SequenceKey);
+        object? value = command.ExecuteScalar();
+        if (value is null or DBNull) return 0;
+        if (value is not byte[] { Length: 8 } bytes) throw new InvalidDataException("Invalid local sequence metadata.");
+        long sequence = BinaryPrimitives.ReadInt64LittleEndian(bytes);
+        if (sequence < 0) throw new InvalidDataException("Invalid local sequence metadata.");
+        return sequence;
+    }
+}

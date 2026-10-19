@@ -222,6 +222,13 @@ SQLite's online backup API (including committed WAL data), then apply SQL and
 Microsoft.Data.Sqlite's async ADO.NET calls execute synchronously, the writer
 runs on a worker task rather than blocking the service caller.
 
+Folder repositories commit up to 1,000 rows per transaction. Allocate local
+sequence numbers and persist their records in that same transaction, so an
+index cursor cannot pass an unpublished earlier sequence. Rewriting a local
+sequence never changes the signed body/signature. Supplied local chunk indexes
+are replaced atomically with their file row. Unsyncable local names may be
+kept as metadata with no signed record; remote paths always pass path rules.
+
 Version vectors use an 8-byte short device id (the first 8 bytes of DeviceId) to keep records small.
 Missing counters are zero; canonical vectors omit zero entries. Incrementing
 an exhausted 64-bit counter fails instead of wrapping. The Core compact
@@ -292,6 +299,19 @@ Security rests on three things: holding a folder key, TLS 1.3 between pinned dev
 | Content hashes | BLAKE3 | `Blake3.Native` 3.0.2 (the `Blake3` namespace); selected in P0.2.4 after measuring both implementations |
 | Encrypted-peer data (phase 6) | AES-256-GCM with a synthetic, content-derived nonce | `AesGcm` |
 | Secrets at rest | Device key: non-exportable CNG key in LocalMachine\\My, usable only by the service. Folder keys: DPAPI (machine scope plus app entropy) inside peersync.db | `ProtectedData` |
+
+The shared folder-key protector lives in Crypto so Storage can call it without
+depending on the service host. Preserve fixed entropy `PeerSync folder key v1`.
+DPAPI plaintext is a versioned binary frame containing role, FolderId and raw
+key material; unprotect validates the expected folder/role and re-derives its
+identity. Temporary plaintext is cleared. State database folder writes accept
+key objects and always protect internally; listing folders exposes no cipher
+or key material. Explicit key retrieval is audited. Machine-scope DPAPI does
+not isolate users who can read the blob: the state-directory ACL is essential.
+Folder settings keep the documented defaults, reject unknown/duplicate JSON
+fields, and validate bounded host lists and ranges (rescan 1–86,400 seconds,
+archive age 1–36,500 days, nonnegative archive size, volume cap 1–100%). Host
+entries contain only DNS/IP and port, without credentials, paths or queries.
 
 All randomness comes from `RandomNumberGenerator`. No home-made ciphers: the only custom constructions are the key chain and the deterministic nonce, both built from standard primitives.
 

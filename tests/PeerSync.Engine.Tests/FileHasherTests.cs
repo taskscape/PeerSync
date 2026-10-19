@@ -66,6 +66,9 @@ public sealed class FileHasherTests : IDisposable
         string path = await NewFile();
         const long originalLength = 2 * 1024 * 1024;
         DateTime mtime = File.GetLastWriteTimeUtc(path);
+        // NTFS timestamps use the system clock: two very fast updates may have
+        // the same ChangeTime. Ensure the mutation has a distinct clock tick.
+        await Task.Delay(TimeSpan.FromMilliseconds(30), TestContext.Current.CancellationToken);
         bool changed = false;
         long maximumRead = 0;
         var progress = new InlineProgress(update =>

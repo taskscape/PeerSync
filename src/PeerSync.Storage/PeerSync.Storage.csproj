@@ -1,3 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup><PackageReference Include="Microsoft.Data.Sqlite" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
+    <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
+    <EmbeddedResource Include="FolderDb/Migrations/*.sql" />
+    <EmbeddedResource Include="StateDb/Migrations/*.sql" />
+  </ItemGroup>
 </Project>

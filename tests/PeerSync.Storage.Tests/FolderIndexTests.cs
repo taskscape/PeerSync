@@ -1,0 +1,181 @@
+using System.Buffers.Binary;
+using System.Text;
+using PeerSync.Core.Sync;
+using PeerSync.Storage.FolderDb;
+using Shouldly;
+using Xunit;
+
+namespace PeerSync.Storage.Tests;
+
+public sealed class FolderIndexTests : IDisposable
+{
+    private readonly string root = Path.Combine(Path.GetTempPath(), "PeerSync-Index-" + Guid.NewGuid().ToString("N"));
+    private string DatabasePath => Path.Combine(root, "folder.db");
+    private static readonly byte[] Hash = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
+    private static readonly byte[] Peer = Enumerable.Repeat((byte)42, 32).ToArray();
+    public FolderIndexTests() => Directory.CreateDirectory(root);
+
+    [Fact]
+    public async Task LocalRowsRoundTripExactEnvelopesVectorsAndUnicodeKeysWithAllocatedSequences()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var original = Row("Żółć/É.txt") with { Attributes = 3, MtimeTicks = 638000000000000000, FileId = new byte[16], LocalSequence = 88 };
+        (await index.LocalFiles.UpsertAsync([original], TestContext.Current.CancellationToken)).ShouldBe(1);
+        var saved = index.LocalFiles.Find("żÓŁĆ/é.TXT");
+        saved.ShouldNotBeNull();
+        saved.Path.ShouldBe(original.Path);
+        saved.Attributes.ShouldBe(3u);
+        saved.MtimeTicks.ShouldBe(original.MtimeTicks);
+        saved.LocalSequence.ShouldBe(1);
+        saved.FileId.ShouldBe(original.FileId);
+        VersionVector.Compare(saved.Vector, original.Vector).ShouldBe(VvOrder.Equal);
+        saved.Record!.Body.ToArray().ShouldBe(original.Record!.Body.ToArray());
+        saved.Record.Signature.ToArray().ShouldBe(original.Record.Signature.ToArray());
+        saved.Record.LocalSequence.ShouldBe(1ul);
+        original.Record.LocalSequence.ShouldBe(999ul);
+        await index.LocalFiles.UpsertAsync([original with { Path = "żółć/é.txt" }], TestContext.Current.CancellationToken);
+        index.LocalFiles.Count().ShouldBe(1);
+        index.LocalFiles.Find("ŻÓŁĆ/É.TXT")!.LocalSequence.ShouldBe(2);
+        (await index.LocalFiles.DeleteAsync(["Żółć/é.txt"], TestContext.Current.CancellationToken)).ShouldBe(1);
+        index.LocalFiles.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task EveryOtherTableSupportsParameterizedUpsertReadUpdateAndDelete()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var record = Row("dir/file").Record!;
+        var vector = new Dictionary<ulong, ulong> { [7] = 9 };
+        await index.RemoteFiles.UpsertAsync([new(Peer, "dir/file", vector, record)], TestContext.Current.CancellationToken);
+        var remote = index.RemoteFiles.Find(Peer, "DIR/file")!;
+        remote.PathKey.ShouldBe("DIR/FILE");
+        remote.Record.Body.ToArray().ShouldBe(record.Body.ToArray());
+        remote.Record.Signature.ToArray().ShouldBe(record.Signature.ToArray());
+        remote.Record.LocalSequence.ShouldBe(0ul);
+        VersionVector.Compare(remote.Vector, vector).ShouldBe(VvOrder.Equal);
+        index.RemotesForPath("dir/File").Count().ShouldBe(1);
+
+        await index.Needed.UpsertAsync([new("dir/file", Peer, 1), new("other", Peer, 9)], TestContext.Current.CancellationToken);
+        index.NeededByPriority().First().PathKey.ShouldBe("OTHER");
+        await index.Needed.UpsertAsync([new("dir/file", Peer, 10)], TestContext.Current.CancellationToken);
+        index.NeededByPriority().First().PathKey.ShouldBe("DIR/FILE");
+
+        await index.Chunks.UpsertAsync([new(Hash, "dir/file", 0, 1), new(Hash, "dir/file", 4, 3)], TestContext.Current.CancellationToken);
+        index.FindChunks(Hash).Select(c => c.Offset).ShouldBe(new long[] { 0, 4 });
+        index.Chunks.Find(Hash, "DIR/FILE", 4L)!.Length.ShouldBe(3);
+
+        await index.Devices.UpsertAsync([new(Peer, "Żółć", 638000000000000000, 11, DeviceApproval.Approved, false)], TestContext.Current.CancellationToken);
+        var device = index.Devices.Find(Peer)!;
+        device.Name.ShouldBe("Żółć"); device.LastSequenceReceived.ShouldBe(11);
+        device.Approval.ShouldBe(DeviceApproval.Approved); device.Pinned.ShouldBeFalse();
+        await index.Devices.UpsertAsync([device with { Name = "Updated" }], TestContext.Current.CancellationToken);
+        index.Devices.Find(Peer)!.Name.ShouldBe("Updated");
+
+        await index.Archive.UpsertAsync([new(0, "old.txt", ".psp/archive/old~20261019.txt", 638000000000000000, 3, Hash),
+            new(0, "old.txt", ".psp/archive/old~20261019-2.txt", 638000000000000001, 4, null)], TestContext.Current.CancellationToken);
+        var archive = index.Archive.ReadAll().OrderBy(a => a.Id).ToArray();
+        archive.Length.ShouldBe(2); archive[0].Id.ShouldBeGreaterThan(0);
+        archive[0].FileHash.ShouldBe(Hash); archive[1].FileHash.ShouldBeNull();
+
+        await index.Meta.UpsertAsync([new("scan ' ; --", [1, 2, 3]), new("empty", []), new("null", null)], TestContext.Current.CancellationToken);
+        index.Meta.Find("scan ' ; --")!.Value.ShouldBe(new byte[] { 1, 2, 3 });
+        index.Meta.Find("empty")!.Value.ShouldBeEmpty(); index.Meta.Find("null")!.Value.ShouldBeNull();
+
+        (await index.RemoteFiles.DeleteAsync([Peer, "dir/file"], TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await index.Needed.DeleteAsync(["dir/file"], TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await index.Chunks.DeleteAsync([Hash, "dir/file", 4L], TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await index.Devices.DeleteAsync([Peer], TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await index.Archive.DeleteAsync([archive[0].Id], TestContext.Current.CancellationToken)).ShouldBe(1);
+        (await index.Meta.DeleteAsync(["scan ' ; --"], TestContext.Current.CancellationToken)).ShouldBe(1);
+        index.RemoteFiles.Count().ShouldBe(0); index.Devices.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task LocalChunkReplacementAndDeletionCommitWithTheFileRow()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var row = Row("file") with { Size = 3, IndexedChunks = [new(0, 1, Hash), new(1, 2, Peer)] };
+        await index.LocalFiles.UpsertAsync([row], TestContext.Current.CancellationToken);
+        index.FindChunks(Hash).Single().Length.ShouldBe(1);
+        index.FindChunks(Peer).Single().Offset.ShouldBe(1);
+        await index.LocalFiles.UpsertAsync([row with { IndexedChunks = [new(0, 3, Peer)] }], TestContext.Current.CancellationToken);
+        index.FindChunks(Hash).ShouldBeEmpty(); index.FindChunks(Peer).Single().Length.ShouldBe(3);
+        await index.LocalFiles.UpsertAsync([row with { Deleted = true, IndexedChunks = [] }], TestContext.Current.CancellationToken);
+        index.Chunks.Count().ShouldBe(0);
+        index.LocalFiles.Find("file")!.Deleted.ShouldBeTrue();
+        await index.LocalFiles.UpsertAsync([row], TestContext.Current.CancellationToken);
+        index.Chunks.Count().ShouldBe(2);
+        await index.LocalFiles.DeleteAsync(["file"], TestContext.Current.CancellationToken);
+        index.Chunks.Count().ShouldBe(0); index.LocalFiles.Find("file").ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ThousandRowBatchesCommitIndependentlyAndFailedBatchDoesNotAdvanceSequence()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var rows = Enumerable.Range(0, 1001).Select(i => Row($"file-{i}")).ToArray();
+        rows[^1] = rows[^1] with { Path = "../invalid" };
+        await Should.ThrowAsync<ArgumentException>(() => index.LocalFiles.UpsertAsync(rows, TestContext.Current.CancellationToken));
+        index.LocalFiles.Count().ShouldBe(1000);
+        var batch = index.ReadIndexBatch(0);
+        batch.Records.Count.ShouldBe(1000); batch.LastSequence.ShouldBe(1000);
+        index.ReadIndexBatch(1000).Records.ShouldBeEmpty();
+
+        byte[] nearOverflow = new byte[8];
+        BinaryPrimitives.WriteInt64LittleEndian(nearOverflow, long.MaxValue - 1);
+        await index.Meta.UpsertAsync([new("_local-sequence", nearOverflow)], TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<OverflowException>(() => index.LocalFiles.UpsertAsync([Row("rollback-first"), Row("overflow-second")], TestContext.Current.CancellationToken));
+        index.LocalFiles.Find("rollback-first").ShouldBeNull();
+        index.Meta.Find("_local-sequence")!.Value.ShouldBe(nearOverflow);
+    }
+
+    [Fact]
+    public async Task UnsyncableLocalNamesArePreservedButNeverPublishedAndRemotePathsRemainStrict()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        string decomposed = "café.txt".Normalize(NormalizationForm.FormD);
+        var row = Row(decomposed) with { Record = null, Flags = LocalFileState.Unsyncable };
+        await index.LocalFiles.UpsertAsync([row], TestContext.Current.CancellationToken);
+        index.LocalFiles.Find(decomposed)!.Path.ShouldBe(decomposed);
+        var batch = index.ReadIndexBatch(0);
+        batch.Records.ShouldBeEmpty(); batch.LastSequence.ShouldBe(1);
+        await Should.ThrowAsync<ArgumentException>(() => index.LocalFiles.UpsertAsync([row with { Record = Row("file").Record }], TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<ArgumentException>(() => index.RemoteFiles.UpsertAsync([new(Peer, "../escape", new Dictionary<ulong, ulong>(), Row("file").Record!)], TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(7)]
+    [InlineData(1000)]
+    public async Task SnapshotCursorDoesNotSkipRecordsDuringConcurrentWrites(int limit)
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        var writing = Task.WhenAll(Enumerable.Range(0, 60).Select(i => index.LocalFiles.UpsertAsync([Row($"file-{i}")], TestContext.Current.CancellationToken)));
+        var seen = new HashSet<long>();
+        long cursor = 0;
+        while (true)
+        {
+            // If completion is observed only after the read, the last commit
+            // can land between an empty snapshot and the exit check.
+            bool completedBeforeRead = writing.IsCompleted;
+            var batch = index.ReadIndexBatch(cursor, limit);
+            foreach (var row in batch.Records)
+            {
+                row.LocalSequence.ShouldBeGreaterThan(cursor);
+                row.LocalSequence.ShouldBeLessThanOrEqualTo(batch.LastSequence);
+                seen.Add(row.LocalSequence).ShouldBeTrue();
+            }
+            cursor = batch.LastSequence;
+            if (completedBeforeRead && batch.Records.Count == 0) break;
+            await Task.Yield();
+        }
+        await writing;
+        seen.Count.ShouldBe(60); cursor.ShouldBe(60);
+    }
+
+    private static LocalFileRow Row(string path) => new(path, 0, 1, 638000000000000000, 0, false, 638000000000000000,
+        Hash, new Dictionary<ulong, ulong> { [ulong.MaxValue] = 7, [1] = 5 },
+        new SignedRecord("opaque storage fixture"u8, new byte[64], 999), null);
+
+    public void Dispose() => Directory.Delete(root, recursive: true);
+}

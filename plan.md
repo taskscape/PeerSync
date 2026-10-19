@@ -72,6 +72,8 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.3.3: place the shared folder-key protector in Crypto, preserving fixed v1 app entropy and machine-scope DPAPI. Protect a versioned role/FolderId/material frame, verify context on unprotect and clear plaintext buffers. State writes protect internally and key reads are audited. | Security model: Secrets at rest |
+| 2026-10-19 | P1.3.2: local sequence allocation, file-row storage and supplied chunk-index replacement share the batch transaction. Unsyncable local metadata has no signed record; remote paths remain strict. Batch at 1,000 rows and preserve envelope bytes verbatim. | Sync engine design: metadata database |
 | 2026-10-19 | P1.3.1: one normalized-path writer owner and a bounded channel, transactional operations with rollback, independent read-only connections, and online SQLite backup before transactional user_version migrations. Run synchronous SQLite I/O on the writer worker; retain WAL/NORMAL/foreign_keys/busy_timeout/temp_store settings. | Sync engine design: metadata database |
 | 2026-10-19 | P1.2.2: bound one-pass hashing to the original length and compare handle/path size, timestamps, attributes and 128-bit file identity. Detected mutation/removal/replacement retries; progress exposes counts only. This is metadata-based detection with shared writers, not an atomic snapshot. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.1.5: specify the ignore glob subset and ancestry/negation behavior, accept Windows pattern separators, and match Unicode scalars without regex backtracking. Local rule text is bounded at 64 KiB, 1,024 rules and 4,096 characters per line. Invalid paths and internal metadata remain excluded. | Sync engine design: Archive, ignore rules and special files |
@@ -196,6 +198,10 @@ The service is the only writer of machine-wide state. Everything lives under `%P
 
 ### 4.1 Settings model
 
+The folder settings portion is superseded by `src/PeerSync.Core/Settings/FolderSettings.cs`
+with strict JSON/range/endpoint validation. Device settings and atomic file
+recovery remain P2.5.4 work.
+
 ```csharp
 // src/PeerSync.Core/Settings/DeviceSettings.cs
 public sealed record DeviceSettings
@@ -295,6 +301,10 @@ public sealed class SettingsStore(string path, ILogger<SettingsStore> log)
 The service loads the file with `AddJsonFile(path, optional: false, reloadOnChange: true)` and binds it to `IOptionsMonitor<DeviceSettings>`, so a save is picked up live.
 
 ### 4.3 Folder-key protection
+
+Superseded by `src/PeerSync.Crypto/FolderKeyProtector.cs`. Crypto owns the
+shared helper to avoid Storage depending on Service. Fixed v1 entropy is
+unchanged; a versioned binary payload binds the role and folder identity.
 
 ```csharp
 // src/PeerSync.Service/Secrets/FolderKeyProtector.cs
@@ -1066,9 +1076,9 @@ static byte[] Bytes(Blake3.Hash h) => h.AsSpan().ToArray();
 - [x] **P1.3.1 SQLite plumbing** (`PeerSync.Storage/Db.cs`) (#9)
   - Done when: connections open with the pragmas in 7.7. One writer per database (a single-reader channel), any number of readers. Migrations via `user_version` take a backup first.
   - Merged as `06c48f568566dc30ba03e204aa60655f1f016228`; [required CI attempt 4](https://github.com/taskscape/PeerSync/actions/runs/39184897814/attempts/4) passed all five jobs, including 600 s fuzz (126,489 seeds, zero crashes). See [verification](docs/verification/P1.3.1-sqlite-plumbing-2026-10-19.md).
-- [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`)
+- [ ] **P1.3.2 Folder index schema and repositories** (`PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
   - Done when: the schema in 7.7 is created by migration 1. Repositories cover `local_files`, `remote_files`, `needed`, `chunks`, `devices`, `archive` and `meta`. Bulk updates commit in batches of 1,000 rows per transaction. Indexing 1M rows takes under 60 s on the reference SSD.
-- [ ] **P1.3.3 Central state database** (`PeerSync.Storage/StateDb/`)
+- [ ] **P1.3.3 Central state database** (`PeerSync.Storage/StateDb/`) [WIP @Codex 2026-10-19]
   - Done when: `peersync.db` has `folders` (id, path, access level, protected key, `settings_json`, paused), `devices`, `pending_approvals` and `audit_log`. Folder keys are stored only through `FolderKeyProtector`.
 
 ### 7.7 Code: SQLite setup and folder schema (P1.3)
