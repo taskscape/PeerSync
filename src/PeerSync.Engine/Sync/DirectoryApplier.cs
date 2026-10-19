@@ -50,7 +50,7 @@ public sealed class DirectoryApplier
             using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); Signal("start", session);
             using var selection = await ScheduledApplySelection.AcquireDirectoryAsync(index, needed, ownDevice, key, scheduled, cancellationToken).ConfigureAwait(false);
             var known = selection.Known; var decision = selection.Decision;
-            if (decision.BlockedReason is not null) { Signal("blocked", session); return new(FileApplyOutcome.Blocked); }
+            if (decision.BlockedReason is not null) { Signal(decision.BlockedReason == "directory-publication-pending" ? "publication-pending" : "blocked", session); return new(FileApplyOutcome.Blocked); }
             if (!decision.RequiresApply) { Signal("unchanged", session); return new(FileApplyOutcome.Unchanged); }
             if (!selection.RangeComplete) { Signal("index-range-pending", session); return new(FileApplyOutcome.Deferred); }
             if (decision.Winner!.Type != 1) { Signal("unsupported-type", session); return new(FileApplyOutcome.Deferred); }
@@ -115,7 +115,7 @@ public sealed class DirectoryApplier
         }
         using var deletionBarrier = await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version, ownDevice, state.ScheduledDeletion, token).ConfigureAwait(false);
         using var caseReferences = state.ScheduledDeletion ? null : await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
-        if (index.HasPendingCasePreservation(state.Version.Path)) return await ChangedAsync(intent, token).ConfigureAwait(false);
+        if (index.HasPendingCasePreservation(state.Version.Path) || index.HasPendingDirectoryPublication(state.Version.Path, includeDescendants: true)) return await ChangedAsync(intent, token).ConfigureAwait(false);
         using var parentProbe = state.Version.Deleted ? tree.ProbeDirectory(ApplyState.Parent(state.Version.Path)) : null;
         if (parentProbe?.Absent == true)
         {

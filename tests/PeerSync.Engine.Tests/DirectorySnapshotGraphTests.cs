@@ -23,6 +23,27 @@ public sealed class DirectorySnapshotGraphTests : IDisposable
     private readonly byte[] device = [1, .. new byte[31]];
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task PrivatePublicationQueueWithholdsCoverageAndOnlyMetadataExpires()
+    {
+        await using var index = await Bind("source"); using var blocks = Store("source", index);
+        var builder = new BlockReferences(Root("source"), index, keys, device); var before = await builder.RefreshAsync(Token);
+        var root = await blocks.PutAsync(DirectorySnapshotNode.Entries([]), Token); await blocks.FlushAsync(Token);
+        var queued = new DirectoryPublication(Guid.NewGuid(), "topic", index.Meta.Find("_root-identity")!.Value!, new byte[16], 0, 16,
+            Sign("topic", 1), new byte[32], 0, DateTime.UtcNow.Ticks, DateTime.UtcNow.Ticks);
+        await index.StageDirectoryPublicationAsync(queued, Token);
+        var pending = await builder.RefreshAsync(Token); pending.WaitingForDirectorySnapshots.ShouldBeTrue(); pending.AllKnownSourcesCovered.ShouldBeFalse();
+        index.ReadActiveBlockReferenceSnapshot()!.Id.ShouldBe(before.SnapshotId!.Value);
+        (await new BlockRetention(Root("source"), index, keys, device) { CapacityOverride = () => 1 }.SweepAsync(Token)).WaitingForRecovery.ShouldBeTrue();
+        index.ReadBlockDeletionIntents().ShouldBeEmpty();
+        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database("source"), Pooling = false }.ToString()))
+        {
+            connection.Open(); using var command = connection.CreateCommand(); command.CommandText = "UPDATE directory_publications SET touched_ticks=1;"; command.ExecuteNonQuery();
+        }
+        (await builder.RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue(); index.HasPendingDirectoryPublications().ShouldBeFalse();
+        using var cache = new PublishedBlocks(Root("source"), index); cache.TryRead(root.Hash, root.EncodedLength, Token).ShouldNotBeNull();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

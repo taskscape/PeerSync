@@ -26,6 +26,39 @@ public sealed class DirectorySnapshotCaptureTests : IDisposable
     private string Database => Path.Combine(fixture, "index.db");
     public DirectorySnapshotCaptureTests() => Directory.CreateDirectory(Path.Combine(Root, "topic"));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PendingPublicationBlocksIncomingFileOrDirectoryMutationBeforeNativeChanges(bool directory)
+    {
+        WriteFiles("a"); await using var index = await Open(); var local = index.LocalFiles.Find("topic")!;
+        var queued = new DirectoryPublication(Guid.NewGuid(), "topic", index.Meta.Find("_root-identity")!.Value!, local.FileId!, local.LocalSequence,
+            local.Attributes, local.Record!, new byte[32], 1, DateTime.UtcNow.Ticks, DateTime.UtcNow.Ticks);
+        await index.StageDirectoryPublicationAsync(queued, Token);
+        byte[] remote = [2, .. new byte[31]], content = "remote content"u8.ToArray();
+        var body = new FileRecordBody { Path = directory ? "topic" : "topic/a", Type = directory ? 1u : 0u,
+            ModifiedBy = ByteString.CopyFrom(remote), MtimeTicks = DateTime.UtcNow.AddMinutes(1).Ticks, ChangedTicks = DateTime.UtcNow.Ticks,
+            Attributes = directory ? (uint)FileAttributes.Hidden : 0 };
+        body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        if (!directory)
+        {
+            body.Size = (ulong)content.Length; body.FileHash = ByteString.CopyFrom(Blake3.Hasher.Hash(content).AsSpan());
+            body.Chunks.Add(new Chunk { Hash = body.FileHash, Length = (uint)content.Length });
+        }
+        await new NeededSet(index, keys, device).ApplyIndexUpdateAsync(remote, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        index.HasPendingCasePreservation(body.Path).ShouldBeFalse();
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "queue-barrier", debugEnabled: true);
+        if (directory)
+            (await new DirectoryApplier(Root, index, keys, device, journal: journal).ApplyAsync(body.Path, Token)).Outcome.ShouldBe(FileApplyOutcome.Blocked);
+        else
+            (await new FileApplier(Root, index, keys, device, journal: journal).ApplyAsync(body.Path,
+                (_, _, _) => throw new InvalidOperationException("Blocked work must not fetch bytes."), Token)).ShouldBe(FileApplyOutcome.Blocked);
+        File.ReadAllBytes(Path.Combine(Root, "topic", "a")).ShouldBeEmpty();
+        ((File.GetAttributes(Path.Combine(Root, "topic")) & FileAttributes.Hidden) != 0).ShouldBeFalse();
+        index.ReadApplyIntents().ShouldBeEmpty(); index.ReadDirectoryPublication("topic")!.Version.ShouldBe(queued.Version);
+        File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")).ShouldContain("publication-pending");
+    }
+
     [Fact]
     public async Task IndexedCaptureResumesAfterRestartWithoutRevalidatingUnchangedFullInput()
     {

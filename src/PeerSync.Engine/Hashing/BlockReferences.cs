@@ -59,13 +59,16 @@ public sealed class BlockReferences
             if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } root || !root.AsSpan().SequenceEqual(tree.Identity))
                 throw new IOException("Block reference root changed or is not bound.");
             var recovery = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
-            int captureRetirements = await index.PruneDirectoryCapturesAsync(root, DateTime.UtcNow.Ticks, cancellationToken: cancellationToken).ConfigureAwait(false);
+            int publicationRetirements = await index.PruneDirectoryPublicationsAsync(root, DateTime.UtcNow.Ticks, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (publicationRetirements != 0) Log("directory.publications_pruned", changed: publicationRetirements);
+            int captureRetirements = publicationRetirements < 1000
+                ? await index.PruneDirectoryCapturesAsync(root, DateTime.UtcNow.Ticks, limit: 1000 - publicationRetirements, cancellationToken: cancellationToken).ConfigureAwait(false) : 0;
             if (captureRetirements != 0) Log("directory.capture_pruned", changed: captureRetirements);
-            var graphRetirement = captureRetirements < 1000
-                ? await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: false, limit: 1000 - captureRetirements, cancellationToken: cancellationToken).ConfigureAwait(false)
+            var graphRetirement = captureRetirements + publicationRetirements < 1000
+                ? await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: false, limit: 1000 - captureRetirements - publicationRetirements, cancellationToken: cancellationToken).ConfigureAwait(false)
                 : new DirectoryGraphPrune(0, false);
             if (graphRetirement.Mutations != 0) Log("directory.graph_pruned", changed: graphRetirement.Mutations, deferred: graphRetirement.MoreWork ? 1 : 0);
-            if (index.HasDirectoryCaptures()) throw new DirectoryGraphPending();
+            if (index.HasDirectoryCaptures() || index.HasPendingDirectoryPublications()) throw new DirectoryGraphPending();
             if (index.ReadApplyIntents().Any())
             {
                 Log("block.references_wait", "pending-application"); return new(null, 0, 0, 0, recovery.Deferred, WaitingForRecovery: true);
@@ -158,9 +161,9 @@ public sealed class BlockReferences
             long unmanifested = index.CountUnmanifestedReferenceArchives(snapshot.Id);
             await FlushAsync().ConfigureAwait(false); Checkpoint?.Invoke("before-activate");
             await index.ActivateBlockReferenceSnapshotAsync(snapshot.Id, cancellationToken).ConfigureAwait(false);
-            if (graphRetirement.Mutations + captureRetirements < 1000)
+            if (graphRetirement.Mutations + captureRetirements + publicationRetirements < 1000)
             {
-                var retiredGraphs = await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: true, limit: 1000 - graphRetirement.Mutations - captureRetirements, cancellationToken: cancellationToken).ConfigureAwait(false);
+                var retiredGraphs = await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: true, limit: 1000 - graphRetirement.Mutations - captureRetirements - publicationRetirements, cancellationToken: cancellationToken).ConfigureAwait(false);
                 if (retiredGraphs.Mutations != 0) Log("directory.graph_pruned", changed: retiredGraphs.Mutations, deferred: retiredGraphs.MoreWork ? 1 : 0);
             }
             var active = index.ReadActiveBlockReferenceSnapshot() ?? throw new InvalidOperationException("Reference activation disappeared.");
