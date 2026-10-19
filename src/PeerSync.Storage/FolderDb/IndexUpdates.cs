@@ -89,8 +89,10 @@ public sealed partial class FolderIndex
             this.resolver = resolver;
             local = Make("SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE path_key=$path;");
             remote = Make("SELECT device_id,path_key,vv,record_body,signature FROM remote_files WHERE path_key=$path ORDER BY device_id;");
-            store = Make("INSERT INTO needed(path_key,source_device,priority) VALUES($path,$source,$priority) ON CONFLICT(path_key) DO UPDATE SET source_device=excluded.source_device,priority=excluded.priority;");
-            store.Parameters.Add("$source", SqliteType.Blob); store.Parameters.Add("$priority", SqliteType.Integer); store.Prepare();
+            store = Make("INSERT INTO needed(path_key,source_device,priority,work_stage,work_size,work_mtime,work_hash) VALUES($path,$source,$priority,$stage,$size,$mtime,$hash) "
+                + "ON CONFLICT(path_key) DO UPDATE SET source_device=excluded.source_device,priority=excluded.priority,work_stage=excluded.work_stage,work_size=excluded.work_size,work_mtime=excluded.work_mtime,work_hash=excluded.work_hash;");
+            store.Parameters.Add("$source", SqliteType.Blob); store.Parameters.Add("$priority", SqliteType.Integer);
+            store.Parameters.Add("$stage", SqliteType.Integer); store.Parameters.Add("$size", SqliteType.Integer); store.Parameters.Add("$mtime", SqliteType.Integer); store.Parameters.Add("$hash", SqliteType.Blob); store.Prepare();
             remove = Make("DELETE FROM needed WHERE path_key=$path;");
             SqliteCommand Make(string sql)
             {
@@ -113,6 +115,8 @@ public sealed partial class FolderIndex
             FolderMaps.Needed.Validate(row);
             if (PathRules.Key(row.PathKey) != path) throw new InvalidOperationException("Needed resolver returned another path.");
             store.Parameters[0].Value = path; store.Parameters[1].Value = row.SourceDevice; store.Parameters[2].Value = row.Priority;
+            store.Parameters[3].Value = (object?)row.Work?.Stage ?? DBNull.Value; store.Parameters[4].Value = (object?)row.Work?.Size ?? DBNull.Value;
+            store.Parameters[5].Value = (object?)row.Work?.MtimeTicks ?? DBNull.Value; store.Parameters[6].Value = (object?)row.Work?.Fingerprint ?? DBNull.Value;
             store.ExecuteNonQuery();
         }
         public void Dispose() { local.Dispose(); remote.Dispose(); store.Dispose(); remove.Dispose(); }

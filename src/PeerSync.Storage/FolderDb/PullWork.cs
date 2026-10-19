@@ -1,0 +1,103 @@
+using Microsoft.Data.Sqlite;
+using PeerSync.Core.Paths;
+using PeerSync.Core.Settings;
+
+namespace PeerSync.Storage.FolderDb;
+
+public sealed record RemoteIndexRange(byte[] DeviceId, long TargetSequence, long ReceivedSequence)
+{
+    public bool Complete => ReceivedSequence >= TargetSequence;
+    public override string ToString() => "Remote index range (redacted)";
+}
+public sealed record PullRetry(string PathKey, byte[] RootId, byte[] Fingerprint, int Attempts, long FailedTicks, long NextTicks)
+{
+    public override string ToString() => "Pull retry (redacted)";
+}
+
+public sealed partial class FolderIndex
+{
+    /// <summary>Current sender index generation only. A rollback/reset needs
+    /// explicit transport reconciliation; never lower an outstanding target.</summary>
+    public Task<RemoteIndexRange> AnnounceRemoteIndexRangeAsync(byte[] deviceId, long targetSequence, CancellationToken cancellationToken = default)
+    {
+        FolderMaps.RequireBytes(deviceId, 32); ArgumentOutOfRangeException.ThrowIfNegative(targetSequence); byte[] device = deviceId.ToArray();
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT last_seq_received FROM devices WHERE device_id=$device;"; command.Parameters.AddWithValue("$device", device);
+            long received = command.ExecuteScalar() is long cursor ? cursor : 0;
+            if (targetSequence < received) throw new InvalidOperationException("Remote index target precedes its received cursor.");
+            command.CommandText = "INSERT OR IGNORE INTO devices(device_id) VALUES($device); INSERT INTO remote_index_ranges(device_id,target_sequence) VALUES($device,$target) "
+                + "ON CONFLICT(device_id) DO UPDATE SET target_sequence=MAX(remote_index_ranges.target_sequence,excluded.target_sequence);";
+            command.Parameters.AddWithValue("$target", targetSequence); command.ExecuteNonQuery();
+            command.CommandText = "SELECT target_sequence FROM remote_index_ranges WHERE device_id=$device;";
+            return new RemoteIndexRange(device.ToArray(), (long)command.ExecuteScalar()!, received);
+        }, cancellationToken);
+    }
+
+    public RemoteIndexRange? ReadRemoteIndexRange(byte[] deviceId)
+    {
+        FolderMaps.RequireBytes(deviceId, 32); using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT r.target_sequence,d.last_seq_received FROM remote_index_ranges r JOIN devices d ON d.device_id=r.device_id WHERE r.device_id=$device;";
+        command.Parameters.AddWithValue("$device", deviceId); using var reader = command.ExecuteReader();
+        return reader.Read() ? new(deviceId.ToArray(), reader.GetInt64(0), reader.GetInt64(1)) : null;
+    }
+
+    /// <summary>Bounded scheduling metadata only. Caller revalidates work and
+    /// range/target state inside the applier before performing native mutation.</summary>
+    public IReadOnlyList<NeededRow> ReadDuePullWork(byte[] rootId, long nowTicks, TransferPriority priority = TransferPriority.Default, int limit = 1000)
+    {
+        byte[] root = FreezeSweep(rootId, nowTicks, 1, limit); if (!Enum.IsDefined(priority)) throw new ArgumentOutOfRangeException(nameof(priority));
+        using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true); RequireBlockReferenceRoot(connection, transaction, root);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT n.path_key,n.source_device,n.priority,n.work_stage,n.work_size,n.work_mtime,n.work_hash FROM needed n "
+            + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root "
+            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) "
+            + "ORDER BY n.work_stage,CASE WHEN n.work_stage=0 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END,"
+            + "CASE WHEN n.work_stage=3 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END DESC,n.priority DESC,"
+            + "CASE WHEN n.work_stage=1 AND $priority=1 THEN n.work_size END,CASE WHEN n.work_stage=1 AND $priority=2 THEN n.work_size END DESC,"
+            + "CASE WHEN n.work_stage=1 AND $priority=3 THEN n.work_mtime END,CASE WHEN n.work_stage=1 AND $priority=4 THEN n.work_mtime END DESC,n.path_key LIMIT $limit;";
+        command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$priority", (int)priority); command.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<NeededRow>(limit); using var reader = command.ExecuteReader(); while (reader.Read()) rows.Add(FolderMaps.ReadNeeded(reader)); return rows.AsReadOnly();
+    }
+
+    public PullRetry? ReadPullRetry(string path)
+    {
+        using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT path_key,root_id,work_hash,attempts,failed_ticks,next_ticks FROM pull_retries WHERE path_key=$path;";
+        command.Parameters.AddWithValue("$path", PathRules.Key(path)); using var reader = command.ExecuteReader(); return reader.Read() ? ReadRetry(reader) : null;
+    }
+
+    /// <summary>Persist backoff only for the current exact needed fingerprint.
+    /// New work is immediately eligible; clock rollback restarts bounded delay.</summary>
+    public Task<PullRetry?> RecordPullFailureAsync(string path, byte[] rootId, byte[] fingerprint, long nowTicks, CancellationToken cancellationToken = default)
+    {
+        string key = PathRules.Key(path); byte[] root = FreezeSweep(rootId, nowTicks, 1, 1000); FolderMaps.RequireBytes(fingerprint, 32); byte[] hash = fingerprint.ToArray();
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            RequireBlockReferenceRoot(connection, transaction, root); using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.Parameters.AddWithValue("$path", key); command.CommandText = "SELECT path_key,root_id,work_hash,attempts,failed_ticks,next_ticks FROM pull_retries WHERE path_key=$path;";
+            PullRetry? prior; using (var reader = command.ExecuteReader()) prior = reader.Read() ? ReadRetry(reader) : null;
+            if (prior is not null && !prior.RootId.AsSpan().SequenceEqual(root)) throw new InvalidOperationException("Pull retry belongs to another root.");
+            int attempts = prior is not null && prior.Fingerprint.AsSpan().SequenceEqual(hash) && prior.FailedTicks <= nowTicks ? Math.Min(7, prior.Attempts + 1) : 1;
+            long delay = Math.Min(600, 10 << Math.Min(6, attempts - 1)) * TimeSpan.TicksPerSecond;
+            long next = nowTicks + Math.Min(DateTime.MaxValue.Ticks - nowTicks, delay);
+            command.CommandText = "INSERT INTO pull_retries(path_key,root_id,work_hash,attempts,failed_ticks,next_ticks) SELECT path_key,$root,$hash,$attempts,$now,$next FROM needed "
+                + "WHERE path_key=$path AND work_hash=$hash ON CONFLICT(path_key) DO UPDATE SET root_id=excluded.root_id,work_hash=excluded.work_hash,attempts=excluded.attempts,failed_ticks=excluded.failed_ticks,next_ticks=excluded.next_ticks;";
+            command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$hash", hash); command.Parameters.AddWithValue("$attempts", attempts); command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$next", next);
+            return command.ExecuteNonQuery() == 1 ? new PullRetry(key, root.ToArray(), hash.ToArray(), attempts, nowTicks, next) : null;
+        }, cancellationToken);
+    }
+
+    public Task<bool> ClearPullRetryAsync(string path, byte[] fingerprint, CancellationToken cancellationToken = default)
+    {
+        string key = PathRules.Key(path); FolderMaps.RequireBytes(fingerprint, 32); byte[] hash = fingerprint.ToArray();
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "DELETE FROM pull_retries WHERE path_key=$path AND work_hash=$hash;";
+            command.Parameters.AddWithValue("$path", key); command.Parameters.AddWithValue("$hash", hash); return command.ExecuteNonQuery() == 1;
+        }, cancellationToken);
+    }
+
+    private static PullRetry ReadRetry(SqliteDataReader reader) => new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetInt32(3), reader.GetInt64(4), reader.GetInt64(5));
+}

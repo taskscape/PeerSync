@@ -1,4 +1,5 @@
 using PeerSync.Core.Ignore;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Paths;
@@ -132,7 +133,14 @@ public sealed class NeededSet
     internal NeededRow? ToNeededRow(FolderPathSnapshot snapshot)
     {
         var decision = Decide(snapshot);
-        return decision.RequiresApply ? new(snapshot.PathKey, decision.Winner!.SourceDevice.ToArray(), 0) : null;
+        if (!decision.RequiresApply) return null;
+        var winner = decision.Winner!; var desired = decision.DesiredRecord!;
+        using var hash = Blake3.Hasher.New(); hash.Update("PeerSync pull work v1"u8); hash.Update(desired.Body); hash.Update(desired.Signature); hash.Update(winner.SourceDevice);
+        Span<byte> target = stackalloc byte[17]; target.Clear(); BinaryPrimitives.WriteInt64LittleEndian(target, snapshot.Local?.LocalSequence ?? 0);
+        BinaryPrimitives.WriteInt64LittleEndian(target[8..], snapshot.Local?.ChangeFileTime ?? 0); target[16] = snapshot.Local?.ContentReady == true ? (byte)1 : (byte)0;
+        hash.Update(target); if (snapshot.Local?.FileId is { } id) hash.Update(id);
+        int stage = winner.Deleted ? winner.Type == 1 ? 3 : 2 : winner.Type == 1 ? 0 : 1;
+        return new(snapshot.PathKey, winner.SourceDevice.ToArray(), 0) { Work = new(stage, winner.Size, winner.MtimeTicks, hash.Finalize().AsSpan().ToArray()) };
     }
 
     private static bool ActualMatches(LocalFileRow? local, VersionView winner)

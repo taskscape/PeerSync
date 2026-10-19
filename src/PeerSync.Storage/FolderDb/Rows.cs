@@ -26,7 +26,27 @@ public sealed record LocalFileRow(string Path, uint Type, long Size, long MtimeT
 // Remote original-case paths are in the signed body; these keys are uppercase invariant.
 public sealed record RemoteFileRow(byte[] DeviceId, string PathKey,
     IReadOnlyDictionary<ulong, ulong> Vector, SignedRecord Record);
-public sealed record NeededRow(string PathKey, byte[] SourceDevice, int Priority);
+public sealed record NeededRow(string PathKey, byte[] SourceDevice, int Priority)
+{
+    public PullWorkDescriptor? Work { get; init; }
+}
+
+/// <summary>Scheduling cache only; the applier revalidates the signed decision.</summary>
+public sealed class PullWorkDescriptor
+{
+    private readonly byte[] fingerprint;
+    public int Stage { get; }
+    public long Size { get; }
+    public long MtimeTicks { get; }
+    public byte[] Fingerprint => fingerprint.ToArray();
+    public PullWorkDescriptor(int stage, long size, long mtimeTicks, byte[] fingerprint)
+    {
+        FolderMaps.RequireBytes(fingerprint, 32);
+        if (stage is < 0 or > 3 || size < 0 || mtimeTicks < 0 || mtimeTicks > DateTime.MaxValue.Ticks) throw new ArgumentException("Invalid pull work descriptor.");
+        Stage = stage; Size = size; MtimeTicks = mtimeTicks; this.fingerprint = fingerprint.ToArray();
+    }
+    public override string ToString() => "Pull work descriptor (redacted)";
+}
 public sealed record ChunkRow(byte[] Hash, string PathKey, long Offset, int Length);
 public sealed record DeviceRow(byte[] DeviceId, string? Name = null, long? LastSeenTicks = null,
     long LastSequenceReceived = 0, DeviceApproval Approval = DeviceApproval.Unknown, bool Pinned = true);
