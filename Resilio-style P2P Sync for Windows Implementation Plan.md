@@ -364,6 +364,20 @@ detached sources, so archive-row removal/reuse cannot make an unknown source
 silently disappear from the reference safety checks. Missing/changed/locked/
 linked/reparse sources without a manifest remain uncovered and prevent future
 sweeping until explicit policy release is implemented.
+Retention must account for history reuse before releasing references or
+pruning physical archives. A newly retained authenticated snapshot can share an
+older private archive with matching bytes: FULL-durable retention accounting
+must protect the newer history's observation time while preserving the reused
+file's metadata. Age selection and capacity ordering use that effective
+retention time. Do not attach a new hold to an archive already reserved for
+policy deletion; retain another verified copy instead. Existing history markers
+must receive equivalent authenticated/root-bound accounting before pruning.
+Bind new archive retirement authorizations to stable provenance source IDs,
+so a completed witness cannot authorize a later archive row which reuses the
+same numeric ID and metadata. Legacy orphan protection, explicit private/public
+history policy release, owned-object grace/cap selection, FULL-durable deletion
+intents and recovery with fresh references remain required before enabling
+block sweeping. Unknown, changed, linked, locked or reparse objects are preserved.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
