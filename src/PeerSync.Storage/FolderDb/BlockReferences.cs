@@ -79,8 +79,8 @@ public sealed partial class FolderIndex
         }, cancellationToken);
     }
 
-    /// <summary>Resolve authenticated history locations against the serialized
-    /// archive snapshot in bounded batches, without retaining all names in RAM.</summary>
+    /// <summary>Resolve authenticated history locations against stable archive
+    /// sources, including detached rows, without retaining all names in RAM.</summary>
     public Task<int> AppendBlockArchiveCoverageAsync(Guid snapshot, IReadOnlyList<ArchiveReferenceSource> sources, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sources);
@@ -93,8 +93,10 @@ public sealed partial class FolderIndex
             if (state.Active) throw new InvalidOperationException("Active archive coverage is immutable.");
             RequireBlockReferenceRoot(connection, transaction, state.RootId);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT OR IGNORE INTO block_reference_archives(snapshot_id,archive_id) SELECT $id,id FROM archive WHERE original_path=$original AND archive_path=$path AND size=$size AND file_hash=$hash;";
+            command.CommandText = "INSERT OR IGNORE INTO block_reference_sources(snapshot_id,source_id) SELECT $id,source_id FROM archive_provenance "
+                + "WHERE original_path=$original AND archive_path=$path AND size=$size AND file_hash=$hash AND (root_id IS NULL OR root_id=$root);";
             command.Parameters.AddWithValue("$id", snapshot.ToString("N")); command.Parameters.Add("$original", SqliteType.Text); command.Parameters.Add("$path", SqliteType.Text);
+            command.Parameters.AddWithValue("$root", state.RootId);
             command.Parameters.Add("$size", SqliteType.Integer); command.Parameters.Add("$hash", SqliteType.Blob); int count = 0;
             foreach (var row in frozen)
             {
@@ -108,9 +110,18 @@ public sealed partial class FolderIndex
     public long CountUnmanifestedReferenceArchives(Guid snapshot)
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT (SELECT COUNT(*) FROM archive a WHERE NOT EXISTS(SELECT 1 FROM block_reference_archives c WHERE c.snapshot_id=s.id AND c.archive_id=a.id)) FROM block_reference_snapshots s WHERE id=$id;";
+        command.CommandText = "SELECT (SELECT COUNT(*) FROM archive_provenance p WHERE NOT EXISTS(SELECT 1 FROM block_reference_sources c WHERE c.snapshot_id=s.id AND c.source_id=p.source_id)) "
+            + "+(SELECT COUNT(*) FROM archive a WHERE NOT EXISTS(SELECT 1 FROM archive_provenance p WHERE p.archive_id=a.id)) FROM block_reference_snapshots s WHERE id=$id;";
         command.Parameters.AddWithValue("$id", snapshot.ToString("N"));
         return command.ExecuteScalar() is long count ? count : throw new InvalidOperationException("Reference snapshot no longer exists.");
+    }
+
+    public bool IsBlockArchiveSourceCovered(Guid snapshotId, Guid sourceId)
+    {
+        using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM block_reference_sources WHERE snapshot_id=$snapshot AND source_id=$source);";
+        command.Parameters.AddWithValue("$snapshot", snapshotId.ToString("N")); command.Parameters.AddWithValue("$source", sourceId.ToString("N"));
+        return (long)command.ExecuteScalar()! != 0;
     }
 
     public BlockReferenceSnapshot? ReadActiveBlockReferenceSnapshot()

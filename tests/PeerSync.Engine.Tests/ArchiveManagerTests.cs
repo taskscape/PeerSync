@@ -112,6 +112,9 @@ public sealed class ArchiveManagerTests : IDisposable
         var result = await manager.PruneAsync(cancellationToken: Token);
         result.Missing.ShouldBe(1); result.Removed.ShouldBe(0); File.ReadAllBytes(Disk(retained.ArchivePath)).ShouldBe(Content);
         index.ReadArchiveRetirements().ShouldBeEmpty();
+        var source = index.ReadArchiveProvenance().Single(s => s.Archive.Id == missing.Id);
+        source.Attached.ShouldBeFalse(); source.Archive.FileHash.ShouldBe(missing.FileHash);
+        source.Archive.ArchivePath.ShouldBe(missing.ArchivePath); source.RootId.ShouldBe(index.Meta.Find("_root-identity")!.Value);
     }
 
     [Theory]
@@ -134,6 +137,8 @@ public sealed class ArchiveManagerTests : IDisposable
         await using var reopened = await FolderIndex.OpenAsync(Database, Token); await Manager(reopened).PruneAsync(cancellationToken: Token);
         File.Exists(Disk(row.ArchivePath)).ShouldBeFalse(); reopened.Archive.Count().ShouldBe(0);
         reopened.ReadArchiveRetirements().Single().CompletedTicks.ShouldNotBeNull();
+        var source = reopened.ReadArchiveProvenance().Single(); source.Attached.ShouldBeFalse();
+        source.Archive.Id.ShouldBe(row.Id); source.Archive.ArchivePath.ShouldBe(row.ArchivePath); source.Archive.FileHash.ShouldBe(row.FileHash);
         (await Manager(reopened).PruneAsync(force: true, cancellationToken: Token)).Removed.ShouldBe(0);
     }
 

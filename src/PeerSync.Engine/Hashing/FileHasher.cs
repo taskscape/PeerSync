@@ -50,6 +50,22 @@ public static class FileHasher
         return await HashOpenedAsync(file, () => root.OpenFile(relativePath), progress, cancellationToken, capture).ConfigureAwait(false);
     }
 
+    // Caller holds a root-relative no-write/no-delete-sharing read guard for
+    // the entire asynchronous operation. Never take ownership of its handle.
+    internal static async Task<FileHash?> HashGuardedAsync(SafeFileHandle handle, CaptureChunk capture, CancellationToken cancellationToken)
+    {
+        bool retained = false;
+        try
+        {
+            handle.DangerousAddRef(ref retained); FileIoPriority.SetVeryLow(handle);
+            using var borrowed = new SafeFileHandle(handle.DangerousGetHandle(), ownsHandle: false);
+            await using var file = new FileStream(borrowed, FileAccess.Read, 0, isAsync: false);
+            return await HashOpenedAsync(file, () => new SafeFileHandle(handle.DangerousGetHandle(), ownsHandle: false),
+                null, cancellationToken, capture).ConfigureAwait(false);
+        }
+        finally { if (retained) handle.DangerousRelease(); }
+    }
+
     private static async Task<FileHash?> HashOpenedAsync(FileStream file, Func<SafeFileHandle> reopen,
         IProgress<FileHashProgress>? progress, CancellationToken cancellationToken, CaptureChunk? capture = null)
     {

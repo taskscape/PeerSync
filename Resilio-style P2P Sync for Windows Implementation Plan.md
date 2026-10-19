@@ -336,6 +336,34 @@ missing-row reconciliation must retain provenance before removing their last
 metadata, and upgrades must protect older cataloged objects whose historical
 references cannot be reconstructed. The sweep must establish that protection,
 refresh references under both gates, and hold them through verified deletion.
+Preserve archive provenance transactionally at the database boundary: every
+archive insertion records its exact row and current root binding with a stable
+source identifier. Replacing metadata detaches the previous source and creates
+a new source; removing an archive row detaches its source without deleting its
+metadata. Seed existing archives during migration before any future cleanup.
+Unchanged upserts do not duplicate provenance, and transaction rollback applies
+to archive rows and provenance together. Provenance is local protection data,
+not proof of file ownership or authorization to delete bytes. Native verification,
+content manifests and explicit policy release must establish those separately.
+For archive sources without an authenticated history manifest, verify the
+independent private file under a no-write/no-delete-sharing read guard, hash
+and chunk its exact indexed bytes, and capture independent blocks through the
+ordinary durable ownership path. Stage a root/source/file-identity-bound content
+manifest in batches of at most 1,000 chunks, then FULL-activate after complete
+length/hash verification and block registration. Bound a manifest to 100,000
+chunks; oversized/unverifiable sources defer with their protection intact.
+The prior active manifest survives interrupted replacement and remains a
+reference source if the archive subsequently disappears or changes. A content
+manifest is protection metadata, not permission to delete an archive or blob.
+On restart, complete staged manifests can FULL-activate after root/source,
+contiguous chunk count/length, every independent block and the whole-file hash
+are verified again, even if the original archive is now missing. Partial or
+unverifiable staging remains protected until safe recapture or explicit policy.
+Track snapshot archive coverage by stable provenance source ID, including
+detached sources, so archive-row removal/reuse cannot make an unknown source
+silently disappear from the reference safety checks. Missing/changed/locked/
+linked/reparse sources without a manifest remain uncovered and prevent future
+sweeping until explicit policy release is implemented.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
