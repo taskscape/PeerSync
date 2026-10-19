@@ -310,7 +310,7 @@ public sealed class Scanner : IDisposable
 
     private static bool MetadataEqual(LocalFileRow row, WalkEntry entry) => !row.Deleted
         && row.Type == (entry.Unsyncable ? 2u : entry.Native.IsDirectory ? 1u : 0u)
-        && row.Path == entry.Path && row.Size == entry.Native.Length && row.Attributes == (uint)entry.Native.Attributes
+        && PathSpelling.SameLeaf(row.Path, entry.Path) && row.Size == entry.Native.Length && row.Attributes == (uint)entry.Native.Attributes
         && (entry.Native.IsDirectory || row.MtimeTicks == entry.Native.MtimeTicks)
         && row.FileId is not null && row.FileId.AsSpan().SequenceEqual(entry.Native.FileId);
 

@@ -43,7 +43,7 @@ internal sealed class SafeFileTree : IDisposable
         && (PathRules.IsValid(name) || allowTemp && name.EndsWith(".!psp", StringComparison.OrdinalIgnoreCase)
             && PathRules.IsValid(name[..^5]));
 
-    internal static unsafe SafeFileHandle Open(SafeFileHandle parent, string name, bool directory,
+    internal static unsafe SafeFileHandle Open(SafeFileHandle parent, string name, bool? directory,
         uint access, uint share, uint disposition, uint attributes = 0, bool deleteOnClose = false)
     {
         fixed (char* pointer = name)
@@ -59,7 +59,7 @@ internal sealed class SafeFileTree : IDisposable
                     ObjectName = &unicode, Attributes = 0x1040,
                 };
                 int status = NativeFiles.NtCreateFile(out var handle, access, in objectAttributes, out _, 0, attributes,
-                    share, disposition, 0x00200020u | (directory ? 1u : 0x44u) | (deleteOnClose ? 0x1000u : 0), 0, 0);
+                    share, disposition, 0x00200020u | (directory is true ? 1u : directory is false ? 0x44u : 0) | (deleteOnClose ? 0x1000u : 0), 0, 0);
                 if (status < 0) { handle.Dispose(); throw new Win32Exception((int)NativeFiles.RtlNtStatusToDosError(status)); }
                 try
                 {
@@ -95,6 +95,20 @@ internal sealed class DirectoryLease : IDisposable
         Check(name, temporary);
         // A mutation guard excludes other writers/deleters. Its own DELETE access supports rename by handle.
         return SafeFileTree.Open(parent, name, false, mutation ? 0x00130181u : 0x00100081u, mutation ? 1u : 7u, 1);
+    }
+
+    // Generic classification guard. Only mutate directories through it: file
+    // content replacement still requires OpenFile's no-write-sharing guard.
+    internal SafeFileHandle OpenNode(string name)
+    {
+        Check(name, temporary: false);
+        return SafeFileTree.Open(parent, name, null, 0x00130181, 3, 1);
+    }
+
+    internal SafeFileHandle CreateDirectory(string name)
+    {
+        Check(name, temporary: false);
+        return SafeFileTree.Open(parent, name, true, 0x00130181, 3, 2, 0x10);
     }
 
     // Only call after reading a persisted ownership identity; verify that identity

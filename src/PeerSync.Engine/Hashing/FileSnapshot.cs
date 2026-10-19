@@ -13,7 +13,7 @@ internal readonly record struct FileSnapshot(long Length, long LastWrite, long C
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         if (!NativeFileInfo.GetIdentity(handle, 18, out var identity, (uint)Marshal.SizeOf<NativeFileInfo.IdentityInfo>()))
             throw new Win32Exception(Marshal.GetLastPInvokeError());
-        return new(RandomAccess.GetLength(handle), basic.LastWriteTime, basic.ChangeTime,
+        return new(((FileAttributes)basic.Attributes & FileAttributes.Directory) != 0 ? 0 : RandomAccess.GetLength(handle), basic.LastWriteTime, basic.ChangeTime,
             (FileAttributes)basic.Attributes, identity.VolumeSerial, identity.IdLow, identity.IdHigh);
     }
 }
