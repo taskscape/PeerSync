@@ -1245,6 +1245,9 @@ PRAGMA user_version = 1;
   - Done when: each folder rescans at start-up and every `RescanIntervalSeconds` (default 600), at most one folder hashes at a time per disk, and hashing runs at low I/O priority.
   - Local evidence: [watcher/scheduler verification](docs/verification/P1.4.2-3-watcher-scheduler-2026-10-19.md). The initial budget serializes folder scans process-wide, including across partitions and unknown mappings.
 
+- [ ] **P1.4.4 Detect edits with restored mtime** (`PeerSync.Engine/Scanning/`, `PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
+  - Done when: a same-length edit which keeps file identity, attributes and original last-write time is detected and preserves the previously published snapshot. Native change metadata participates in the unchanged fast path, including restart/upgrade and own-write completion, without creating versions for directory child changes or metadata-only cache refresh. Native regression, signed RW/RO backfill, migration, applied-file no-loop checks and the real unchanged 100k-file benchmark pass.
+
 ### 7.8 Code: NTFS file id (P1.4.1)
 
 Superseded by `src/PeerSync.Engine/Native/NativeRoot.cs`, which enumerates
