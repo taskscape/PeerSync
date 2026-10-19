@@ -857,6 +857,12 @@ the same update otherwise starts independent push and PR matrices, and
 per-ref concurrency cannot cancel that duplication. Keep every required job,
 the full fuzz duration, publishing and evidence. Combine related local work
 before submitting a new head, and inspect the causal failure before retrying.
+P0 diagnostic bundles use self-contained JIT publication for both architectures.
+Do not spend each CI job compiling six temporary probes into ReadyToRun images:
+those bundles exercise protocol/diagnostic behavior, and can use the included
+.NET runtime on a test PC without installing the SDK. Keep locked restore,
+all probe outputs, signatures and native runtime checks. Production service,
+app and CLI installer packaging retains its ReadyToRun requirement below.
 
 ## Packaging and deployment
 
