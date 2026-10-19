@@ -94,7 +94,7 @@ public sealed class BlockReferences
                 }
             }
             await FlushArchiveCoverageAsync().ConfigureAwait(false);
-            foreach (var source in index.ReadArchiveProvenance())
+            foreach (var source in index.ReadRetainedArchiveProvenance(root))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var content = index.FindActiveArchiveContent(source.SourceId);
@@ -114,6 +114,7 @@ public sealed class BlockReferences
             }
             foreach (var pending in index.ReadPendingArchiveContents())
             {
+                if (index.IsArchiveSourceReleased(pending.SourceId, root)) continue;
                 if (!pending.RootId.AsSpan().SequenceEqual(root) || pending.ChunkCount > ArchiveContentSnapshot.MaximumChunks)
                     throw new InvalidDataException("Pending archive protection belongs to another root.");
                 long offset = 0; int count = 0;

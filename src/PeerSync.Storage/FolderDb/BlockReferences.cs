@@ -110,7 +110,7 @@ public sealed partial class FolderIndex
     public long CountUnmanifestedReferenceArchives(Guid snapshot)
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT (SELECT COUNT(*) FROM archive_provenance p WHERE NOT EXISTS(SELECT 1 FROM block_reference_sources c WHERE c.snapshot_id=s.id AND c.source_id=p.source_id)) "
+        command.CommandText = "SELECT (SELECT COUNT(*) FROM archive_provenance p WHERE NOT EXISTS(SELECT 1 FROM archive_policy_releases r WHERE r.source_id=p.source_id AND r.root_id=s.root_id) AND NOT EXISTS(SELECT 1 FROM block_reference_sources c WHERE c.snapshot_id=s.id AND c.source_id=p.source_id)) "
             + "+(SELECT COUNT(*) FROM archive a WHERE NOT EXISTS(SELECT 1 FROM archive_provenance p WHERE p.archive_id=a.id)) FROM block_reference_snapshots s WHERE id=$id;";
         command.Parameters.AddWithValue("$id", snapshot.ToString("N"));
         return command.ExecuteScalar() is long count ? count : throw new InvalidOperationException("Reference snapshot no longer exists.");

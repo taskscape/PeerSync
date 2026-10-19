@@ -110,6 +110,12 @@ public sealed partial class FolderIndex
         Guid? source = protection.PublicCopy ? null : FindRetainableArchiveSource(connection, transaction, protection)
             ?? throw new InvalidOperationException("History archive is missing or reserved for retirement.");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
+        if (source is { } retainedSource)
+        {
+            command.CommandText = "DELETE FROM archive_policy_releases WHERE source_id=$source AND root_id=$root;";
+            command.Parameters.AddWithValue("$source", retainedSource.ToString("N")); command.Parameters.AddWithValue("$root", protection.RootId);
+            command.ExecuteNonQuery(); command.Parameters.Clear();
+        }
         command.CommandText = "INSERT INTO history_archive_links(marker_key,source_id,root_id,file_id,retained_ticks) VALUES($key,$source,$root,$file,$ticks) "
             + "ON CONFLICT(marker_key) DO UPDATE SET source_id=excluded.source_id,root_id=excluded.root_id,file_id=excluded.file_id,retained_ticks=excluded.retained_ticks;";
         command.Parameters.AddWithValue("$key", marker.Key); command.Parameters.AddWithValue("$source", source is { } id ? id.ToString("N") : DBNull.Value);
