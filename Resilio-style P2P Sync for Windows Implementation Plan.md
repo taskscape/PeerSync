@@ -715,6 +715,13 @@ An incoming authenticated snapshot without a matching local publication cache
 is reconstruction-only: never infer a user deletion from not-yet-applied
 remote children. Its graph/materialization proof must be integrated before
 activation; readonly scans retain their existing unsigned-edit behavior.
+Subtree materialization starts with a bounded, reauthenticated projection from
+the complete non-retiring original graph into a stable case-copy root, without
+rewriting any signed member. Page canonical keys, preserve causal parent-case
+aliases, bound envelope memory and flush fetched metadata before continuation.
+This projection proves no native ownership/readiness. Follow
+docs/proposals/P1-directory-subtree-materialization.md for the subsequent
+root/member-bound no-overwrite journal, recovery and publication requirements.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
