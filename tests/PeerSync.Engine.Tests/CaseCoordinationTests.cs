@@ -18,6 +18,78 @@ public sealed class CaseCoordinationTests : IDisposable
     private readonly DateTime early=DateTime.UtcNow.AddHours(-1);
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task DirectoryCaseClashPreservesTheLosingSignedSubtreeOnAnEmptyReceiver(bool reverseArrival, bool nested)
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2); await using var c = await NodeAsync(3);
+        string relative = nested ? "nested/shared.txt" : "shared.txt";
+        await PublishDirectory(a, "topic", relative, First, early); await PublishDirectory(b, "TOPIC", relative, Second, early.AddMinutes(1));
+        var network = new InMemoryNetwork(); network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        var endpoint = network.Register(c.Id, c.Engine.CreateHandler);
+        await using var ca = await c.Engine.ConnectAsync(endpoint.Connect(a.Id), Token); await using var cb = await c.Engine.ConnectAsync(endpoint.Connect(b.Id), Token);
+        if (reverseArrival) { await cb.SynchronizeAsync(cancellationToken: Token); await ca.SynchronizeAsync(cancellationToken: Token); }
+        else { await ca.SynchronizeAsync(cancellationToken: Token); await cb.SynchronizeAsync(cancellationToken: Token); }
+        for (int pass = 0; pass < 8; pass++) await c.Engine.RunPassAsync(Token);
+        var copy = Directory.GetDirectories(c.Root).SingleOrDefault(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
+        copy.ShouldNotBeNull("a directory source needs its own visible subtree, not only a pending metadata proof");
+        File.ReadAllText(Path.Combine(copy!, relative)).ShouldBe(First);
+        File.ReadAllText(Path.Combine(c.Root, "TOPIC", relative)).ShouldBe(Second);
+        c.Index.ReadPendingCasePreservations().ShouldBeEmpty(); c.Index.Needed.Count().ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DirectoryCaseClashWithAFilePreservesBothKinds(bool fileWins)
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2); await using var c = await NodeAsync(3);
+        await PublishDirectory(a, "topic", "shared.txt", First, early.AddMinutes(fileWins ? 0 : 1));
+        await Publish(b, "TOPIC", Second, early.AddMinutes(fileWins ? 1 : 0));
+        var network = new InMemoryNetwork(); network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        var endpoint = network.Register(c.Id, c.Engine.CreateHandler);
+        await using var ca = await c.Engine.ConnectAsync(endpoint.Connect(a.Id), Token); await using var cb = await c.Engine.ConnectAsync(endpoint.Connect(b.Id), Token);
+        await ca.SynchronizeAsync(cancellationToken: Token); await cb.SynchronizeAsync(cancellationToken: Token);
+        for (int pass = 0; pass < 8; pass++) await c.Engine.RunPassAsync(Token);
+        if (fileWins)
+        {
+            File.Exists(Path.Combine(c.Root, "TOPIC")).ShouldBeTrue(); File.ReadAllText(Path.Combine(c.Root, "TOPIC")).ShouldBe(Second);
+            string copy = Directory.GetDirectories(c.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
+            File.ReadAllText(Path.Combine(copy, "shared.txt")).ShouldBe(First);
+        }
+        else
+        {
+            File.ReadAllText(Path.Combine(c.Root, "topic", "shared.txt")).ShouldBe(First);
+            File.ReadAllText(Directory.GetFiles(c.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal))).ShouldBe(Second);
+        }
+        c.Index.ReadPendingCasePreservations().ShouldBeEmpty(); c.Index.Needed.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task DirectoryCaseRenameIsCausalEvenWhenTheSignedChildRetainsItsOldParentSpelling()
+    {
+        await using var source = await NodeAsync(1); await using var receiver = await NodeAsync(2);
+        await PublishDirectory(source, "topic", "shared.txt", First, early);
+        var network = new InMemoryNetwork(); network.Register(source.Id, source.Engine.CreateHandler); var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        await using var connection = await receiver.Engine.ConnectAsync(endpoint.Connect(source.Id), Token);
+        await connection.SynchronizeAsync(cancellationToken: Token); await receiver.Engine.RunPassAsync(Token);
+        Directory.Move(Path.Combine(source.Root, "topic"), Path.Combine(source.Root, "TOPIC")); source.Engine.RequestScan(); await source.Engine.RunPassAsync(Token);
+        VersionView.Open(source.Index.LocalFiles.Find("topic/shared.txt")!.Record!, keys, source.Id).Path.ShouldBe("topic/shared.txt");
+        await connection.SynchronizeAsync(cancellationToken: Token); for (int pass = 0; pass < 3; pass++) await receiver.Engine.RunPassAsync(Token);
+        File.ReadAllText(Path.Combine(receiver.Root, "TOPIC", "shared.txt")).ShouldBe(First);
+        Directory.GetDirectories(receiver.Root).Where(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal)).ShouldBeEmpty();
+    }
+
+    private static async Task PublishDirectory(Node node, string directory, string relative, string content, DateTime at)
+    {
+        string path = Path.Combine(node.Root, directory, relative); Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllText(path, content);
+        File.SetLastWriteTimeUtc(path, at); Directory.SetLastWriteTimeUtc(Path.Combine(node.Root, directory), at);
+        node.Engine.RequestScan(); await node.Engine.RunPassAsync(Token);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task EmptyReceiverPreservesBothConcurrentRemoteCaseVersionsVisibly(bool reverseArrival)
