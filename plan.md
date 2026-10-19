@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core, hashing, storage/scanning, needed selection, recoverable file/directory application, archive/restore, immutable history/retention and the ordered pull coordinator are merged with green CI. Case/hierarchy coordination, temporary cleanup, clock admission/UI and production simulations remain open; retention parent invariants still need production simulation evidence. | - |
+| P1 Local sync engine | 4-8 | In progress: core, hashing, storage/scanning, needed selection, recoverable application, archive/history/retention, ordered pulls, UTC clock foundations, in-memory connected transport and initial real-engine simulations are merged with green CI. Absent-descendant hierarchy fixes pass locally. Case coordination, temporary cleanup, real authenticated clock admission/UI and full phase-gate simulations remain open. | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -1483,9 +1483,9 @@ Our own writes need no special suppression: the puller records the new state in 
     - Merged with [local and CI verification](docs/verification/P1.5.4b-archive-restore-2026-10-19.md): 32 restore cases, normal RW/RO scanning, shared recovery and reused-staging inheritance regression pass, along with all five required CI jobs. Actual UI remains P5.5.
 - [ ] **P1.5.5 Clock-skew guard** (`PeerSync.Engine/Sync/ClockGuard.cs`) [WIP @Codex 2026-10-19]
   - Done when: `Hello` carries UTC time. A peer more than 10 minutes off exchanges no index updates and shows "clock differs by N minutes" in the UI.
-  - [ ] **P1.5.5a UTC Hello and clock decision/status model** (`PeerSync.Protocol/`, `PeerSync.Engine/Sync/ClockGuard.cs`) [WIP @Codex 2026-10-19]
+  - [x] **P1.5.5a UTC Hello and clock decision/status model** (`PeerSync.Protocol/`, `PeerSync.Engine/Sync/ClockGuard.cs`) (#34)
     - Done when: UTC Hello round-trips; missing/invalid/extreme samples, both offset signs, exact limit, elapsed time, local clock jumps, reset, frozen inputs and safe transition diagnostics are tested. This foundation alone does not authorize peer exchange or close the parent.
-    - Local [verification](docs/verification/P1.5.5a-clock-foundation-2026-10-19.md): 18 clock and two Hello additions pass with all 902 canonical tests/native/probe/publishing in 108.92 seconds, exit 0 (CI fuzz skipped locally). Authenticated exchange/UI integration and main/CI evidence remain pending.
+    - Foundation [verification](docs/verification/P1.5.5a-clock-foundation-2026-10-19.md) and [final merge audit](docs/verification/P1-clock-transport-ci-merge-2026-10-19.md): all 970 final cases, both Server variants and required boundary fuzz pass, with identical submitted/tested/main trees. Real authenticated transport/UI integration remains required by the parent.
   - [ ] **P1.5.5b Guard peer index admission** (`PeerSync.Engine/`, `PeerSync.Net/`) [WIP @Codex 2026-10-19]
     - Done when: authenticated peer sessions check current clock admission before incoming and outgoing index exchange; skewed or missing samples exchange no index data and recovery after a valid Hello is tested using production engine/transport integration.
     - Local [facade/transaction evidence](docs/verification/P1.5.5b-peer-index-admission-2026-10-19.md): eleven Engine, four Storage and three Core additions pass with all 935 canonical tests/native/probe/publishing in 110.20 seconds, exit 0 (CI fuzz skipped locally). Pure checks under writer/reference gates, rollback, identity binding, immutable pages and private trace/session diagnostics are covered. Production transport wiring, UI and main/CI remain pending.
@@ -1611,21 +1611,21 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
 
 ### P1.6 Simulation harness
 
-- [ ] **P1.6.1 Transport abstraction and in-memory transport** (`PeerSync.Net/InMemory/`) [WIP @codex 2026-10-19]
+- [x] **P1.6.1 Transport abstraction and in-memory transport** (`PeerSync.Net/InMemory/`) (#34)
   - Done when: the engine talks only to `IPeerTransport`. The in-memory implementation supports injected latency, drops and partitions.
-  - [ ] **P1.6.1a Bounded identity-bound in-memory fabric** [WIP @codex 2026-10-19]
+  - [x] **P1.6.1a Bounded identity-bound in-memory fabric** (#34)
     - Done when: connection-scoped handlers, isolated identity/message ownership, independent bounded requests, directional latency/drop/partition injection and cancel/drain/disconnect behavior have executable tests and canonical CI coverage.
-  - [ ] **P1.6.1b Connected engine integration** [WIP @codex 2026-10-19]
+  - [x] **P1.6.1b Connected engine integration** (#34)
     - Done when: real folder indexes, Hello clocks, bounded range/page synchronization and verified chunk serving/pulling use IPeerTransport, with actual file transfer, partition/reconnect and skew-blocking tests. No raw remote callback bypass in this connected path. Parent remains open until all connected engine integration is proven.
-  - Local implementation and 955-case canonical verification pass; no merge/CI claim yet. See `docs/verification/P1.6.1-in-memory-engine-transport-2026-10-19.md`. Actual TLS/folder authentication, rendered clock UI and the separate multi-node property gate remain open.
-  - [ ] **P1.6.1c Connected-session review hardening** [WIP @codex 2026-10-19]
+  - Merged with [final CI/main audit](docs/verification/P1-clock-transport-ci-merge-2026-10-19.md): all connected peer exchanges in TransportFolder use IPeerTransport; callback appliers remain trusted local primitives as specified by the design. Actual TLS/folder authentication, rendered clock UI and the separate multi-node property gate remain open.
+  - [x] **P1.6.1c Connected-session review hardening** (#34)
     - Done when: growth beyond an announced target retains the true range barrier; disconnect/fresh-Hello cannot revive old queued admission; peer cancellation/disposal permits independent work and durable retry while caller cancellation remains intact; all folder disposal callers await the same drain/failure. Focused regressions and canonical/main/CI evidence pass.
-    - Local [repair evidence](docs/verification/P1.6.1c-connected-session-hardening-2026-10-19.md): baseline reproduces seven failures; all 52 focused and 970 canonical cases pass after twelve additions. Updated-head CI/main evidence remains pending.
+    - [Repair evidence](docs/verification/P1.6.1c-connected-session-hardening-2026-10-19.md): baseline reproduces seven failures; all 52 focused and 970 canonical cases pass after twelve additions. All five final CI jobs pass, threads are resolved, and actual main matches the tested tree; see the merge audit above.
 - [ ] **P1.6.2 Multi-node property tests** (`tests/PeerSync.Simulation`) [WIP @codex 2026-10-19]
   - Done when: `CsCheck` generates random edits, renames, deletes, partitions and heals on 3 to 7 nodes, each with a temp folder. After the network heals, all trees are identical. Every overwritten version exists in some node's archive or as a conflict copy. 1,000 seeds run in CI, and failing seeds are saved as regression tests.
-  - [ ] **P1.6.2a Reproducible real-engine scenarios and loss oracle** [WIP @codex 2026-10-19]
+  - [x] **P1.6.2a Reproducible real-engine scenarios and loss oracle** (#34)
     - Done when: generated/replayed operation traces use actual engine folders, heal to byte-identical visible trees and verify preservation from current/archive/conflict files. Save failure evidence and promote found regressions. Initial bounded smoke does not close the parent or phase gate.
-    - Local [simulation evidence](docs/verification/P1.6.2a-real-engine-simulation-2026-10-19.md): 100 distinct three-to-seven-node cases pass convergence/preservation. A checker regression excludes internal staging from user trees; a native negative-control test rejects private cache alone as preservation. Canonical verification now passes 958 cases including an eight-scenario smoke. Full coverage, 1,000 CI cases, five consecutive days and main/CI evidence remain pending.
+    - [Simulation evidence](docs/verification/P1.6.2a-real-engine-simulation-2026-10-19.md) and [merged audit](docs/verification/P1-clock-transport-ci-merge-2026-10-19.md): initial generated scenarios, saved checker regression and native loss-oracle negative control pass locally and in final green CI, with an eight-scenario smoke. Expanded coverage, 1,000 CI cases, five consecutive days and the parent gate remain pending.
     - An additional local 1,000-case batch on the first PR #34 head passes: 9,807 versions, 500 actual renames and 1,001 actual deletions, all converged/preserved. This is initial flat-path evidence before the review repairs, not CI/five-day/100k-file gate evidence.
 
 ### Gate P1
