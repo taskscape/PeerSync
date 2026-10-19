@@ -59,11 +59,12 @@ public sealed class FolderIndexTests : IDisposable
         Directory.GetFiles(root, "*.pre-v2-to-v3-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v3-to-v4-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v4-to-v5-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v5-to-v6-*.bak").Length.ShouldBe(1);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        ((long)command.ExecuteScalar()!).ShouldBe(5);
+        ((long)command.ExecuteScalar()!).ShouldBe(6);
         command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
         command.Parameters.AddWithValue("$path", "FILE");
         var details = new List<string>();
@@ -75,6 +76,10 @@ public sealed class FolderIndexTests : IDisposable
         using (var query = command.ExecuteReader()) while (query.Read()) details.Add(query.GetString(3));
         string.Join('\n', details).ShouldContain("ix_remote_path");
         string.Join('\n', details).ShouldNotContain("SCAN remote_files");
+        command.Parameters.Clear(); command.CommandText = "EXPLAIN QUERY PLAN SELECT id FROM archive WHERE original_path=$path AND file_hash=$hash AND size=$size;";
+        command.Parameters.AddWithValue("$path", "file"); command.Parameters.AddWithValue("$hash", Hash); command.Parameters.AddWithValue("$size", 1);
+        details.Clear(); using (var query = command.ExecuteReader()) while (query.Read()) details.Add(query.GetString(3));
+        string.Join('\n', details).ShouldContain("ix_archive_version"); string.Join('\n', details).ShouldNotContain("SCAN archive");
     }
 
     [Fact]

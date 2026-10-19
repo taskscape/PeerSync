@@ -115,6 +115,14 @@ internal sealed class DirectoryLease : IDisposable
         return SafeFileTree.Open(parent, name, null, 0x00130181, 3, 1);
     }
 
+    internal SafeFileHandle OpenMetadataNode(string name)
+    {
+        Check(name, temporary: false);
+        // Classification only: do not request data/write/delete access, so a
+        // locked unknown collision need not block another no-overwrite slot.
+        return SafeFileTree.Open(parent, name, null, 0x00100080, 7, 1);
+    }
+
     internal SafeFileHandle CreateDirectory(string name)
     {
         Check(name, temporary: false);

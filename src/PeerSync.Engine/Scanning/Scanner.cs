@@ -8,9 +8,11 @@ using Google.Protobuf;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Ignore;
 using PeerSync.Core.Paths;
+using PeerSync.Core.Settings;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
+using PeerSync.Engine.Archive;
 using PeerSync.Engine.Native;
 using PeerSync.Engine.Sync;
 using PeerSync.Protocol.Records;
@@ -21,7 +23,10 @@ namespace PeerSync.Engine.Scanning;
 
 public sealed record ScanProblem(string RelativePath, string Code, int? NativeError = null);
 public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int Renamed, int Updated,
-    int Deleted, int Ignored, int Unsyncable, TimeSpan Elapsed, IReadOnlyList<ScanProblem> Problems);
+    int Deleted, int Ignored, int Unsyncable, TimeSpan Elapsed, IReadOnlyList<ScanProblem> Problems)
+{
+    public bool RequiresFollowupScan { get; init; }
+}
 
 /// <summary>Tracks a local tree. The caller owns the index, keys and optional journal.
 /// Filesystem apply/recovery shares the per-index operation gate with scans.</summary>
@@ -38,12 +43,14 @@ public sealed class Scanner : IDisposable
     private readonly TimeProvider clock;
     private readonly DiagnosticJournal? journal;
     private readonly int hashConcurrency;
+    private readonly FolderSettings settings;
+    internal Action<string>? Checkpoint { get; set; }
     private readonly SemaphoreSlim scanGate = new(1);
     internal string RootPath => rootPath;
 
     public Scanner(string rootPath, FolderIndex index, FolderKeys keys, byte[] deviceId,
         IgnoreMatcher? ignore = null, int? hashConcurrency = null, TimeProvider? timeProvider = null,
-        DiagnosticJournal? journal = null)
+        DiagnosticJournal? journal = null, FolderSettings? settings = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         ArgumentNullException.ThrowIfNull(index);
@@ -57,6 +64,7 @@ public sealed class Scanner : IDisposable
         this.ignore = ignore ?? new();
         this.clock = timeProvider ?? TimeProvider.System;
         this.journal = journal;
+        this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
         this.hashConcurrency = hashConcurrency ?? Math.Max(1, Environment.ProcessorCount - 1);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(this.hashConcurrency);
     }
@@ -70,7 +78,8 @@ public sealed class Scanner : IDisposable
         {
             using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
             journal?.TryWrite(new("scan.start", "scan") { SessionId = session });
-            if (index.ReadApplyIntents().Any())
+            var pendingIntents = index.ReadApplyIntents().ToArray();
+            if (pendingIntents.Any(intent => !HistoryState.IsHistory(intent)))
                 throw new IOException("Pending file application must be recovered before scanning.");
             using var root = new NativeRoot(rootPath);
             using var blocks = keys.CanWrite ? new PublishedBlocks(root) : null;
@@ -79,6 +88,9 @@ public sealed class Scanner : IDisposable
                 throw new IOException("Sync root identity changed; the existing index cannot be reused.");
             if (identity is null)
                 await index.Meta.UpsertAsync([new(RootIdentityKey, root.Identity)], cancellationToken).ConfigureAwait(false);
+            using var historyTree = new SafeFileTree(root);
+            var history = new SnapshotHistory(index, keys, device, settings, journal, clock) { Checkpoint = Checkpoint };
+            foreach (var intent in pendingIntents) await history.RecoverIntentAsync(historyTree, intent, cancellationToken).ConfigureAwait(false);
 
             var previous = index.LocalFiles.ReadAll().ToDictionary(r => r.Path.ToUpperInvariant(), StringComparer.Ordinal);
             var entries = new Dictionary<string, WalkEntry>(StringComparer.Ordinal);
@@ -258,13 +270,30 @@ public sealed class Scanner : IDisposable
             using (var currentRoot = new NativeRoot(rootPath))
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity))
                     throw new IOException("Sync root was replaced during the scan.");
-            int written = await index.LocalFiles.UpsertAsync(updates.OrderBy(r => r.Path, StringComparer.Ordinal), cancellationToken).ConfigureAwait(false);
+            var ordered = updates.OrderBy(r => r.Path, StringComparer.Ordinal).ToArray(); bool followup = false;
+            var retainedCopies = ordered.Where(r => !r.Deleted && r.Type == 0 && r.FileId is not null && r.FileHash is not null
+                    && r.Path.Split('/').Any(p => p.Contains(".sync-conflict-", StringComparison.Ordinal)))
+                .GroupBy(r => Convert.ToHexString(r.FileId!) + Convert.ToHexString(r.FileHash!), StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Path, StringComparer.Ordinal);
+            foreach (var next in ordered)
+                if (previous.TryGetValue(next.Path.ToUpperInvariant(), out var old))
+                {
+                    string? retainedPath = old.FileId is not null && old.FileHash is not null
+                        && retainedCopies.TryGetValue(Convert.ToHexString(old.FileId) + Convert.ToHexString(old.FileHash), out string? path) ? path : null;
+                    followup |= await history.EnsureAsync(historyTree, old, next, retainedPath, cancellationToken).ConfigureAwait(false);
+                }
+            Checkpoint?.Invoke("before-scan-commit");
+            // History retention can perform I/O: recheck the root pathname again
+            // before committing the newly collected local records.
+            using (var currentRoot = new NativeRoot(rootPath))
+                if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity)) throw new IOException("Sync root changed during history retention.");
+            int written = await index.LocalFiles.UpsertAsync(ordered, cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
-                stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray());
+                stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray()) { RequiresFollowupScan = followup };
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {

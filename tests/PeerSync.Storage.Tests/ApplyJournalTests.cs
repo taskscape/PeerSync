@@ -229,6 +229,54 @@ public sealed class ApplyJournalTests : IDisposable
         index.LocalFiles.Find("file/child")!.Flags.ShouldBe(LocalFileState.NeedsRescan); index.Needed.Find("file/child").ShouldBeNull();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HistoryCompletionAtomicallyAccountsMarkerAndArchiveWithoutChangingTheSource(bool archived)
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); await PrepareAsync(index);
+        var before = index.LocalFiles.Find("file")!; var intent = new ApplyIntent(Guid.NewGuid(), "file", before.LocalSequence, [4]);
+        var marker = new MetaRow("_history-" + new string('A', 64), [1, 2, 3]); await index.ReserveApplyAsync(intent, Token);
+        (await index.WithholdApplySourceAsync(intent, Token)).ShouldBeTrue();
+        index.ReadIndexBatch(0).Records.ShouldBeEmpty(); index.LocalFiles.Find("file")!.LocalSequence.ShouldBe(before.LocalSequence);
+        (await index.CommitHistoryAsync(intent, marker, archived ? Archive() : null, Token)).ShouldBeTrue();
+        index.Meta.Find(marker.Key)!.Value.ShouldBe(marker.Value); index.Archive.Count().ShouldBe(archived ? 1 : 0);
+        index.LocalFiles.Find("file")!.FileHash.ShouldBe(OldHash); index.LocalFiles.Find("file")!.LocalSequence.ShouldBe(before.LocalSequence);
+        index.LocalFiles.Find("file")!.Flags.ShouldBe(LocalFileState.NeedsRescan); index.ReadApplyIntents().ShouldBeEmpty();
+        (await index.CommitHistoryAsync(intent, marker, archived ? Archive() : null, Token)).ShouldBeFalse();
+        (await index.WithholdApplySourceAsync(intent, Token)).ShouldBeFalse(); index.Archive.Count().ShouldBe(archived ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task ARealMarkerWriteFailureRollsBackArchiveAccountingAndRetainsHistoryIntent()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); await PrepareAsync(index);
+        var intent = new ApplyIntent(Guid.NewGuid(), "file", 1, [4]); await index.ReserveApplyAsync(intent, Token);
+        var marker = new MetaRow("_history-" + new string('B', 64), [1]);
+        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()))
+        {
+            connection.Open(); using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TRIGGER reject_history BEFORE INSERT ON meta WHEN NEW.key LIKE '_history-%' BEGIN SELECT RAISE(ABORT,'injected marker failure'); END;";
+            command.ExecuteNonQuery();
+        }
+        await Should.ThrowAsync<SqliteException>(() => index.CommitHistoryAsync(intent, marker, Archive(), Token));
+        index.Archive.Count().ShouldBe(0); index.Meta.Find(marker.Key).ShouldBeNull(); index.ReadApplyIntents().Count().ShouldBe(1);
+        index.LocalFiles.Find("file")!.LocalSequence.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task StaleHistorySourceOrMarkerShapeCannotChangeTheArchiveOrAnotherLocalVersion()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); await PrepareAsync(index);
+        var intent = new ApplyIntent(Guid.NewGuid(), "file", 1, [4]); await index.ReserveApplyAsync(intent, Token);
+        await Should.ThrowAsync<ArgumentException>(() => index.CommitHistoryAsync(intent, new("other", [1]), Archive(), Token));
+        await index.LocalFiles.UpsertAsync([Row(NewHash)], Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => index.CommitHistoryAsync(intent, new("_history-" + new string('C', 64), [1]), Archive(), Token));
+        await Should.ThrowAsync<InvalidOperationException>(() => index.WithholdApplySourceAsync(intent, Token));
+        index.LocalFiles.Find("file")!.FileHash.ShouldBe(NewHash); index.LocalFiles.Find("file")!.Flags.ShouldBe(LocalFileState.None);
+        index.Archive.Count().ShouldBe(0); index.ReadApplyIntents().Count().ShouldBe(1);
+    }
+
     private static LocalFileRow Row(byte[] hash) => new("file", 0, 3, 0, 0, false, 0, hash, new Dictionary<ulong, ulong> { [1] = 1 },
         new(hash, new byte[64]), new byte[16]) { IndexedChunks = [new(0, 3, hash)], ContentReady = true };
     private static ArchiveRow Archive() => new(0, "file", ".psp/archive/file~20261019-120000", DateTime.UtcNow.Ticks, 3, OldHash);

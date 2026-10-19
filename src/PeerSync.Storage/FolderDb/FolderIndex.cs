@@ -34,7 +34,7 @@ public sealed partial class FolderIndex : IAsyncDisposable
     public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         var migrations = new List<DbMigration>();
-        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql", "0005_content_ready.sql" })
+        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql", "0004_apply_intents.sql", "0005_content_ready.sql", "0006_archive_version.sql" })
         {
             using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations." + file)
                 ?? throw new InvalidOperationException("Missing folder schema resource.");
@@ -79,6 +79,11 @@ public sealed partial class FolderIndex : IAsyncDisposable
 
     public IEnumerable<NeededRow> NeededByPriority() => Needed.ReadWhere("1=1 ORDER BY priority DESC,path_key");
     public IEnumerable<ArchiveRow> ArchivesByAge() => Archive.ReadWhere("1=1 ORDER BY archived_ticks,id");
+    public IEnumerable<ArchiveRow> ArchivesForVersion(string originalPath, byte[] hash, long size)
+    {
+        _ = PathRules.Key(originalPath); FolderMaps.RequireBytes(hash, 32); ArgumentOutOfRangeException.ThrowIfNegative(size);
+        return Archive.ReadWhere("original_path=$k0 AND file_hash=$k1 AND size=$k2 ORDER BY id", originalPath, hash, size);
+    }
     public ValueTask DisposeAsync() => database.DisposeAsync();
 
     internal static long ReadSequence(SqliteConnection connection, SqliteTransaction transaction)

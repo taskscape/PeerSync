@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
@@ -40,6 +41,7 @@ internal sealed class ApplyIntentJsonConverter : JsonConverter<ApplyIntent>
 
 public sealed partial class FolderIndex
 {
+    private static readonly SearchValues<char> HistoryHex = SearchValues.Create("0123456789ABCDEF");
     /// <summary>Leave an unknown concurrent filesystem target untouched. Account
     /// for retained originals, withhold the stale local record until rescan, and
     /// remove the exact intent together. The caller has already verified archives.</summary>
@@ -172,6 +174,52 @@ public sealed partial class FolderIndex
             if (movedDirectory) WithholdDescendants(connection, transaction, expected.PathKey);
             cancellationToken.ThrowIfCancellationRequested();
             RemoveIntent(connection, transaction, expected.Id); return true;
+        }, cancellationToken);
+    }
+
+    /// <summary>Withhold publication after failed recovery while retaining the
+    /// exact intent and source sequence needed to retry safely.</summary>
+    public Task<bool> WithholdApplySourceAsync(ApplyIntent expected, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            var current = ReadIntent(connection, transaction, expected.Id);
+            if (current is null) return false;
+            RequireSameIntent(current, expected); RequireExpectedSequence(connection, transaction, expected);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "UPDATE local_files SET flags=flags|4 WHERE path_key=$path;";
+            command.Parameters.AddWithValue("$path", expected.PathKey); command.ExecuteNonQuery(); return true;
+        }, cancellationToken);
+    }
+
+    /// <summary>Account for a reconstructed historical version without changing
+    /// the current user file or its local row. The opaque authenticated location
+    /// marker, optional archive and exact intent removal commit together.</summary>
+    public Task<bool> CommitHistoryAsync(ApplyIntent expected, MetaRow marker, ArchiveRow? archive,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(marker);
+        if (marker.Key.Length != 73 || !marker.Key.StartsWith("_history-", StringComparison.Ordinal)
+            || marker.Key.AsSpan(9).ContainsAnyExcept(HistoryHex)
+            || marker.Value is not { Length: > 0 and <= ApplyIntent.MaxPayloadBytes })
+            throw new ArgumentException("Invalid history marker.", nameof(marker));
+        var frozen = marker with { Value = marker.Value.ToArray() };
+        ArchiveRow? retained = archive is null ? null : archive with { FileHash = archive.FileHash?.ToArray() };
+        if (retained is not null)
+        {
+            FolderMaps.Archive.Validate(retained);
+            if (retained.Id != 0 || PathRules.Key(retained.OriginalPath) != expected.PathKey)
+                throw new ArgumentException("History archive does not match its source.", nameof(archive));
+        }
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            var current = ReadIntent(connection, transaction, expected.Id);
+            if (current is null) return false;
+            RequireSameIntent(current, expected); RequireExpectedSequence(connection, transaction, expected);
+            if (retained is not null) Archive.WriteBatch(connection, transaction, [retained], cancellationToken);
+            Meta.WriteBatch(connection, transaction, [frozen], cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested(); RemoveIntent(connection, transaction, expected.Id); return true;
         }, cancellationToken);
     }
 

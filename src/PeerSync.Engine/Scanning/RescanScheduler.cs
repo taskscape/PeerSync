@@ -81,10 +81,10 @@ public sealed class RescanScheduler
                 {
                     journal?.TryWrite(new("scheduler.scan_start", "rescan") { SessionId = session });
                     result = await folder.Scanner.ScanAsync(stopped.Token).ConfigureAwait(false);
-                    if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed"))
+                    if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed"))
                         errorCode = "scan-deferred";
                 }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or System.Security.Cryptography.CryptographicException
                     || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 })
                 {
                     errorCode = "scan-unavailable";
@@ -106,6 +106,7 @@ public sealed class RescanScheduler
                 int retry = errorCode is null ? 0 : BackoffSeconds(attempt);
                 if (errorCode is not null) attempt = Math.Min(attempt + 1, 6);
                 outcomes.Writer.TryWrite(new(folder.Scanner, result, errorCode, retry));
+                if (result?.RequiresFollowupScan == true) requests.Writer.TryWrite(true);
                 if (retry == 0) continue;
                 journal?.TryWrite(new("scheduler.retry", "rescan")
                 { SessionId = session, Level = DiagnosticLevel.Debug, ErrorCode = errorCode, RetryInMilliseconds = retry * 1000 });

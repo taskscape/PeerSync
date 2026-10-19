@@ -125,11 +125,14 @@ public sealed class PublishedBlocks : IDisposable
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return false; }
     }
 
-    private static void RequireIndependent(SafeFileHandle file)
+    internal static void RequireIndependent(SafeFileHandle file)
+    {
+        if (!IsIndependent(file)) throw new IOException("Published blocks must be independent regular files.");
+    }
+    internal static bool IsIndependent(SafeFileHandle file)
     {
         if (!NativeFileInfo.GetStandard(file, 1, out var info, 24)) throw new Win32Exception(Marshal.GetLastPInvokeError());
-        if (info.NumberOfLinks != 1 || info.DeletePending != 0 || info.Directory != 0)
-            throw new IOException("Published blocks must be independent regular files.");
+        return info.NumberOfLinks == 1 && info.DeletePending == 0 && info.Directory == 0;
     }
 
     private static void Read(SafeFileHandle file, Span<byte> bytes, long offset, CancellationToken token)
