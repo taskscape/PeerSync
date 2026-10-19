@@ -722,6 +722,13 @@ aliases, bound envelope memory and flush fetched metadata before continuation.
 This projection proves no native ownership/readiness. Follow
 docs/proposals/P1-directory-subtree-materialization.md for the subsequent
 root/member-bound no-overwrite journal, recovery and publication requirements.
+Begin native case-root creation with distinct local intent kind 8: authenticated
+original directory/source and physical root, stable collision slot, exclusive
+GUID temporary/native identity and prepared state. Require complete graph
+coverage, FULL reserve before preparation/rename and FULL identity accounting
+before intent release. Preserve changed/occupied temporaries and replay by
+native identity. Share a 1000-unit graph budget; root creation alone never
+completes subtree preservation or publication.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the

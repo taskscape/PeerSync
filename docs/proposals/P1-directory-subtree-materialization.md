@@ -39,3 +39,33 @@ original envelopes, bounded continuation/byte budget, damaged or replaced
 metadata, missing/retiring/root-mismatched graphs and cancellation. Then add
 real native member recovery/publication and connected arrival-order/gossip/
 late-page/collision/source-replacement tests before activating the scanner.
+
+## Native root journal
+
+Use a distinct local recovery intent kind 8 for the case-copy root. Bind the
+physical root, original authenticated directory envelope/source ID, stable
+collision slot, sibling GUID temporary directory/native ID and preparation
+state. This format remains within the existing 24 MiB intent bound, without
+duplicating member envelopes. Require a complete non-retiring source graph
+before reserving or recovering native root mutation. Legacy missing roots stay
+pending. Bound new graph work to a shared 1000 units per preparation pass;
+successful metadata continuation remains immediately schedulable.
+
+Create the owned temporary exclusively and retain its native handle. FULL
+reserve the existing source/destination case ledger and kind-8 intent before
+preparation or rename. Reject nonempty reused temporaries. Prepare inherited
+metadata and source mtime, FULL-mark prepared, then rename by held handle
+without overwrite. FULL-account the root native identity and release the
+intent together. No source completion occurs here, even for an empty graph;
+member accounting and RW/RO publication proof are still mandatory.
+
+Recovery accepts a prepared installed destination only by its persisted native
+identity. It accounts that identity without erasing post-install user metadata.
+A valid empty prepared temporary can finish its guarded rename; unprepared,
+changed, occupied or unclassifiable cases preserve all objects, park owned
+temporary metadata (protected when changed/nonempty), and release the intent
+for another safe attempt. A mutation followed by a database failure retains
+the intent and requires recovery before scanning. Diagnostic stages/correlation
+identify graph, reservation, preparation, installation, accounting and replay
+without logging source envelopes or paths. Member intents/journals follow this
+root foundation and must bind the accounted destination-root native identity.
