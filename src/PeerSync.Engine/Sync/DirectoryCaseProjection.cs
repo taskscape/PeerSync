@@ -12,7 +12,10 @@ using PeerSync.Storage.FolderDb;
 namespace PeerSync.Engine.Sync;
 
 internal sealed record DirectoryCaseMember(VersionView Original, string Destination)
-{ public override string ToString() => "Projected directory member (redacted)"; }
+{
+    internal required DirectorySnapshotLink RecordLink { get; init; }
+    public override string ToString() => "Projected directory member (redacted)";
+}
 internal sealed record DirectoryCasePage(VersionView OriginalRoot, string DestinationRoot, IReadOnlyList<DirectoryCaseMember> Members, string? NextKey, bool More)
 { public override string ToString() => "Projected directory page (redacted)"; }
 
@@ -59,7 +62,7 @@ internal sealed class DirectoryCaseProjection(string rootPath, FolderIndex index
                     string relative = string.Join('/', original.Path.Split('/').Skip(rootSegments)); string target = destination + '/' + relative;
                     stage = "destination";
                     if (!PathRules.IsValid(target)) throw new InvalidDataException("Directory projection destination cannot be represented.");
-                    output.Add(new(original, target)); bytes = checked(bytes + node.PayloadLength); cursor = member.PathKey;
+                    output.Add(new(original, target) { RecordLink = link }); bytes = checked(bytes + node.PayloadLength); cursor = member.PathKey;
                 }
                 stage = "flush"; await blocks.FlushAsync(token).ConfigureAwait(false);
             }

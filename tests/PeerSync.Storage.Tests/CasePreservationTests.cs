@@ -6,7 +6,7 @@ using Xunit;
 
 namespace PeerSync.Storage.Tests;
 
-public sealed class CasePreservationTests : IDisposable
+public sealed partial class CasePreservationTests : IDisposable
 {
     private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-CaseDb-" + Guid.NewGuid().ToString("N"));
     private string Database => Path.Combine(fixture, "index.db");

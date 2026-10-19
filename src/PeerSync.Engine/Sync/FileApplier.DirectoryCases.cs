@@ -12,10 +12,10 @@ namespace PeerSync.Engine.Sync;
 
 public sealed partial class FileApplier
 {
-    private async Task<(bool Created, int GraphWork)> PrepareDirectoryCaseRootAsync(SafeFileTree tree, PendingCasePreservation pending, VersionView source,
-        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, int graphBudget, CancellationToken token)
+    private async Task<(bool Created, int GraphWork, int NativeWork)> PrepareDirectoryCaseRootAsync(SafeFileTree tree, PendingCasePreservation pending, VersionView source,
+        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, int graphBudget, int memberBudget, CancellationToken token)
     {
-        int processed = 0; byte[] preferred = pending.Source.SourceDevice;
+        int processed = 0, nativeWork = 0; byte[] preferred = pending.Source.SourceDevice;
         try
         {
             FileMetadata.ValidateMtime(source.MtimeTicks);
@@ -29,15 +29,24 @@ public sealed partial class FileApplier
             {
                 Signal("case-root-graph-pending", Guid.NewGuid());
                 if (processed == 0 && graphBudget > 0) await RetryCaseAsync(pending, "case-root-graph-waiting", token).ConfigureAwait(false);
-                return (false, processed);
+                return (false, processed, 0);
             }
             if (pending.DestinationPath is not null && pending.InstalledFileId is not null)
             {
-                using var knownParent = tree.Directory(ApplyState.Parent(pending.DestinationPath));
-                using var known = TryCaseRoot(knownParent, ApplyState.Name(pending.DestinationPath), out _);
-                if (known is not null && CaseRootMatches(known, pending.InstalledFileId))
-                { await RetryCaseAsync(pending, "case-root-members-pending", token).ConfigureAwait(false); return (false, processed); }
+                bool valid;
+                using (var knownParent = tree.Directory(ApplyState.Parent(pending.DestinationPath)))
+                using (var known = TryCaseRoot(knownParent, ApplyState.Name(pending.DestinationPath), out _)) valid = known is not null && CaseRootMatches(known, pending.InstalledFileId);
+                if (valid)
+                {
+                    // Failure may follow successful member accounting. Charge
+                    // the offered work until exact progress is returned.
+                    nativeWork = memberBudget;
+                    var members = await PrepareDirectoryMembersAsync(tree, pending, source, FetchMetadata, memberBudget, token).ConfigureAwait(false);
+                    return (members.Changed, processed, members.Processed);
+                }
             }
+            if (memberBudget == 0) return (false, processed, 0);
+            nativeWork = 1;
             using var parent = tree.Directory(ApplyState.Parent(source.Path)); string destination = ""; int collision;
             for (collision = 1; collision <= 1000; collision++)
             {
@@ -60,7 +69,7 @@ public sealed partial class FileApplier
                 FileMetadata.PrepareNewFile(parent, temporary); FileMetadata.SetMtime(temporary, source.MtimeTicks);
                 state.TemporaryAttributes = (uint)FileSnapshot.Read(temporary).Attributes; state.Prepared = true;
                 intent = await index.RewriteApplyAsync(intent, state.Encode(), token).ConfigureAwait(false); Signal("case-root-prepared", session);
-                return (await InstallDirectoryCaseRootAsync(tree, pending, state, intent, parent, temporary, token).ConfigureAwait(false), processed);
+                return (await InstallDirectoryCaseRootAsync(tree, pending, state, intent, parent, temporary, token).ConfigureAwait(false), processed, 1);
             }
             catch (Exception error) when (error is IOException or Win32Exception or UnauthorizedAccessException or CryptographicException)
             {
@@ -88,7 +97,7 @@ public sealed partial class FileApplier
         {
             if (index.ReadApplyIntents().Any()) throw;
             StagingProbeFailed("case-root-deferred", Guid.NewGuid(), error); await RetryCaseAsync(pending, error.GetType().Name, token).ConfigureAwait(false);
-            return (false, processed);
+            return (false, processed, nativeWork);
         }
     }
     private async Task RecoverDirectoryCaseRootAsync(SafeFileTree tree, ApplyIntent intent, CancellationToken token)

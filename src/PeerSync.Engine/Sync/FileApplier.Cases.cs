@@ -17,16 +17,17 @@ public sealed partial class FileApplier
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, CancellationToken token)
     {
         if (DirectoryCaseGraphWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory case graph work bound.");
+        if (DirectoryCaseMemberWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory case member work bound.");
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
-        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); bool readyForScan = false; int graphBudget = DirectoryCaseGraphWorkLimit;
+        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); bool readyForScan = false; int graphBudget = DirectoryCaseGraphWorkLimit, memberBudget = DirectoryCaseMemberWorkLimit;
         if (index.ReadApplyIntents().Any()) return false;
         foreach (var pending in index.ReadDueCasePreservations(tree.Identity.ToArray(), CaseNow))
         {
             token.ThrowIfCancellationRequested(); var source = OpenCaseSource(tree, pending);
             if (source.Type == 1)
             {
-                var root = await PrepareDirectoryCaseRootAsync(tree, pending, source, fetch, graphBudget, token).ConfigureAwait(false);
-                readyForScan |= root.Created; graphBudget -= root.GraphWork; continue;
+                var root = await PrepareDirectoryCaseRootAsync(tree, pending, source, fetch, graphBudget, memberBudget, token).ConfigureAwait(false);
+                readyForScan |= root.Created; graphBudget -= root.GraphWork; memberBudget -= root.NativeWork; continue;
             }
             try
             {
