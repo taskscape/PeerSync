@@ -316,6 +316,17 @@ replaced, linked, locked and reparse objects. Unexpected missing archives withou
 such a witness may reconcile their rows, but do not authorize releasing history
 references. Reference retention consumes completed witnesses or the explicit age
 policy, never absence alone. Pending application still blocks policy maintenance.
+Build persistent block-reference snapshots under the same folder gate as scans,
+application, restore and index receive/recompute. Include all local chunk hints
+and authenticated local live-file manifests (including withheld rows), every
+candidate at a needed path, and authenticated root-bound history manifests.
+Stage bounded batches in a separate snapshot and activate it with a FULL
+transaction only after validation finishes; failure/cancellation keeps the
+previous active snapshot. Never use an incomplete or stale snapshot to authorize
+deletion. Unmanifested retained archives prevent sweeping until their content
+references are captured, and policy retirement/reference release remains a
+separate required step. Future transport dispatch must handle block responses
+independently of a waiting serialized index handler.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
