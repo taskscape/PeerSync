@@ -34,6 +34,6 @@ Submitted/tested/prospective/actual trees all match:
 
 P0.1.2d and the P1.5.3e coordinator work meet their main/green-CI acceptance.
 The automatic main workflow 39259378375 is separate follow-up evidence and is
-still running at this audit. Parent file/directory/case/hierarchy coordination,
+now successful on all five jobs (verified 2026-10-19). Parent file/directory/case/hierarchy coordination,
 temporary cleanup, clock admission/UI and production simulations remain open.
 Gate P1 is not closed; the production service/transport/UI are not completed.

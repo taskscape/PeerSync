@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | Start transport-backed engine simulation: per-connection identity-bound handlers, frozen bounded messages, independently scheduled requests and deterministic directional delay/drop/partition delivery. Drain cancellation before handler disposal. Route connected index/chunk exchanges through IPeerTransport and retain symmetric clock admission; trusted fabric identity does not prove real TLS/folder authentication. | Testing strategy: in-memory transport |
 | 2026-10-19 | Ordered pull scheduling: transactionally cache authenticated work descriptors/fingerprints, persist monotonic sender-range targets and exact-work root-bound backoff, and query bounded priority work without loading every envelope. Guard destructive range rechecks, route downloads from the applier's actual winner, recover before scans and rescan preserved data outside mutation gates. Case/hierarchy coordination and production simulations remain required parent integration. | Applying remote changes |
 | 2026-10-19 | Bounded historical metadata cleanup: FULL retiring-manifest state hides partial drains and resumes in batches of at most 1,000 mutations under fresh covered references/both gates. Reused history copies durably recapture exact signed chunks before renewed holds. Preserve attached/pending/foreign sources; drain detached released metadata and only aged unlinked completed witnesses. Do not change byte references, orphan clocks, needed work or deletion journals; report backlog for retries. | Detecting local changes: published block ownership |
 | 2026-10-19 | Referenced partial duplicates may expire only when an independent, verified, durably cataloged complete replacement is bound by file ID and guarded through FULL retirement. Revalidate replacement after restart; loss preserves a present prefix or withholds readiness for missing bytes. This closes permanent maintenance deferral without releasing needed bytes. | Detecting local changes: published block ownership |
@@ -1603,8 +1604,12 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
 
 ### P1.6 Simulation harness
 
-- [ ] **P1.6.1 Transport abstraction and in-memory transport** (`PeerSync.Net/InMemory/`)
+- [ ] **P1.6.1 Transport abstraction and in-memory transport** (`PeerSync.Net/InMemory/`) [WIP @codex 2026-10-19]
   - Done when: the engine talks only to `IPeerTransport`. The in-memory implementation supports injected latency, drops and partitions.
+  - [ ] **P1.6.1a Bounded identity-bound in-memory fabric** [WIP @codex 2026-10-19]
+    - Done when: connection-scoped handlers, isolated identity/message ownership, independent bounded requests, directional latency/drop/partition injection and cancel/drain/disconnect behavior have executable tests and canonical CI coverage.
+  - [ ] **P1.6.1b Connected engine integration** [WIP @codex 2026-10-19]
+    - Done when: real folder indexes, Hello clocks, bounded range/page synchronization and verified chunk serving/pulling use IPeerTransport, with actual file transfer, partition/reconnect and skew-blocking tests. No raw remote callback bypass in this connected path. Parent remains open until all connected engine integration is proven.
 - [ ] **P1.6.2 Multi-node property tests** (`tests/PeerSync.Simulation`)
   - Done when: `CsCheck` generates random edits, renames, deletes, partitions and heals on 3 to 7 nodes, each with a temp folder. After the network heals, all trees are identical. Every overwritten version exists in some node's archive or as a conflict copy. 1,000 seeds run in CI, and failing seeds are saved as regression tests.
 

@@ -1053,6 +1053,19 @@ Phase 6 options are independent of each other:
 
 The engine's correctness matters more than its speed: every phase gate includes a soak run with zero lost versions. Most of the logic is tested with many simulated nodes in one process over the in-memory transport, before any real network is involved.
 
+The engine exchanges Hello, bounded index pages/range targets and immutable
+blocks through `IPeerTransport`. The in-process fabric grants each registered
+node its identity and creates a separate handler for each connection; request
+payloads cannot choose their authenticated source. It injects directional
+latency, deterministic drops and partitions on request and response delivery.
+Requests run independently with a bounded outstanding limit, so an index wait
+cannot block a chunk response. Disconnect cancels and drains requests before
+disposing that connection's handler. This trusted simulation identity context
+does not replace P2 TLS identity or folder authentication. Clock admission is
+checked by both engine endpoints, including immediately before index commits
+and block/page handoff. Existing callback-based appliers remain local primitives;
+the connected engine path routes remote bytes through the transport interface.
+
 | Layer | What it proves | How |
 | --- | --- | --- |
 | Unit | Key chain and checksums, version-vector comparison, ignore matcher, path rules, FastCDC boundaries, conflict naming | `xunit.v3` with fixed test vectors |
