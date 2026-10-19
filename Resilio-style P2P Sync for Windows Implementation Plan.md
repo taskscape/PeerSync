@@ -777,6 +777,15 @@ to verification/completion instead of refreshing its retry deadline. Completion
 owns pending scan/publication backoff. Connected simulations advance injected
 UTC to a reported future deadline; they must not spin past a real backoff or
 sleep in wall time to simulate service scheduling.
+Before activation, ordinary applied directory/file version changes must also
+request preview snapshot reconciliation. Transport-backed metadata fetching must
+cover every protected directory root, independently of native copy work and
+needed-path drain. Persist exact root/source-bound envelopes and route hints
+before replacement can lose them; advance authenticated graphs in bounded work,
+with persistent retry and source fairness. Do not fetch over the network while
+holding the reference gate or weaken GC coverage to hide missing graph metadata.
+Queue admission/retirement and known-source coverage follow the metadata-fetch
+proposal; visible copies and signed records remain independent of this cache.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
