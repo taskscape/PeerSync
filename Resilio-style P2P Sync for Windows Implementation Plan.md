@@ -225,7 +225,7 @@ sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
 - **Watcher:** `FileSystemWatcher` (ReadDirectoryChangesW) with a 64 KB buffer. A buffer overflow triggers a full scan.
 - **Debounce:** a path is processed once it has been quiet for 2 s, or after 30 s of continuous change. That avoids syncing half-written files.
 - **Rescan:** a full walk at start-up and every 600 s, Resilio's default, configurable per folder. Unchanged size, mtime, attributes and FileId mean no hashing.
-- **Hashing:** a changed file is streamed once through FastCDC and BLAKE3, on a bounded worker pool (default: cores − 1, low I/O priority).
+- **Hashing:** a changed file is streamed once through FastCDC and BLAKE3, on a bounded worker pool (default: cores − 1, low I/O priority). Each pass is bounded to the original length. Compare open-handle size, last-write/change timestamps, attributes and volume/file identity before and after reading, then reopen the path to check it still names that file. Detected edits, growth/truncation, removal or replacement return "retry later". This is metadata-based change detection, not an atomic filesystem snapshot; ordinary writer sharing remains allowed. Progress reports contain only byte/chunk counts. Reparse points are not hashed.
 - **New record:** increment this device's counter in the version vector, bump the local sequence, sign (RW folders only), then push `IndexUpdate` to connected peers.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
