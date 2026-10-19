@@ -1313,9 +1313,9 @@ Our own writes need no special suppression: the puller records the new state in 
 
 ### P1.5 Sync logic
 
-- [ ] **P1.5.1 Needed-set computation** (`PeerSync.Engine/Sync/NeededSet.cs`)
+- [ ] **P1.5.1 Needed-set computation** (`PeerSync.Engine/Sync/NeededSet.cs`) [WIP @Codex 2026-10-19]
   - Done when: for each path, the winning version among local and all remote records is computed with 7.10. `needed` contains exactly the paths where the winner isn't the local version. Incremental updates on each `IndexUpdate` are covered by tests.
-- [ ] **P1.5.2 Conflict resolution: latest version wins** (`PeerSync.Engine/Sync/ConflictResolver.cs`)
+- [ ] **P1.5.2 Conflict resolution: latest version wins** (`PeerSync.Engine/Sync/ConflictResolver.cs`) [WIP @Codex 2026-10-19]
   - Done when: every row of the design doc's conflict table has a test, and every peer picks the same winner (`changed_ticks`, tie broken by the higher DeviceId).
     - A loser above `ArchiveMaxFileBytes`, or with "Keep both copies" on, becomes `name.sync-conflict-YYYYMMDD-HHMMSS-XXXX.ext`.
     - Only RW peers publish the merged record. RO peers apply the same rule locally and never publish.
