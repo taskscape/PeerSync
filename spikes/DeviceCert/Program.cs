@@ -119,7 +119,7 @@ internal sealed class CertificateWorker(X509Certificate2 certificate, ListenPort
         catch (Exception ex)
         {
             log.Write(new("service.failed", "startup") { Level = DiagnosticLevel.Error, ErrorCode = ex.GetType().Name,
-                NativeError = ex is SocketException socket ? socket.NativeErrorCode : ex.GetBaseException().HResult });
+                HResult = ex.HResult, NativeError = (ex.GetBaseException() as SocketException)?.NativeErrorCode });
             throw;
         }
     }

@@ -350,6 +350,14 @@ loopback, LAN, WAN, container and VM evidence. The P0 journal, collector and
 probe runbook establish the mechanism; production event hooks ship with their
 components in P2 and P4.
 
+Cross-machine diagnostic refinement (2026-10-18): retain managed HRESULT,
+native socket error and QUIC transport/application error numbers as separate
+metadata. Failed probes report the operation stage and transferred bytes;
+progress is emitted at bounded intervals. Collection must reject a bundle
+with no recent valid debug events and report file/event counts. The P0 QUIC
+probe gives connection establishment and the transfer independent deadlines,
+so waiting for the second operator does not consume the transfer budget.
+
 ## WPF control app
 
 `PeerSync.exe` is a small WPF app that only controls the service: closing it never stops syncing. It is built on .NET 10 WPF with `CommunityToolkit.Mvvm`, the built-in Fluent theme and a tray icon (`H.NotifyIcon.Wpf`).
@@ -599,6 +607,15 @@ end;
 **Uninstall:** stops and deletes the service, removes the binaries, firewall rule and local group. A `CurUninstallStepChanged` prompt asks whether to delete `%ProgramData%\PeerSync` (default: keep it). It never touches the contents of synced folders.
 
 **Signing:** define a sign tool once (the IDE's Configure Sign Tools, or ISCC's `--signtool` option) that calls `signtool sign ... $f`. Then `SignTool=signtool` signs the setup, `SignedUninstaller=yes` signs the uninstaller, and the `signonce` flag signs the EXEs. Azure Trusted Signing or a standard code-signing certificate both work. Unsigned, SmartScreen warns every user.
+
+P0 signing-path verification (2026-10-19) uses a fresh, non-exportable
+development certificate generated on each CI runner. Sign and timestamp a
+separate test EXE, verify its signature, and reject a changed PE section.
+Remove the temporary machine-store signing key and root trust entry afterwards;
+retain only the public certificate, signed smoke EXE and verification metadata.
+This does not sign deployment artifacts with a disposable identity or provide
+public release trust. A production signing identity remains required for
+publicly trusted v1 EXEs and installers.
 
 **Silent installs:** `PeerSync-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart" /LOG="setup.log"` installs unattended, for scripted roll-outs. Phase 5 auto-update uses the same path: the service downloads a newer setup, checks its signature, and starts it from a short-lived helper process, because Setup stops the service.
 

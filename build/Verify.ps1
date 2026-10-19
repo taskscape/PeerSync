@@ -36,6 +36,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
         }
         & "$PSScriptRoot/Run-P0.ps1"
+        & "$PSScriptRoot/Test-QuicDiagnostics.ps1"
     }
     & "$PSScriptRoot/Publish.ps1" -Runtime $Runtime
     if ($fuzz) {

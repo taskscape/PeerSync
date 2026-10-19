@@ -1,12 +1,20 @@
-# Implementation status — 2026-10-18
+# Implementation status — 2026-10-19
 
 Current phase: P0. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
 Nine tasks and the performance/certificate subchecks are verified. The CI
 budget repair is merged through [PR #4](https://github.com/taskscape/PeerSync/pull/4),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39144766855). The
-remaining LAN/NAT and signing items are explicitly blocked; Gate P0 has not
+remaining LAN/NAT items are explicitly blocked; local development signing now
+passes, while signing in CI remains pending. Gate P0 has not
 passed. See [the verification report](verification/P0-2026-10-18.md).
+
+New external evidence: two physical PCs on different LANs transferred 1 GiB
+over Tailscale in 220.78 seconds (4.64 MiB/s), with matching receiver session
+and byte count. The public Windows Server probe passed exact HTTP/2 and HTTP/3
+on TCP/UDP 99 with mutual TLS, identity verification and three bidirectional
+messages. See [the cross-network report](verification/P0-cross-network-2026-10-19.md).
+This does not satisfy the physical LAN benchmark or native NAT matrix.
 
 Implemented locally:
 
@@ -44,7 +52,9 @@ Open prerequisites:
 - [Physical hardware/LAN/NAT evidence](https://github.com/taskscape/PeerSync/issues/2)
   for P0.2.1 and P0.2.2. All three source-port reuse options failed
   locally; relay for hard NATs is provisional.
-- [Signing identity](https://github.com/taskscape/PeerSync/issues/3) for P0.1.3.
+- Signing in CI for P0.1.3 remains pending. The user-created local development
+  certificate signs and verifies test executables; public release signing
+  remains separate from this development setup.
 
 P1-P5 have not started because section 0.1 of plan.md forbids starting a phase
 before the previous gate passes. The production engine, client service,

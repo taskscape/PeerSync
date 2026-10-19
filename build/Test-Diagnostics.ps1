@@ -28,6 +28,20 @@ try {
         } finally { $zip.Dispose() }
         Write-Host "Collector live-reader sharing, filtering and exclusion passed ($locale)"
     }
+    foreach ($case in @('empty','expired')) {
+        $source = Join-Path $folder $case
+        New-Item -ItemType Directory $source | Out-Null
+        if ($case -eq 'expired') { Set-Content (Join-Path $source 'debug.jsonl') @($expired,'partial-json') }
+        $destination = Join-Path $folder "$case.zip"
+        try {
+            & "$PSScriptRoot/Collect-Diagnostics.ps1" -Logs $source -Destination $destination | Out-Null
+            throw 'Collector unexpectedly accepted a metadata-only bundle'
+        } catch {
+            if ($_.Exception.Message -notmatch '^No (debug\*\.jsonl files|recent valid debug events) found') { throw }
+        }
+        if (Test-Path -LiteralPath $destination) { throw 'An empty diagnostic bundle was created' }
+        Write-Host "Collector rejected $case debug logs with an actionable error"
+    }
 }
 finally {
     if ($writer) { $writer.Dispose() }
