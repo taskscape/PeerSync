@@ -525,6 +525,23 @@ schema migration; existing databases are backed up by the migration runner.
 | Two remote names differ only by case | Keep the first. Rename the second with a `.case-conflict` suffix, as Resilio's `.Conflict` handling does. |
 | Name invalid on Windows | Mark the record unsyncable here and show a warning. Don't block the rest of the folder. |
 
+Case handling must retain competing signed versions before a merged vector can
+hide the original concurrency. An empty receiver with two remote case spellings
+needs both visible payloads, as does a peer that already owns one spelling.
+Archives/private block caches alone do not satisfy the `.case-conflict` rule.
+Ordinary causally ordered case renames, including an edit accompanying the
+rename, must not create spurious case-conflict copies.
+
+Begin with connected-engine regressions for both arrival orders, local-winner
+and remote-winner paths and causal rename controls. The preservation design
+must bind pending work to authenticated source envelopes and root identity,
+retain reference coverage, survive restart/source replacement and reserve
+destinations without overwriting. Incoming signed paths cannot be rewritten:
+RW publication of a preserved copy requires an ordinary new local record; RO
+copies remain local. First-name ownership and subsequent suffix allocation
+must remain consistent across gossip/restart and preserve every source
+version. Complete that admission/recovery design before enabling case mutation.
+
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
 
 Each authenticated peer session retains a frozen Hello UTC sample and the local
