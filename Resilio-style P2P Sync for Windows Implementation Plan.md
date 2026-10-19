@@ -590,6 +590,29 @@ keeps the obligation for a later network retry; prepared recovery installs or
 accounts only its verified object before scanning. Directory sources remain
 pending until authenticated subtree mapping is implemented.
 
+A received case copy can arrive before the original clash is resolved locally.
+Reuse it as visible evidence only when its local row is a ready authenticated
+publication at the exact portable candidate, its native file ID still matches,
+and a guarded whole-file check matches the pending source. FULL-account that
+observation against the same local sequence; it grants no deletion ownership.
+An unindexed, unsigned, changed or merely same-named occupant is a collision.
+The ordinary scanner/publication completion barrier still applies. This avoids
+duplicate suffixes from gossip without trusting a filename as ownership proof.
+
+Case retries are per portable source and root, FULL durable with failure time,
+attempt count and 10–600 second exponential deadlines. Visit at most the 1,000
+pending sources per pass, defer unsupported subtrees and inaccessible sources
+without blocking independent work, and include the earliest due case deadline
+in the coordinator timer. A backwards wall clock makes old deadlines due;
+successful installed/publication accounting clears the retry. Cancellation
+leaves recoverable owned staging and does not complete the source.
+
+After a completed source has aged at least 24 hours, bounded FULL metadata-only
+compaction may remove its large signed envelope/forwarder fields while keeping
+the root/path/portable-ID completed witness. That compact witness suppresses
+later exact authenticated gossip and conveys no native deletion permission.
+Never compact pending sources, future completion times or a foreign root.
+
 Because mtime picks the winner, peers whose clocks differ by more than 10 minutes don't exchange changes, as in Resilio, and the UI says why. A per-folder setting, "Keep both copies", saves every losing version as a conflict copy instead.
 
 Each authenticated peer session retains a frozen Hello UTC sample and the local
