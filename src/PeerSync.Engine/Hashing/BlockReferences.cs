@@ -54,6 +54,7 @@ public sealed class BlockReferences
             {
                 Log("block.references_wait", "pending-application"); return new(null, 0, 0, 0, recovery.Deferred, WaitingForRecovery: true);
             }
+            await ArchiveContent.RecoverAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
             var snapshot = await index.BeginBlockReferenceSnapshotAsync(root, DateTime.UtcNow.Ticks, cancellationToken).ConfigureAwait(false);
             Checkpoint?.Invoke("begun");
             var batch = new Dictionary<string, BlockReferenceRow>(StringComparer.Ordinal); int batches = 0;
@@ -93,6 +94,36 @@ public sealed class BlockReferences
                 }
             }
             await FlushArchiveCoverageAsync().ConfigureAwait(false);
+            foreach (var source in index.ReadArchiveProvenance())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var content = index.FindActiveArchiveContent(source.SourceId);
+                if (content is null && !index.IsBlockArchiveSourceCovered(snapshot.Id, source.SourceId))
+                    content = await ArchiveContent.CaptureAsync(tree, index, source, journal, Checkpoint, cancellationToken).ConfigureAwait(false);
+                if (content is null) continue;
+                if (!content.RootId.AsSpan().SequenceEqual(root) || content.Size != source.Archive.Size
+                    || !content.FileHash.AsSpan().SequenceEqual(source.Archive.FileHash)) throw new InvalidDataException("Archive content no longer matches its protected source.");
+                long offset = 0; int count = 0;
+                foreach (var chunk in index.ReadArchiveContentChunks(content.Id))
+                {
+                    if (chunk.Offset != offset || chunk.Length > content.Size - offset) throw new InvalidDataException("Archive content chunks changed.");
+                    offset += chunk.Length; count++; await AddAsync(chunk.Hash, chunk.Length, BlockReferenceKind.Archive).ConfigureAwait(false);
+                }
+                if (offset != content.Size || count != content.ChunkCount) throw new InvalidDataException("Archive content manifest is incomplete.");
+                await index.AppendBlockArchiveContentCoverageAsync(snapshot.Id, content.Id, cancellationToken).ConfigureAwait(false);
+            }
+            foreach (var pending in index.ReadPendingArchiveContents())
+            {
+                if (!pending.RootId.AsSpan().SequenceEqual(root) || pending.ChunkCount > ArchiveContentSnapshot.MaximumChunks)
+                    throw new InvalidDataException("Pending archive protection belongs to another root.");
+                long offset = 0; int count = 0;
+                foreach (var chunk in index.ReadPendingArchiveContentChunks(pending.Id))
+                {
+                    if (chunk.Offset != offset || chunk.Length > pending.NextOffset - offset) throw new InvalidDataException("Pending archive chunk prefix changed.");
+                    offset += chunk.Length; count++; await AddAsync(chunk.Hash, chunk.Length, BlockReferenceKind.Archive).ConfigureAwait(false);
+                }
+                if (offset != pending.NextOffset || count != pending.ChunkCount) throw new InvalidDataException("Pending archive chunk prefix is incomplete.");
+            }
             long unmanifested = index.CountUnmanifestedReferenceArchives(snapshot.Id);
             await FlushAsync().ConfigureAwait(false); Checkpoint?.Invoke("before-activate");
             await index.ActivateBlockReferenceSnapshotAsync(snapshot.Id, cancellationToken).ConfigureAwait(false);

@@ -355,6 +355,10 @@ chunks; oversized/unverifiable sources defer with their protection intact.
 The prior active manifest survives interrupted replacement and remains a
 reference source if the archive subsequently disappears or changes. A content
 manifest is protection metadata, not permission to delete an archive or blob.
+On restart, complete staged manifests can FULL-activate after root/source,
+contiguous chunk count/length, every independent block and the whole-file hash
+are verified again, even if the original archive is now missing. Partial or
+unverifiable staging remains protected until safe recapture or explicit policy.
 Track snapshot archive coverage by stable provenance source ID, including
 detached sources, so archive-row removal/reuse cannot make an unknown source
 silently disappear from the reference safety checks. Missing/changed/locked/

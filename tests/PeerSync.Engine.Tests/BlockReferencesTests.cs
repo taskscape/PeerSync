@@ -126,12 +126,15 @@ public sealed class BlockReferencesTests : IDisposable
     }
 
     [Fact]
-    public async Task UnmanifestedArchiveExplicitlyPreventsFutureSweepAndNeverLosesItsData()
+    public async Task UnmanifestedArchiveIsVerifiedBeforeReferenceCoverageAndNeverLosesItsData()
     {
         await using var index = await PrepareAsync(); Directory.CreateDirectory(Disk(".psp/archive")); File.WriteAllBytes(Disk(".psp/archive/raw"), Current);
         await index.Archive.UpsertAsync([new(0, "raw", ".psp/archive/raw", DateTime.UtcNow.Ticks, Current.Length, Hash(Current))], Token);
-        var result = await Builder(index).RefreshAsync(Token); result.ArchivesWithoutManifest.ShouldBe(1); result.AllKnownSourcesCovered.ShouldBeFalse();
+        var result = await Builder(index).RefreshAsync(Token); result.ArchivesWithoutManifest.ShouldBe(0); result.AllKnownSourcesCovered.ShouldBeTrue();
         File.ReadAllBytes(Disk(".psp/archive/raw")).ShouldBe(Current); index.ReadBlockObjects().Count().ShouldBe(1);
+        var content = index.FindActiveArchiveContent(index.ReadArchiveProvenance().Single().SourceId)!;
+        content.Size.ShouldBe(Current.Length); content.FileHash.ShouldBe(Hash(Current));
+        index.ReadBlockReferences().Single().Kinds.ShouldBe(BlockReferenceKind.Current | BlockReferenceKind.Archive);
     }
 
     [Fact]
