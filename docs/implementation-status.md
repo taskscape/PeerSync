@@ -1,14 +1,15 @@
 # Implementation status — 2026-10-19
 
-Current phase: P0. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
+P0 gate passed on 2026-10-19; P1 is ready to start. Code is merged through [PR #1](https://github.com/taskscape/PeerSync/pull/1),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283).
-Nine tasks and the performance/certificate subchecks are verified. The CI
+Ten tasks and the performance/certificate subchecks are verified. The CI
 budget repair is merged through [PR #4](https://github.com/taskscape/PeerSync/pull/4),
 with [green CI](https://github.com/taskscape/PeerSync/actions/runs/39144766855). The
 physical LAN/NAT validation is deferred to Gates P2/P4 by the user's explicit
-2026-10-19 decision; local development signing passes, while signing in CI
-and the repair merge remain pending. Gate P0 has not
-passed. See [the verification report](verification/P0-2026-10-18.md).
+2026-10-19 decision. Development signing and diagnostics are now merged through
+[PR #5](https://github.com/taskscape/PeerSync/pull/5), with all five jobs
+[green](https://github.com/taskscape/PeerSync/actions/runs/39179220764) in
+13m44s. The merged tree matches the tested head. See [the follow-up report](verification/P0-signing-diagnostics-2026-10-19.md).
 
 New external evidence: two physical PCs on different LANs transferred 1 GiB
 over Tailscale in 220.78 seconds (4.64 MiB/s), with matching receiver session
@@ -29,7 +30,7 @@ Implemented locally:
   and native Windows Server 2022/2025 virtual-account/transport checks.
 
 Verified locally: zero-warning Release build and Roslyn analysis of all 33
-projects, eight unit cases, IPv4/IPv6 1 GiB QUIC, exact HTTP/2 and HTTP/3 mutual
+projects, nine unit cases, IPv4/IPv6 1 GiB QUIC, exact HTTP/2 and HTTP/3 mutual
 TLS on port 99, standard-user/virtual-account pipe and private-key checks,
 100,000 watcher operations with scan recovery, and collector filtering under
 Polish and English locales. Native hashing reached 1.051 decimal GB/s on the
@@ -55,13 +56,11 @@ Open prerequisites:
   All three source-port reuse options failed locally; the approved implementation
   baseline is reachable direct connections and relay after five seconds. The
   final native transport decision remains required before the WAN gate.
-- Signing in CI for P0.1.3 remains pending. The user-created local development
-  certificate signs and verifies test executables; public release signing
-  remains separate from this development setup.
+- Public release signing remains separate from the completed P0.1.3
+  development signing path and the user's local development certificate.
 
-P1-P5 have not started: the revised P0 gate still requires green CI and the
-signing/diagnostics merge. The user-approved external-test deferral lets P1
-start once those remaining P0 requirements pass. The production engine, client service,
+P1-P5 have not started; the revised P0 gate is now satisfied and P1 can begin.
+The production engine, client service,
 central tracker/relay, control app and installers are not implemented. The
 user-requested production diagnostic hooks are explicitly tracked as P2.5.6
 and P4.1.7. P0 bundles are self-contained test probes, not a deployable sync

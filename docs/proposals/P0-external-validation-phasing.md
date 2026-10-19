@@ -5,7 +5,7 @@ continue implementation." The source design and checklist now record the
 changes below. P0.2.1/P0.2.2 remain unchecked; P0 still requires its other
 checks to pass and the code to be merged with green CI before P1 starts.
 
-## Exact proposed changes
+## Approved changes
 
 1. Keep P0.2.1 and P0.2.2 unchecked and retain their existing IDs, original
    acceptance requirements and collected evidence. Add a deferred-validation

@@ -29,6 +29,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
   | `- [ ]` / `- [x]` | Open / done |
   | `[WIP @name 2026-10-20]` | Someone has been working on it since that date |
   | `[BLOCKED: reason, since 2026-10-20]` | Cannot proceed |
+  | `[DEFERRED validation to Gate Pn: user approved date]` | Unverified requirement remains mandatory at that later gate; only an explicit user-approved phasing decision permits the earlier gate |
   | `~~task~~ [DROPPED 2026-10-20: reason]` | Deliberately not done |
   | `(#123)` | The pull request that completed the task |
   | `[VERIFY]` | An assumption in a code example that a spike or test must confirm |
@@ -55,7 +56,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
-| P0 Foundations and spikes | 1-3 | CI signing/repair merge pending; physical LAN/NAT validation deferred to P2/P4 by user | - |
+| P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
 | P1 Local sync engine | 4-8 | Not started | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
@@ -556,10 +557,11 @@ Goal: a building, testing repo, plus answers to every question that could change
 - [x] **P0.1.2 CI pipeline** (`.github/workflows/ci.yml`) (#1, #4)
   - Done when: every push builds x64 and Arm64, runs tests, and uploads published artifacts. Runtime is under 15 minutes.
   - Repaired and merged in (#4): the unchanged required 600-second fuzz smoke runs in its own parallel job, with no check removed. [Green CI](https://github.com/taskscape/PeerSync/actions/runs/39144766855) completed in 11m32s, including uploads/cleanup; both architectures and Server variants passed.
-- [ ] **P0.1.3 Code-signing setup** (`build/sign.ps1`) [WIP @Codex 2026-10-19]
+- [x] **P0.1.3 Code-signing setup** (`build/sign.ps1`) (#5)
   - Done when: a test EXE is signed in CI, or the task is marked BLOCKED until a certificate exists (open question in the design doc).
   - Local update (2026-10-18): user-created development certificate signed the self-contained QuicBasics EXE with a SHA-256 RFC3161 timestamp. SignTool verification and PowerShell Authenticode status passed. SDK tool discovery is repaired locally; CI signing is still pending, so this task remains unchecked. Publicly trusted release signing remains separate.
   - 2026-10-19 implementation: `build/Test-Signing.ps1` and both CI build jobs now sign and verify a separate test EXE using runner-generated credentials, reject PE tampering and remove test trust/key material. Local x64 smoke passed; remote CI and merge are pending, so the task is not yet ticked.
+  - Completed: merged in (#5). [Green PR CI](https://github.com/taskscape/PeerSync/actions/runs/39179220764) passed all five jobs in 13m44s; both architecture signing artifacts were downloaded and their signer/timestamp/hash matched the evidence. Tamper rejection and temporary key/trust cleanup passed. The merged tree exactly matches the tested PR head. This closes development signing-path verification, not publicly trusted release signing.
 - [x] **P0.1.4 Reference hardware recorded** (`docs/reference-hardware.md`) (#1)
   - Done when: the CPU, disk and network of the two to three test PCs are written down, so all benchmarks are comparable.
   - Recorded: development PC plus version-stamped Server 2022/2025 hosted VM snapshots; VM adapter link rates are not measured LAN throughput. Merged in (#1); green CI is recorded in docs/verification/P0-2026-10-18.md.
@@ -568,7 +570,7 @@ New P0 foundation requirement from the user (2026-10-18):
 
 - [x] **P0.1.5 Deployment diagnostic foundation** (`PeerSync.Core/Diagnostics/`, `build/Collect-Diagnostics.ps1`, `docs/diagnostics.md`) (#1)
   - Done when: structured opt-in debug events have shared session IDs, UTC/run/process metadata, transport/timings/errors; log size and address retention are bounded; collection excludes settings, databases, keys and dumps; rotation, filtering and correlation are verified; server and second-PC probe instructions exist.
-  - Follow-up repair, locally verified (not merged): detailed QUIC failure stages/codes/progress, independent transfer timeout, and collector rejection of empty debug bundles. See `docs/verification/P0-two-machine-troubleshooting-2026-10-18.md`; this does not close P0.2.1 or P0.2.2.
+  - Follow-up repair merged in (#5), [CI green](https://github.com/taskscape/PeerSync/actions/runs/39179220764): detailed QUIC failure stages/codes/progress, independent transfer timeout, and collector rejection of empty debug bundles. See `docs/verification/P0-two-machine-troubleshooting-2026-10-18.md`; this does not close P0.2.1 or P0.2.2.
   - Production service hooks are tracked by P2.5.6 and central hooks by P4.1.7.
 
 ### P0.2 Spikes
@@ -665,8 +667,8 @@ public static byte[] FromCertificate(X509Certificate cert)
 
 ### Gate P0
 
-- [ ] All P0 tasks ticked or explicitly dropped, except the user-approved P0.2.1 validation deferral to Gate P2 and P0.2.2 validation deferral to Gate P4. Both remain unchecked and mandatory at those gates.
-- [ ] The direct QUIC/TCP plus relay-after-5-s implementation baseline is logged in section 2 and P4.2.3 matches. P0.2.2's final transport decision remains mandatory at Gate P4 under the user-approved deferral.
+- [x] All P0 tasks ticked or explicitly dropped, except the user-approved P0.2.1 validation deferral to Gate P2 and P0.2.2 validation deferral to Gate P4. Both remain unchecked and mandatory at those gates. Evidence: (#5), [green CI](https://github.com/taskscape/PeerSync/actions/runs/39179220764), and the approved phasing decision in section 2.
+- [x] The direct QUIC/TCP plus relay-after-5-s implementation baseline is logged in section 2 and P4.2.3 matches. P0.2.2's final transport decision remains mandatory at Gate P4 under the user-approved deferral. Source design and checklist are merged in (#5).
 - [x] Performance targets confirmed or revised (P0.2.4), and the design doc's Testing section updated. Evidence: [spike report](docs/spikes/P0.2.4-chunking-hashing.md), merged in (#1).
 - [x] The device-certificate and control-pipe approaches work under the virtual account (P0.2.3, P0.2.5). Evidence: [green Server 2022/2025 CI](https://github.com/taskscape/PeerSync/actions/runs/39141978283), merged in (#1).
 

@@ -20,8 +20,8 @@ checks. Only the signed smoke EXE and public CER can be uploaded; no private
 key is exported. Published deployment probes remain separate from this test.
 
 Local x64 result: passed; signature Valid; timestamp present; tamper status
-HashMismatch; privateCertificateRemoved/testTrustRemoved true. Remote CI and
-merge are pending; no acceptance box is ticked from this local result alone.
+HashMismatch; privateCertificateRemoved/testTrustRemoved true. The remote
+results and merge recorded below provide the task-completion evidence.
 
 The first local smoke was interrupted while CurrentUser root import displayed
 a trust-consent prompt. Its temporary signing certificate, thumbprint
@@ -69,5 +69,22 @@ journal, and public Windows Server HTTP/2 and HTTP/3 mutual-TLS probes.
   run in CI; the local runner had loaded before that script addition.
 - Workflow YAML/signing-step validation and PowerShell syntax checks passed.
 
-Remote CI and merge remain pending. The required ten-minute fuzz remains a
-separate mandatory CI job and has not been shortened or removed.
+Final [PR CI](https://github.com/taskscape/PeerSync/actions/runs/39179220764)
+and [push CI](https://github.com/taskscape/PeerSync/actions/runs/39179218019)
+passed on `6df738e7b514ee7a4f4d55bedecf70819b3dcde8`. PR CI ran from 00:05:50
+to 00:19:34 UTC (13m44s including queue time); its longest job took 12m06s.
+All five jobs passed: x64, Arm64, Server 2022, Server 2025 and required fuzz.
+Fuzz executed 153,942 FastCDC seeds for 600.0025835 target seconds, zero crashes;
+its standalone runner took 649.76 s including restore/build.
+
+Both architecture signing artifacts were downloaded from push CI. Their full
+file SHA-256 hashes, signer thumbprints and timestamps match the JSON evidence.
+Each reported Valid while test trust was installed, HashMismatch after PE
+tampering, and successful removal of its temporary private certificate/root
+trust. Downloaded copies are correctly untrusted outside that temporary trust
+context; the Windows diagnostic specifically reports an untrusted root.
+
+[PR #5](https://github.com/taskscape/PeerSync/pull/5) merged as
+`5b338c6`; its tree exactly matches the tested PR head. P0.1.3 is complete and
+the revised P0 gate passes with only the user's explicit physical-LAN/native-NAT
+deferrals, still mandatory at P2/P4. No other gate or required test is waived.
