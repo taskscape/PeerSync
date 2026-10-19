@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core, hashing, storage/scanning, needed selection, recoverable application, archive/history/retention, ordered pulls, UTC clock foundations, in-memory connected transport and initial real-engine simulations are merged with green CI. Absent-descendant hierarchy fixes pass locally. Case coordination, temporary cleanup, real authenticated clock admission/UI and full phase-gate simulations remain open. | - |
+| P1 Local sync engine | 4-8 | In progress: core, hashing, storage/scanning, needed selection, recoverable application, archive/history/retention, ordered pulls, UTC clock foundations, in-memory connected transport, absent-descendant hierarchy, staging lifecycle and initial real-engine simulations are merged with green CI. Regular-file case preservation and clock-status contracts pass locally; case/subtree coordination, authenticated production transport/UI and full phase-gate simulations remain open. | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -1512,6 +1512,7 @@ Our own writes need no special suppression: the puller records the new state in 
     - [ ] **P1.5.3h3 Guarded case materialization and publication barriers** [WIP @codex 2026-10-19]
       - Done when: original-path resolution waits through concurrent receipt, verified no-overwrite copies recover at every boundary, changed/foreign occupants survive, RW scanning publishes new paths and RO copies remain local. Complete source markers prevent gossip duplication; connected baseline plus restart/collision/reference/causal controls pass. Directory/nested integration remains mandatory before parent closure.
       - First slice: regular-file kind-7 source/root/destination/GUID/FID recovery; FULL installed-but-pending accounting permits scanning, then guarded local-publication proof completes the obligation. Directory sources stay pending until subtree integration; no parent closure from file-only coverage.
+      - Local [regular-file checkpoint](docs/verification/P1.5.3h3-file-case-copies-2026-10-19.md): four baseline failures now pass with two causal controls and fifteen native additions. All 1,113 canonical cases/native/probe/publishing pass in 123.20 seconds, exit 0 (boundary fuzz skipped). Gossip/retry/fairness/cancellation, completed metadata retirement, directory/subtree integration and CI/main remain open.
 - [x] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23, #24)
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
   - [x] **P1.5.4a Archive placement and retention** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23)

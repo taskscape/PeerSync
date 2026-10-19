@@ -121,6 +121,13 @@ public sealed partial class FileApplier
                 (hash, length, token) => fetch(source, hash, length, token), cancellationToken).ConfigureAwait(false);
             stream.Flush(flushToDisk: true);
         }
+        using var mutationReferences = selection.HoldsReferences ? null : await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
+        if (index.HasPendingCasePreservation(key))
+        {
+            await ParkAsync(tree, state, intent, cancellationToken, tempHandle).ConfigureAwait(false);
+            await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
+            Signal("case-barrier", session); return FileApplyOutcome.Deferred;
+        }
         using var oldParent = tree.Directory(ApplyState.Parent(known?.Path ?? desired.Path));
         using var original = TryOpen(oldParent, ApplyState.Name(known?.Path ?? desired.Path));
         if (!MatchesKnown(original, known, cancellationToken))
@@ -167,6 +174,8 @@ public sealed partial class FileApplier
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (CaseCopyState.IsCase(intent))
+            { await RecoverCaseIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue; }
             if (HistoryState.IsHistory(intent))
             {
                 var history = new SnapshotHistory(index, keys, ownDevice, settings, journal, clock) { Checkpoint = Checkpoint };
@@ -188,6 +197,7 @@ public sealed partial class FileApplier
             }
             using var deletionBarrier = state.ScheduledDeletion
                 ? await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version!, ownDevice, true, cancellationToken).ConfigureAwait(false) : null;
+            using var recoveryReferences = state.ScheduledDeletion ? null : await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
             using var parentProbe = state.Deleted ? tree.ProbeDirectory(ApplyState.Parent(state.Path)) : null;
             if (parentProbe?.Absent == true)
             {
@@ -202,6 +212,16 @@ public sealed partial class FileApplier
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);
+            if (!state.IsRestore && index.HasPendingCasePreservation(state.Path))
+            {
+                if (state.OriginalId.Length == 0 && target is null || target is not null && HasIdentity(target, state.OriginalId))
+                {
+                    await ParkAsync(tree, state, intent, cancellationToken, temporary).ConfigureAwait(false);
+                    await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
+                }
+                else await DeferAsync(tree, state, intent, null, cancellationToken, temporary).ConfigureAwait(false);
+                recovered++; Signal("case-recovery-barrier", intent.Id); continue;
+            }
             if (temporary is not null && !HasIdentity(temporary, state.TemporaryId))
                 throw new IOException("Recovery temporary identity changed.");
             if (target is not null && HasIdentity(target, state.TemporaryId))

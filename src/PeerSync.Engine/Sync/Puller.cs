@@ -140,6 +140,15 @@ public sealed class Puller : IDisposable
             if ((Volatile.Read(ref scanRequested) != 0 || now >= nextScanTicks) && now >= scanRetryTicks)
             { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
         }
+        if (await files.PrepareCaseCopiesAsync(fetch, token).ConfigureAwait(false))
+        { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        var casePaths = await files.CompleteCaseCopiesAsync(token).ConfigureAwait(false);
+        if (casePaths.Count != 0)
+        {
+            await needed.RecomputeAsync(casePaths, token).ConfigureAwait(false);
+            foreach (string path in casePaths)
+                if (index.Needed.Find(path)?.Work is { } descriptor) await index.ClearPullRetryAsync(path, descriptor.Fingerprint, token).ConfigureAwait(false);
+        }
         var work = index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
         foreach (var row in work)
         {

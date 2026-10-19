@@ -26,10 +26,13 @@ public sealed class CasePreservationSource
 public sealed class PendingCasePreservation
 {
     private readonly byte[] root;
+    private readonly byte[]? installed;
     public byte[] RootId => root.ToArray();
     public CasePreservationSource Source { get; }
-    internal PendingCasePreservation(byte[] rootId, CasePreservationSource source)
-    { root = rootId.ToArray(); Source = source; }
+    public string? DestinationPath { get; }
+    public byte[]? InstalledFileId => installed?.ToArray();
+    internal PendingCasePreservation(byte[] rootId, CasePreservationSource source, string? destination = null, byte[]? installedFileId = null)
+    { root = rootId.ToArray(); Source = source; DestinationPath = destination; installed = installedFileId?.ToArray(); }
     public override string ToString() => "Pending case preservation (redacted)";
 }
 
@@ -43,20 +46,105 @@ public sealed partial class FolderIndex
     {
         if (limit is < 1 or > MaximumPendingCaseSources) throw new ArgumentOutOfRangeException(nameof(limit));
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT root_id,source_id,source_device,path_key,record_body,signature FROM case_preservations WHERE completed=0 ORDER BY source_id LIMIT $limit;";
+        command.CommandText = "SELECT root_id,source_id,source_device,path_key,record_body,signature,destination_path,installed_file_id FROM case_preservations WHERE completed=0 ORDER BY source_id LIMIT $limit;";
         command.Parameters.AddWithValue("$limit", limit);
         var rows = new List<PendingCasePreservation>(); using var reader = command.ExecuteReader();
         while (reader.Read()) rows.Add(new(reader.GetFieldValue<byte[]>(0), new(reader.GetFieldValue<byte[]>(1),
-            reader.GetFieldValue<byte[]>(2), reader.GetString(3), new(reader.GetFieldValue<byte[]>(4), reader.GetFieldValue<byte[]>(5)))));
+            reader.GetFieldValue<byte[]>(2), reader.GetString(3), new(reader.GetFieldValue<byte[]>(4), reader.GetFieldValue<byte[]>(5))),
+            reader.IsDBNull(6) ? null : reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7)));
         return rows.AsReadOnly();
     }
 
-    public bool HasPendingCasePreservation(string path)
+    public bool HasPendingCasePreservation(string path, bool includeDescendants = true)
     {
         string key = PathRules.Key(path);
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM case_preservations WHERE path_key=$path AND completed=0);";
-        command.Parameters.AddWithValue("$path", key); return (long)command.ExecuteScalar()! != 0;
+        return HasPendingCase(connection, null, key, includeDescendants);
+    }
+
+    private static bool HasPendingCase(SqliteConnection connection, SqliteTransaction? transaction, string key, bool includeDescendants = true)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM case_preservations WHERE completed=0 AND (path_key=$path OR $descendants=1 AND path_key >= $low AND path_key < $high));";
+        command.Parameters.AddWithValue("$descendants", includeDescendants ? 1 : 0);
+        command.Parameters.AddWithValue("$path", key); command.Parameters.AddWithValue("$low", key + "/"); command.Parameters.AddWithValue("$high", key + "0");
+        return (long)command.ExecuteScalar()! != 0;
+    }
+
+    /// <summary>Reserve an authenticated case copy and its native recovery intent
+    /// together. The engine holds the filesystem/reference gates and verifies the
+    /// source, destination policy and native root before calling.</summary>
+    public Task ReserveCaseCopyAsync(PendingCasePreservation expected, ApplyIntent intent, string destination, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(intent);
+        string key = PathRules.Key(destination);
+        if (key == expected.Source.PathKey || key != intent.PathKey || intent.ExpectedLocalSequence is not null)
+            throw new ArgumentException("Invalid case copy destination.", nameof(destination));
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            RequirePendingCase(connection, transaction, expected); RequireExpectedSequence(connection, transaction, intent);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO apply_intents(id,path_key,expected_local_seq,payload) VALUES($intent,$path,NULL,$payload);";
+            command.Parameters.AddWithValue("$intent", intent.Id.ToString("N")); command.Parameters.AddWithValue("$path", key);
+            command.Parameters.AddWithValue("$payload", intent.Payload.ToArray()); command.ExecuteNonQuery();
+            command.CommandText = "UPDATE case_preservations SET destination_key=$path,destination_path=$destination,installed_file_id=NULL WHERE source_id=$id;";
+            command.Parameters.AddWithValue("$destination", destination); command.Parameters.AddWithValue("$id", expected.Source.SourceId);
+            cancellationToken.ThrowIfCancellationRequested(); command.ExecuteNonQuery(); return true;
+        }, cancellationToken);
+    }
+
+    public Task AccountInstalledCaseCopyAsync(PendingCasePreservation expected, ApplyIntent intent, string destination, byte[] fileId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(intent); FolderMaps.RequireBytes(fileId, 16);
+        byte[] identity = fileId.ToArray(); string key = PathRules.Key(destination);
+        if (key != intent.PathKey) throw new ArgumentException("Case copy does not match its intent.", nameof(destination));
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            RequirePendingCase(connection, transaction, expected); RequireSameIntent(ReadIntent(connection, transaction, intent.Id), intent);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "UPDATE case_preservations SET installed_file_id=$file WHERE source_id=$id AND destination_key=$path AND destination_path=$destination;";
+            command.Parameters.AddWithValue("$id", expected.Source.SourceId); command.Parameters.AddWithValue("$path", key);
+            command.Parameters.AddWithValue("$destination", destination); command.Parameters.AddWithValue("$file", identity);
+            if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("Case destination changed.");
+            cancellationToken.ThrowIfCancellationRequested(); RemoveIntent(connection, transaction, intent.Id); return true;
+        }, cancellationToken);
+    }
+
+    /// <summary>After native byte verification, complete only the same observed
+    /// local version. RW additionally requires ready signed publication.</summary>
+    public Task CompleteCasePreservationAsync(PendingCasePreservation expected, long localSequence, bool requirePublication,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        if (expected.DestinationPath is null || expected.InstalledFileId is null) throw new ArgumentException("Case copy is not installed.", nameof(expected));
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            RequirePendingCase(connection, transaction, expected);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE path_key=$path;";
+            command.Parameters.AddWithValue("$path", PathRules.Key(expected.DestinationPath));
+            LocalFileRow? local; using (var reader = command.ExecuteReader()) local = reader.Read() ? FolderMaps.ReadLocal(reader) : null;
+            if (local is null || local.LocalSequence != localSequence || local.Deleted || local.Flags != LocalFileState.None
+                || local.FileId is null || !local.FileId.AsSpan().SequenceEqual(expected.InstalledFileId)
+                || requirePublication && (local.Record is null || !local.ContentReady)) throw new IOException("Case copy publication changed.");
+            command.CommandText = "UPDATE case_preservations SET completed=1 WHERE source_id=$id AND destination_path=$destination AND installed_file_id=$file;";
+            command.Parameters.AddWithValue("$id", expected.Source.SourceId); command.Parameters.AddWithValue("$destination", expected.DestinationPath);
+            command.Parameters.AddWithValue("$file", expected.InstalledFileId);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (command.ExecuteNonQuery() != 1) throw new IOException("Case copy observation changed."); return true;
+        }, cancellationToken);
+    }
+
+    private static void RequirePendingCase(SqliteConnection connection, SqliteTransaction transaction, PendingCasePreservation expected)
+    {
+        RequireBlockReferenceRoot(connection, transaction, expected.RootId);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT root_id,path_key,record_body,signature FROM case_preservations WHERE source_id=$id AND completed=0;";
+        command.Parameters.AddWithValue("$id", expected.Source.SourceId); using var reader = command.ExecuteReader();
+        if (!reader.Read() || !reader.GetFieldValue<byte[]>(0).AsSpan().SequenceEqual(expected.RootId) || reader.GetString(1) != expected.Source.PathKey
+            || !expected.Source.Record.Body.SequenceEqual(reader.GetFieldValue<byte[]>(2)) || !expected.Source.Record.Signature.SequenceEqual(reader.GetFieldValue<byte[]>(3)))
+            throw new InvalidOperationException("Pending case source changed.");
     }
 
     private static void AdmitCaseSources(SqliteConnection connection, SqliteTransaction transaction, string path,

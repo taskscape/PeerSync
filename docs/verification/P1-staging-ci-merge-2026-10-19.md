@@ -13,6 +13,10 @@ ten-minute boundary fuzz, and virtual-account/standard-user security on
 Windows Server 2022 and 2025. GitHub's aggregate run status briefly lagged
 the completed successful job/check conclusions. Main follow-up CI is separate.
 
+Follow-up [main CI 39286215475](https://github.com/taskscape/PeerSync/actions/runs/39286215475)
+also completes successfully on squash `779310f`; a fresh job-list query confirms
+all five jobs completed/success, including the full boundary fuzz run.
+
 Review comments 4315855832 and 4315855903 have reproducing native regressions
 and fixes in the submitted head. Both threads were resolved after all five
 checks became green. No extra rerun was requested. The final local canonical

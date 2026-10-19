@@ -6,7 +6,9 @@ CREATE TABLE case_preservations (
   record_body BLOB NOT NULL CHECK(length(record_body) BETWEEN 1 AND 16777216),
   signature BLOB NOT NULL CHECK(length(signature)=64),
   completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0,1)),
-  destination_key TEXT
+  destination_key TEXT,
+  destination_path TEXT,
+  installed_file_id BLOB CHECK(installed_file_id IS NULL OR length(installed_file_id)=16)
 ) WITHOUT ROWID;
 CREATE INDEX ix_case_preservations_pending ON case_preservations(completed,source_id);
 CREATE INDEX ix_case_preservations_path ON case_preservations(path_key,completed);
