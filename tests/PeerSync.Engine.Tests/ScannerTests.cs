@@ -128,6 +128,7 @@ public sealed class ScannerTests : IDisposable
         using var scanner = new Scanner(Root, index, keys, Device); await scanner.ScanAsync(Token); var before = index.LocalFiles.Find("file")!;
         string path = Path.Combine(Root, "file"); File.SetCreationTimeUtc(path, DateTime.UtcNow.AddDays(-1));
         var result = await scanner.ScanAsync(Token); result.Hashed.ShouldBe(1); result.Updated.ShouldBe(0);
+        result.ChangedPaths.ShouldContain("file");
         var after = index.LocalFiles.Find("file")!; after.ChangeFileTime.ShouldNotBe(before.ChangeFileTime); after.LocalSequence.ShouldBe(before.LocalSequence);
         after.Record!.Body.ToArray().ShouldBe(before.Record!.Body.ToArray()); after.Record.Signature.ToArray().ShouldBe(before.Record.Signature.ToArray());
         after.Vector.ShouldBe(before.Vector); index.Archive.Count().ShouldBe(0); (await scanner.ScanAsync(Token)).Hashed.ShouldBe(0);

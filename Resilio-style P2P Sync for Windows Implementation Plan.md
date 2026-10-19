@@ -610,6 +610,20 @@ The cancellable loop wakes on coalesced index/local notifications, the next
 eligible durable retry or the periodic scan deadline. Watcher/host notifications
 request scans explicitly; waiting for work holds no mutation or scan gate.
 
+Scheduled deletion intents persist their barrier requirement in local recovery
+formats (kind 5 file/type transitions and kind 6 directories; legacy kinds 1/3
+retain direct-call semantics). Staging abandonment needs no range barrier, but
+prepared deletion recovery reacquires the reference gate and checks the sender's
+current target through all remaining destructive mutation and commit. Incomplete
+knowledge preserves the journal and target while index receipt remains available.
+Live timestamps unrepresentable by Windows mutation APIs are blocked per item,
+without terminating independent work. Incremental scans include native-cache-only
+paths and filter invalid wire names before needed selection. Mark needed repair
+pending before each scan, clear it only after needed recomputation succeeds, and
+rebuild on the next pass after partial scan/recompute failure; fresh coordinators
+already rebuild at startup. Never infer an unchanged second walk repaired a
+partially committed first walk.
+
 Filesystem mutation primitives open every directory component relative to a
 pinned root, reject reparse traversal and hold directory leases that disallow
 rename while the operation is active. Creates use exclusive-create semantics;

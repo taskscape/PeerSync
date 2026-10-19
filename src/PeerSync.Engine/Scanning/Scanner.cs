@@ -331,7 +331,7 @@ public sealed class Scanner : IDisposable
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).ToArray()) };
+                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()) };
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {

@@ -11,6 +11,7 @@ namespace PeerSync.Engine.Sync;
 internal sealed class ApplyState
 {
     internal bool Prepared { get; set; }
+    internal bool ScheduledDeletion { get; init; }
     internal required byte[] Root { get; init; }
     internal VersionView? Version { get; init; }
     internal LocalRestoreData? Restore { get; init; }
@@ -40,8 +41,9 @@ internal sealed class ApplyState
     internal byte[] Encode()
     {
         if ((Version is null) == (Restore is null)) throw new InvalidDataException("Apply state requires exactly one operation kind.");
+        if (ScheduledDeletion && (IsRestore || !Deleted)) throw new InvalidDataException("Scheduled barrier requires a remote deletion.");
         using var stream = new MemoryStream(); using var writer = new BinaryWriter(stream, Utf8, leaveOpen: true);
-        writer.Write(IsRestore ? 2 : 1); writer.Write(Prepared); Bytes(Root);
+        writer.Write(IsRestore ? 2 : ScheduledDeletion ? 5 : 1); writer.Write(Prepared); Bytes(Root);
         if (Version is { } version)
         {
             Bytes(version.SourceDevice); Bytes(version.Record.Body); Bytes(version.Record.Signature); Bytes(VersionVector.Serialize(Vector));
@@ -63,11 +65,11 @@ internal sealed class ApplyState
     {
         using var stream = new MemoryStream(intent.Payload.ToArray(), writable: false); using var reader = new BinaryReader(stream, Utf8);
         int kind = reader.ReadInt32();
-        if (kind is not (1 or 2)) throw new InvalidDataException("Unsupported apply state.");
+        if (kind is not (1 or 2 or 5)) throw new InvalidDataException("Unsupported apply state.");
         bool prepared = reader.ReadBoolean(); byte[] root = Bytes(24);
         VersionView? version = null; LocalRestoreData? restore = null;
         IReadOnlyDictionary<ulong, ulong> vector = new Dictionary<ulong, ulong>();
-        if (kind == 1)
+        if (kind is 1 or 5)
         {
             byte[] source = Bytes(32), body = Bytes(SignedRecord.MaxBodyBytes), signature = Bytes(64);
             vector = VersionVector.Deserialize(Bytes(ApplyIntent.MaxPayloadBytes));
@@ -76,13 +78,13 @@ internal sealed class ApplyState
         else restore = new(Text(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadUInt32(), Bytes(32));
         var result = new ApplyState
         {
-            Prepared = prepared, Root = root, Version = version, Restore = restore, Vector = vector,
+            Prepared = prepared, ScheduledDeletion = kind == 5, Root = root, Version = version, Restore = restore, Vector = vector,
             Temporary = Text(), TemporaryId = Bytes(16), TemporaryAttributes = reader.ReadUInt32(), Original = Text(), OriginalId = Bytes(16), OriginalHash = Bytes(32),
             OriginalDevice = Bytes(32),
             OriginalSize = reader.ReadInt64(), OriginalMtime = reader.ReadInt64(), OriginalAttributes = reader.ReadUInt32(),
             Retained = Text(), ArchivedTicks = reader.ReadInt64(),
         };
-        if (stream.Position != stream.Length || root.Length != 24 || PathRules.Key(result.Path) != intent.PathKey
+        if (stream.Position != stream.Length || root.Length != 24 || PathRules.Key(result.Path) != intent.PathKey || result.ScheduledDeletion && !result.Deleted
             || version is not null && (version.Type > 1 || VersionVector.Compare(vector, version.Vector) is VvOrder.Concurrent or VvOrder.DominatedBy
                 || keys.CanWrite && VersionVector.Compare(vector, version.Vector) != VvOrder.Equal))
             throw new InvalidDataException("Invalid apply identity or vector.");

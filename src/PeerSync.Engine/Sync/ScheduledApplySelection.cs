@@ -2,6 +2,8 @@ using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Sync;
 
+internal sealed class IndexRangeRecoveryPendingException() : IOException("Sender index range is incomplete before deletion recovery.") { }
+
 /// <summary>The caller already owns the filesystem gate. Keep index receipt
 /// available for live transfers; hold references only for a selected deletion.</summary>
 internal sealed class ScheduledApplySelection : IDisposable
@@ -39,4 +41,17 @@ internal sealed class ScheduledApplySelection : IDisposable
     }
 
     public void Dispose() => Interlocked.Exchange(ref references, null)?.Dispose();
+
+    internal static async ValueTask<IDisposable?> AcquireRecoveryAsync(FolderIndex index, VersionView version,
+        byte[] ownDevice, bool required, CancellationToken token)
+    {
+        if (!required) return null;
+        var lease = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+        try
+        {
+            if (version.SourceDevice.SequenceEqual(ownDevice) || index.ReadRemoteIndexRange(version.SourceDevice.ToArray())?.Complete == true) return lease;
+            throw new IndexRangeRecoveryPendingException();
+        }
+        catch { lease.Dispose(); throw; }
+    }
 }

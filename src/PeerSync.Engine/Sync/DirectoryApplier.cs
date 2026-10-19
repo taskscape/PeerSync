@@ -55,7 +55,11 @@ public sealed class DirectoryApplier
             if (!selection.RangeComplete) { Signal("index-range-pending", session); return new(FileApplyOutcome.Deferred); }
             if (decision.Winner!.Type != 1) { Signal("unsupported-type", session); return new(FileApplyOutcome.Deferred); }
             var version = VersionView.Open(decision.DesiredRecord!, keys, decision.Winner.SourceDevice.ToArray());
-            if (!version.Deleted) FileMetadata.ValidateMtime(version.MtimeTicks);
+            if (!version.Deleted)
+            {
+                try { FileMetadata.ValidateMtime(version.MtimeTicks); }
+                catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return new(FileApplyOutcome.Blocked); }
+            }
             using var parent = tree.Directory(ApplyState.Parent(version.Path));
             using var existing = TryNode(parent, ApplyState.Name(version.Path));
             if (existing is not null)
@@ -67,7 +71,7 @@ public sealed class DirectoryApplier
                 { Signal("identity-changed", session); return new(FileApplyOutcome.Deferred, RequiresScan: true); }
             }
             var state = new DirectoryState { Root = tree.Identity.ToArray(), Version = version, Vector = decision.Vector,
-                DirectoryId = existing is null ? [] : Identity(FileSnapshot.Read(existing)) };
+                DirectoryId = existing is null ? [] : Identity(FileSnapshot.Read(existing)), ScheduledDeletion = scheduled && version.Deleted };
             var intent = new ApplyIntent(session, version.Path, known?.LocalSequence, state.Encode());
             await index.ReserveApplyAsync(intent, cancellationToken).ConfigureAwait(false); Signal("staging", session);
             using var created = existing is null && !version.Deleted ? parent.CreateDirectory(ApplyState.Name(version.Path)) : null;
@@ -97,6 +101,7 @@ public sealed class DirectoryApplier
             await index.AbandonApplyAsync(intent, token).ConfigureAwait(false); Signal("recover-staging", intent.Id);
             return new(FileApplyOutcome.Deferred, RequiresScan: true);
         }
+        using var deletionBarrier = await ScheduledApplySelection.AcquireRecoveryAsync(index, state.Version, ownDevice, state.ScheduledDeletion, token).ConfigureAwait(false);
         using var parent = tree.Directory(ApplyState.Parent(state.Version.Path));
         using var node = TryNode(parent, ApplyState.Name(state.Version.Path));
         if (node is not null && ((FileSnapshot.Read(node).Attributes & FileAttributes.Directory) == 0

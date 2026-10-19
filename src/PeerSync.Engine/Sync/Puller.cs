@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Paths;
 using PeerSync.Core.Settings;
 using PeerSync.Crypto;
 using PeerSync.Engine.Scanning;
@@ -38,6 +39,8 @@ public sealed class Puller : IDisposable
     public ChannelReader<PullPassResult> Outcomes => outcomes.Reader;
     private byte[]? rootId;
     private bool initialized;
+    private bool neededRepairPending = true;
+    internal Action<string>? Checkpoint { get; set; }
     private long nextScanTicks, scanRetryTicks;
     private int scanRequested = 1, scanAttempt, running, disposed;
 
@@ -180,12 +183,16 @@ public sealed class Puller : IDisposable
     private async Task ScanAsync(bool rebuild, CancellationToken token)
     {
         Interlocked.Exchange(ref scanRequested, 0);
+        bool repairAll = rebuild || neededRepairPending;
+        neededRepairPending = true;
         try
         {
             ScanResult result;
             using (await FolderScanBudget.AcquireAsync(token).ConfigureAwait(false)) result = await scanner.ScanAsync(token).ConfigureAwait(false);
-            if (rebuild) await needed.RebuildAsync(token).ConfigureAwait(false);
-            else if (result.ChangedPaths.Count != 0) await needed.RecomputeAsync(result.ChangedPaths, token).ConfigureAwait(false);
+            Checkpoint?.Invoke("after-local-scan");
+            if (repairAll) await needed.RebuildAsync(token).ConfigureAwait(false);
+            else if (result.ChangedPaths.Count != 0) await needed.RecomputeAsync(result.ChangedPaths.Where(PathRules.IsValid), token).ConfigureAwait(false);
+            neededRepairPending = false;
             long now = Now; nextScanTicks = AddSeconds(now, settings.RescanIntervalSeconds);
             bool incomplete = result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed");
             if (incomplete)
