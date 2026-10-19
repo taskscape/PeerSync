@@ -16,7 +16,10 @@ public sealed record DirectoryPublication(Guid Version, string Path, byte[] Root
 }
 public sealed record DirectoryPublicationCache(string PathKey, byte[] RootId, byte[] NativeId, byte[] RecordSourceId, byte[] InputHash,
     long MemberCount, long InputEpoch, long TouchedTicks)
-{ public override string ToString() => "Directory publication cache (redacted)"; }
+{
+    public byte[] ExpectedKeysHash { get; init; } = [];
+    public override string ToString() => "Directory publication cache (redacted)";
+}
 
 public sealed partial class FolderIndex
 {

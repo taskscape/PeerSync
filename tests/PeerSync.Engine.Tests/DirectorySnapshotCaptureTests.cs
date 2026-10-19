@@ -16,7 +16,7 @@ using SignedRecord = PeerSync.Core.Sync.SignedRecord;
 
 namespace PeerSync.Engine.Tests;
 
-public sealed class DirectorySnapshotCaptureTests : IDisposable
+public sealed partial class DirectorySnapshotCaptureTests : IDisposable
 {
     private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-DirectoryCapture-" + Guid.NewGuid().ToString("N"));
     private readonly FolderKeys keys = FolderKeys.CreateNew();

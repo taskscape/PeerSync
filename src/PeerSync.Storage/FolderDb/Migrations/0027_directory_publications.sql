@@ -31,6 +31,7 @@ CREATE TABLE directory_publication_cache (
   native_id BLOB NOT NULL CHECK(length(native_id)=16),
   record_source_id BLOB NOT NULL CHECK(length(record_source_id)=32),
   input_hash BLOB NOT NULL CHECK(length(input_hash)=32),
+  expected_keys_hash BLOB NOT NULL CHECK(length(expected_keys_hash)=32),
   member_count INTEGER NOT NULL CHECK(member_count>=0),
   input_epoch INTEGER NOT NULL CHECK(input_epoch>=0),
   touched_ticks INTEGER NOT NULL CHECK(touched_ticks BETWEEN 1 AND 3155378975999999999)

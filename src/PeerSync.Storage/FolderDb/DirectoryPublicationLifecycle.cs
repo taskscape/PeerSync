@@ -27,9 +27,10 @@ public sealed partial class FolderIndex
     public DirectoryPublicationCache? ReadDirectoryPublicationCache(string path)
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT root_id,native_id,record_source_id,input_hash,member_count,input_epoch,touched_ticks FROM directory_publication_cache WHERE path_key=$key;";
+        command.CommandText = "SELECT root_id,native_id,record_source_id,input_hash,member_count,input_epoch,touched_ticks,expected_keys_hash FROM directory_publication_cache WHERE path_key=$key;";
         string key = PathRules.Key(path); command.Parameters.AddWithValue("$key", key); using var reader = command.ExecuteReader();
-        return reader.Read() ? new(key, reader.GetFieldValue<byte[]>(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetFieldValue<byte[]>(3), reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6)) : null;
+        return reader.Read() ? new DirectoryPublicationCache(key, reader.GetFieldValue<byte[]>(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetFieldValue<byte[]>(3), reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6))
+            { ExpectedKeysHash = reader.GetFieldValue<byte[]>(7) } : null;
     }
     public Task<int> PruneDirectoryPublicationsAsync(byte[] rootId, long nowTicks, int limit = 1000, CancellationToken cancellationToken = default)
     {
