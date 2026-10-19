@@ -328,6 +328,13 @@ separate internal validation, never a public remote-path escape hatch.
 1. Create new directories, shallowest first.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
 3. For each file, assemble it in a hidden temp file next to the target (`name.ext.!psp`, like Resilio's `.!sync`), from local chunks first, then network chunks. A new file created there inherits that directory's permissions. Verify every chunk and then the whole-file hash.
+   Existing temporary bytes are also reusable only after chunk verification.
+   Local index entries are hints: reject reparse traversal, verify the actual
+   bytes and try at most 64 candidates per chunk before network fallback.
+   Copy transport data into an owned, bounded chunk buffer before hashing it.
+   Assembly never installs a target or publishes index metadata. Debug events
+   distinguish temporary/local reuse from verified network chunks with counts,
+   timing and a session ID; they contain no paths, hashes or content.
 4. Re-check the target just before replacing. If it changed since the database last saw it, scan it now and re-run the conflict rules.
 5. If the target exists, `File.Replace(tmp, target, archivePath)` archives the old version and swaps in the new one, keeping the target's permissions. Otherwise `File.Move(tmp, target)`. Set mtime and attributes, then record the new state.
 6. Apply deletions last by moving files to the archive, then remove emptied directories deepest first.

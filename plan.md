@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.5.3: assemble only into caller-owned temporary streams; verify resumed/local/network chunks and the independent whole-file hash. Treat the local chunk index as a bounded hint, reject link traversal, own transport bytes before verification, and log correlated counts/source codes only. | Sync engine design: Applying remote changes |
 | 2026-10-19 | P1.5.3/P1.5.4: introduce root-relative mutation primitives with pinned no-reparse directory leases, exclusive creates and handle-based no-overwrite archive/conflict moves. Validate private metadata/temp names separately from remote sync paths. | Sync engine design: Applying remote changes |
 | 2026-10-19 | P1.5.1: add migration 3 indexing remote_files(path_key), so affected-path winner queries do not scan every device's complete index. | Sync engine design: Version vectors and conflicts |
 | 2026-10-19 | P1.5.1: commit remote records, sender cursor and affected needed rows atomically; verify before submission and select from the writer transaction's current local/all-remote snapshot. Replays are idempotent. RO local changes remain blocked unless overwrite is enabled; local merged causal metadata never rewrites forwarded signatures. | Sync engine design: Version vectors and conflicts |
@@ -1330,6 +1331,7 @@ Our own writes need no special suppression: the puller records the new state in 
 - [ ] **P1.5.3 Puller** (`PeerSync.Engine/Sync/Puller.cs`) [WIP @Codex 2026-10-19]
   - Done when: directories are created first, then files in priority order, then deletions, deepest directory last. Files are assembled from local chunks before network chunks, verified, and swapped in with 7.11. A locked target retries with backoff (10 s up to 10 min).
   - Safe mutation foundation: [root-relative handle and no-overwrite move checks](docs/verification/P1.5.3-4-safe-mutations-2026-10-19.md). Puller, durable apply/recovery, archive accounting and pruning remain unimplemented.
+  - [Verified chunk assembly](docs/verification/P1.5.3-chunk-assembly-2026-10-19.md) reuses verified temporary/local chunks before network fallback, checks each chunk and the independent whole-file hash, and records safe diagnostic progress. It does not install a target or publish index metadata.
 - [ ] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) [WIP @Codex 2026-10-19]
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
 - [ ] **P1.5.5 Clock-skew guard** (`PeerSync.Engine/Sync/ClockGuard.cs`)
