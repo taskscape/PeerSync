@@ -620,6 +620,13 @@ as recoverable backpressure. After a successful native scan, allow already
 admitted sources to install, scan and complete even if full needed recomputation
 is capacity-limited. Block ordinary application until that repair completes,
 then resume remaining batches; never spin on blocked ordinary deadlines.
+Startup/local recomputation may commit a valid prefix within each bounded
+batch when preservation capacity is reached. Use a per-path savepoint so the
+failing path retains neither partial source admission nor changed needed work;
+commit the prefix FULL before reporting recoverable saturation. This permits
+progress when unavailable older sources leave fewer than a batch's free slots.
+Remote receipt remains whole-batch atomic with its cursor. Other resolver
+failures or cancellation roll back the current entire recomputation batch.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
