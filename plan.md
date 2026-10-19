@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.3.2: local sequence allocation, file-row storage and supplied chunk-index replacement share the batch transaction. Unsyncable local metadata has no signed record; remote paths remain strict. Batch at 1,000 rows and preserve envelope bytes verbatim. | Sync engine design: metadata database |
 | 2026-10-19 | P1.3.1: one normalized-path writer owner and a bounded channel, transactional operations with rollback, independent read-only connections, and online SQLite backup before transactional user_version migrations. Run synchronous SQLite I/O on the writer worker; retain WAL/NORMAL/foreign_keys/busy_timeout/temp_store settings. | Sync engine design: metadata database |
 | 2026-10-19 | P1.2.2: bound one-pass hashing to the original length and compare handle/path size, timestamps, attributes and 128-bit file identity. Detected mutation/removal/replacement retries; progress exposes counts only. This is metadata-based detection with shared writers, not an atomic snapshot. | Sync engine design: Detecting local changes |
 | 2026-10-19 | P1.1.5: specify the ignore glob subset and ancestry/negation behavior, accept Windows pattern separators, and match Unicode scalars without regex backtracking. Local rule text is bounded at 64 KiB, 1,024 rules and 4,096 characters per line. Invalid paths and internal metadata remain excluded. | Sync engine design: Archive, ignore rules and special files |

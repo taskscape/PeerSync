@@ -245,10 +245,14 @@
           "xunit.v3.runner.common": "[4.0.2]"
         }
       },
+      "peersync.core": {
+        "type": "Project"
+      },
       "peersync.storage": {
         "type": "Project",
         "dependencies": {
-          "Microsoft.Data.Sqlite": "[10.0.13, )"
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "PeerSync.Core": "[1.0.0, )"
         }
       },
       "Microsoft.Data.Sqlite": {

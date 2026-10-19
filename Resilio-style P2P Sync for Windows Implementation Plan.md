@@ -222,6 +222,13 @@ SQLite's online backup API (including committed WAL data), then apply SQL and
 Microsoft.Data.Sqlite's async ADO.NET calls execute synchronously, the writer
 runs on a worker task rather than blocking the service caller.
 
+Folder repositories commit up to 1,000 rows per transaction. Allocate local
+sequence numbers and persist their records in that same transaction, so an
+index cursor cannot pass an unpublished earlier sequence. Rewriting a local
+sequence never changes the signed body/signature. Supplied local chunk indexes
+are replaced atomically with their file row. Unsyncable local names may be
+kept as metadata with no signed record; remote paths always pass path rules.
+
 Version vectors use an 8-byte short device id (the first 8 bytes of DeviceId) to keep records small.
 Missing counters are zero; canonical vectors omit zero entries. Incrementing
 an exhausted 64-bit counter fails instead of wrapping. The Core compact
