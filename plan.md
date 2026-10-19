@@ -1470,6 +1470,7 @@ Our own writes need no special suppression: the puller records the new state in 
   - Done when: `Hello` carries UTC time. A peer more than 10 minutes off exchanges no index updates and shows "clock differs by N minutes" in the UI.
   - [ ] **P1.5.5a UTC Hello and clock decision/status model** (`PeerSync.Protocol/`, `PeerSync.Engine/Sync/ClockGuard.cs`) [WIP @Codex 2026-10-19]
     - Done when: UTC Hello round-trips; missing/invalid/extreme samples, both offset signs, exact limit, elapsed time, local clock jumps, reset, frozen inputs and safe transition diagnostics are tested. This foundation alone does not authorize peer exchange or close the parent.
+    - Local [verification](docs/verification/P1.5.5a-clock-foundation-2026-10-19.md): 18 clock and two Hello additions pass with all 902 canonical tests/native/probe/publishing in 108.92 seconds, exit 0 (CI fuzz skipped locally). Authenticated exchange/UI integration and main/CI evidence remain pending.
   - [ ] **P1.5.5b Guard peer index admission** (`PeerSync.Engine/`, `PeerSync.Net/`)
     - Done when: authenticated peer sessions check current clock admission before incoming and outgoing index exchange; skewed or missing samples exchange no index data and recovery after a valid Hello is tested using production engine/transport integration.
   - [ ] **P1.5.5c Present clock status in the control UI** (`PeerSync.App/`)

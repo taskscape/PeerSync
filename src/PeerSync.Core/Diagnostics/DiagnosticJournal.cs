@@ -67,6 +67,7 @@ public sealed class DiagnosticJournal : IDisposable
             transport = entry.Transport?.ToString(),
             bytes = entry.Bytes,
             elapsedMs = entry.ElapsedMilliseconds,
+            clockSkewSeconds = entry.ClockSkewSeconds,
             errorCode = entry.ErrorCode,
             hResult = entry.HResult,
             nativeError = entry.NativeError,
@@ -137,6 +138,7 @@ public sealed record DiagnosticEvent(string Event, string Operation)
     public DiagnosticTransport? Transport { get; init; }
     public long? Bytes { get; init; }
     public double? ElapsedMilliseconds { get; init; }
+    public double? ClockSkewSeconds { get; init; }
     public string? ErrorCode { get; init; }
     public int? HResult { get; init; }
     public int? NativeError { get; init; }

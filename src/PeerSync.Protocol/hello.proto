@@ -1,0 +1,14 @@
+syntax = "proto3";
+package peersync.handshake;
+option csharp_namespace = "PeerSync.Protocol.Handshake";
+
+// Time sanity metadata. Authenticated identity comes from TLS, not device_id.
+message Hello {
+  uint32 protocol_version = 1;
+  bytes device_id = 2;
+  string device_name = 3;
+  string client_version = 4;
+  uint64 capabilities = 5;
+  bytes nonce = 6;
+  int64 utc_ticks = 7;
+}
