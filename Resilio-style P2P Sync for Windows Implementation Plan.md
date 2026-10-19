@@ -325,6 +325,14 @@ archive/conflict moves use handle-based no-overwrite renames into a pinned
 destination directory. Private `.psp` paths and generated temp suffixes have
 separate internal validation, never a public remote-path escape hatch.
 
+Replacement preparation reads the original file's DACL/inheritance protection
+and creation time through its held handle and applies them to the sibling
+temporary file before moving the original. New files inherit their parent.
+Validate a remote mtime against Windows FILETIME representation before any
+destructive mutation; apply times before the synchronized read-only/hidden
+attributes. Native metadata and ACL helpers borrow handles without closing the
+caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
+
 1. Create new directories, shallowest first.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
 3. For each file, assemble it in a hidden temp file next to the target (`name.ext.!psp`, like Resilio's `.!sync`), from local chunks first, then network chunks. A new file created there inherits that directory's permissions. Verify every chunk and then the whole-file hash.
