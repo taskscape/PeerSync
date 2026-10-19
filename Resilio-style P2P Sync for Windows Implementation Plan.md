@@ -406,6 +406,18 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    mark stale local metadata for rescan and remove the intent in one durable
    transaction. Keep directory and original-file guards through that commit.
 6. Apply deletions last by moving files to the archive, then remove emptied directories deepest first.
+   Directory application has its own bounded, signed recovery intent. Create
+   parents shallowest first and bind the directory handle identity before
+   setting metadata or requesting deletion. Never recursively delete a tree.
+   Apply individual signed child tombstones through the regular file path
+   before the parent; a parent record is not a substitute child signature.
+   If a parent is still nonempty, keep it and its children, record the logical
+   signed tombstone and request a normal scan. RW scanning then publishes the
+   surviving directory and unknown children as local descendants; RO scanning
+   keeps local changes unpublished under its normal overwrite policy. Native
+   nonempty checks protect a child created concurrently with deletion. A changed
+   identity/type is preserved and rescanned. Recovery dispatches directory
+   intents alongside file and restore operations before scans are permitted.
 
 ### Archive, ignore rules and special files
 
