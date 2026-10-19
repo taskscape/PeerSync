@@ -1136,6 +1136,25 @@ and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/c
 including separate server-instance and client rights. Kernel PID verification
 also protects the local client from additional-instance impersonation.
 
+The shared client resolves only the installed `PeerSync` service and fixed
+`PeerSync.Control` pipe. Query SCM with configuration/status read rights, require
+Running and a nonzero PID, resolve its configured logon account to a SID, and
+fail closed on missing/stopped/changing configuration. Bound native configuration
+buffers to the documented 8 KiB and validate native strings within that buffer.
+Each pipe connection uses identification-level impersonation, verifies owner
+and kernel server PID before returning the stream to HTTP/2, and has a three-
+second cancellable connection deadline. A service restart creates a fresh client
+generation and SCM lookup. Raw fixture endpoints remain internal test seams.
+
+The status server uses an explicit named-pipe-only host and rechecks caller
+token membership in Administrators or the installer-created `PeerSync Users`
+group for each RPC. Its status runtime registers actual TransportFolder objects
+using their derived folder IDs, without transferring engine ownership. Empty
+status-only hosting reports production availability false. Limit WatchEvents
+to 32 subscriptions, emit at one-second intervals, await writes and release the
+slot on cancellation/failure. Installation, service-account provisioning and
+production folder/network supervision remain P2 work.
+
 ## Central rendezvous server
 
 One small ASP.NET Core service, `PeerSync.Rendezvous`, runs the tracker and the relay on the existing taskscape.com server. It is a Windows service listening on port 99, TCP and UDP, while the website keeps ports 80 and 443. It keeps only in-memory sightings ("device D, holding folder F, is reachable at these addresses"), and stores no files, keys or folder names. Without it, LAN and predefined-host sync keep working, as Resilio does with its tracker turned off.
