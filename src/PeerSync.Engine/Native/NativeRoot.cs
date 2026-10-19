@@ -14,9 +14,11 @@ internal sealed class NativeRoot : IDisposable
     public ulong Volume { get; }
     public byte[] Identity { get; }
 
-    public NativeRoot(string path)
+    internal SafeFileHandle Handle => root;
+
+    public NativeRoot(string path, bool preventRename = false)
     {
-        root = NativeFiles.CreateFile(path, 0x81, 7, 0, 3, 0x02200000, 0); // LIST_DIRECTORY | READ_ATTRIBUTES, BACKUP_SEMANTICS | OPEN_REPARSE_POINT.
+        root = NativeFiles.CreateFile(path, 0x81, preventRename ? 3u : 7u, 0, 3, 0x02200000, 0); // LIST_DIRECTORY | READ_ATTRIBUTES, BACKUP_SEMANTICS | OPEN_REPARSE_POINT.
         if (root.IsInvalid) { int error = Marshal.GetLastPInvokeError(); root.Dispose(); throw new Win32Exception(error); }
         try
         {

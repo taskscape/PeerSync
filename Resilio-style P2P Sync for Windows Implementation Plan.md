@@ -318,6 +318,13 @@ the device-first primary key alone cannot serve that access pattern efficiently.
 
 ### Applying remote changes
 
+Filesystem mutation primitives open every directory component relative to a
+pinned root, reject reparse traversal and hold directory leases that disallow
+rename while the operation is active. Creates use exclusive-create semantics;
+archive/conflict moves use handle-based no-overwrite renames into a pinned
+destination directory. Private `.psp` paths and generated temp suffixes have
+separate internal validation, never a public remote-path escape hatch.
+
 1. Create new directories, shallowest first.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
 3. For each file, assemble it in a hidden temp file next to the target (`name.ext.!psp`, like Resilio's `.!sync`), from local chunks first, then network chunks. A new file created there inherits that directory's permissions. Verify every chunk and then the whole-file hash.
