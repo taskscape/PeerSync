@@ -16,6 +16,7 @@ using PeerSync.Storage.FolderDb;
 namespace PeerSync.Engine.Sync;
 
 public enum FileApplyOutcome { Applied, Unchanged, Deferred, Blocked }
+public sealed record ScheduledFileApplyResult(FileApplyOutcome Outcome, bool RequiresScan);
 
 /// <summary>Serializes file application and file/directory transitions with scanning. The host
 /// must recover before its first scan; errors retain durable recovery state.
@@ -46,21 +47,37 @@ public sealed partial class FileApplier
 
     public Task<FileApplyOutcome> ApplyAsync(string path,
         Func<ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
-        CancellationToken cancellationToken = default) =>
-        ObserveAsync("pull", session => ApplyCoreAsync(path, fetch, session, cancellationToken));
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetch);
+        return ObserveAsync("pull", session => ApplyCoreAsync(path, (_, hash, length, token) => fetch(hash, length, token), session, false, null, cancellationToken));
+    }
+
+    /// <summary>Fetch receives the actually selected source device, then chunk hash.
+    /// A scan requirement must be handled after this call releases mutation gates.</summary>
+    public async Task<ScheduledFileApplyResult> ApplyScheduledAsync(string path,
+        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetch); bool requiresScan = false;
+        var outcome = await ObserveAsync("scheduled-pull", session => ApplyCoreAsync(path, fetch, session, true,
+            () => requiresScan = true, cancellationToken)).ConfigureAwait(false);
+        return new(outcome, requiresScan);
+    }
 
     private async Task<FileApplyOutcome> ApplyCoreAsync(string path,
-        Func<ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
-        Guid session, CancellationToken cancellationToken)
+        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        Guid session, bool scheduled, Action? requireScan, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(fetch); string key = PathRules.Key(path);
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         if (index.ReadApplyIntents().Any()) throw new IOException("Recover pending application before pulling.");
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree);
-        var known = index.LocalFiles.Find(key);
-        var decision = needed.Decide(new(key, known, index.RemotesForPath(path).ToArray()));
+        using var selection = await ScheduledApplySelection.AcquireAsync(index, needed, ownDevice, key, scheduled, cancellationToken).ConfigureAwait(false);
+        var known = selection.Known; var decision = selection.Decision;
         if (decision.BlockedReason is not null) return FileApplyOutcome.Blocked;
         if (!decision.RequiresApply) return FileApplyOutcome.Unchanged;
+        if (!selection.RangeComplete) { Signal("index-range-pending", session); return FileApplyOutcome.Deferred; }
         var winner = decision.Winner!;
         // Directory-only operations use DirectoryApplier. A type transition
         // preserves the exact old node without traversing any of its children.
@@ -79,9 +96,11 @@ public sealed partial class FileApplier
         Signal("staging", intent.Id);
         if (tempHandle is not null && desired.Type == 0)
         {
+            byte[] source = winner.SourceDevice.ToArray();
             using var borrowed = new SafeFileHandle(tempHandle.DangerousGetHandle(), ownsHandle: false);
             using var stream = new FileStream(borrowed, FileAccess.ReadWrite, 0, isAsync: false);
-            await new ChunkAssembler(tree, index, journal).AssembleAsync(desired, stream, fetch, cancellationToken).ConfigureAwait(false);
+            await new ChunkAssembler(tree, index, journal).AssembleAsync(desired, stream,
+                (hash, length, token) => fetch(source, hash, length, token), cancellationToken).ConfigureAwait(false);
             stream.Flush(flushToDisk: true);
         }
         using var oldParent = tree.Directory(ApplyState.Parent(known?.Path ?? desired.Path));
@@ -90,7 +109,7 @@ public sealed partial class FileApplier
         {
             await ParkAsync(state, cancellationToken).ConfigureAwait(false);
             await index.DeferApplyAsync(intent, [], cancellationToken).ConfigureAwait(false);
-            Signal("target-changed", intent.Id); return FileApplyOutcome.Deferred;
+            requireScan?.Invoke(); Signal("target-changed", intent.Id); return FileApplyOutcome.Deferred;
         }
         if (original is not null)
         {
@@ -112,7 +131,9 @@ public sealed partial class FileApplier
         state.Prepared = true;
         intent = await index.RewriteApplyAsync(intent, state.Encode(), cancellationToken).ConfigureAwait(false);
         Signal("prepared", intent.Id);
-        return await FinishAsync(tree, state, intent, original, tempHandle, cancellationToken).ConfigureAwait(false);
+        var outcome = await FinishAsync(tree, state, intent, original, tempHandle, cancellationToken).ConfigureAwait(false);
+        if (outcome == FileApplyOutcome.Deferred || state.Retained.Length != 0 && !state.Retained.StartsWith(".psp/", StringComparison.Ordinal)) requireScan?.Invoke();
+        return outcome;
     }
 
     /// <summary>Recover local intents without network access before allowing scans.

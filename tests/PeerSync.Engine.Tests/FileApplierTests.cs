@@ -422,6 +422,117 @@ public sealed class FileApplierTests : IDisposable
         using var scanner = new Scanner(Root, index, keys, own); (await scanner.ScanAsync(Token)).Updated.ShouldBe(0);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScheduledDeletionWaitsForDeclaredCompleteIndexWithoutReservingOrMovingData(bool announce)
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt");
+        await ReceiveAsync(index, "file.txt", [], deleted: true); var needed = new NeededSet(index, keys, own);
+        if (announce) await needed.AnnounceIndexRangeAsync(remote, 2, Token);
+        var applier = new FileApplier(Root, index, keys, own);
+        var waiting = await applier.ApplyScheduledAsync("file.txt", (_, _, _, _) => throw new InvalidOperationException("No download"), Token);
+        waiting.ShouldBe(new(FileApplyOutcome.Deferred, false)); index.ReadApplyIntents().ShouldBeEmpty();
+        File.ReadAllBytes(Disk("file.txt")).ShouldBe(Old); index.Archive.Count().ShouldBe(0);
+        await needed.AnnounceIndexRangeAsync(remote, 2, Token); await needed.ApplyIndexUpdateAsync(remote, 1, 2, [], Token);
+        (await applier.ApplyScheduledAsync("file.txt", (_, _, _, _) => throw new InvalidOperationException("No download"), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        File.Exists(Disk("file.txt")).ShouldBeFalse(); File.ReadAllBytes(Disk(index.Archive.ReadAll().Single().ArchivePath)).ShouldBe(Old);
+    }
+
+    [Fact]
+    public async Task ScheduledDeletionHoldsRangeGuardThroughNativeMovesAndCommit()
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt");
+        await ReceiveAsync(index, "file.txt", [], deleted: true); var needed = new NeededSet(index, keys, own);
+        await needed.AnnounceIndexRangeAsync(remote, 1, Token); Task<RemoteIndexRange>? announcement = null;
+        var applier = new FileApplier(Root, index, keys, own) { Checkpoint = stage =>
+        {
+            if (stage != "prepared") return; announcement = needed.AnnounceIndexRangeAsync(remote, 2, Token); announcement.IsCompleted.ShouldBeFalse();
+        } };
+        (await applier.ApplyScheduledAsync("file.txt", (_, _, _, _) => throw new InvalidOperationException(), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        (await announcement!.WaitAsync(TimeSpan.FromSeconds(5), Token)).Complete.ShouldBeFalse(); index.ReadApplyIntents().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ScheduledFetchRoutesActualWinnerAndKeepsIndexReceiptAvailableDuringLiveDownload()
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt"); await ReceiveAsync(index, "file.txt", New);
+        var needed = new NeededSet(index, keys, own); byte[] selected = Device(3);
+        var body = VersionView.Open(index.RemotesForPath("file.txt").Single().Record, keys, remote).ExportBody();
+        body.ModifiedBy = ByteString.CopyFrom(selected); body.Vv.Add(new VvEntry { Device = 3, Counter = 1 });
+        await needed.ApplyIndexUpdateAsync(selected, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        await needed.AnnounceIndexRangeAsync(selected, 2, Token); // A live transfer does not wait for the rest of this range.
+        var result = await new FileApplier(Root, index, keys, own).ApplyScheduledAsync("file.txt", async (peer, hash, length, token) =>
+        {
+            peer.ToArray().ShouldBe(selected); hash.ToArray().ShouldBe(Hash(New)); length.ShouldBe(New.Length);
+            await needed.ApplyIndexUpdateAsync(selected, 1, 2, [], token).WaitAsync(TimeSpan.FromSeconds(5), token);
+            return New;
+        }, Token);
+        result.ShouldBe(new(FileApplyOutcome.Applied, false)); File.ReadAllBytes(Disk("file.txt")).ShouldBe(New);
+        index.ReadRemoteIndexRange(selected)!.Complete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ScheduledSelectionRechecksAfterWaitingAndReleasesReferenceGuardIfWinnerBecomesLive()
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt"); await ReceiveAsync(index, "file.txt", [], deleted: true);
+        var needed = new NeededSet(index, keys, own);
+        var body = VersionView.Open(index.RemotesForPath("file.txt").Single().Record, keys, remote).ExportBody();
+        body.Deleted = false; body.Size = (ulong)New.Length; body.FileHash = ByteString.CopyFrom(Hash(New)); body.ChunkClass = ChunkParameters.ClassFor(New.Length);
+        body.Chunks.Add(new Chunk { Hash = body.FileHash, Length = (uint)New.Length }); body.Vv.Single(v => v.Device == 2).Counter++;
+        Task<RemoteIndexResult> update; Task<ScheduledFileApplyResult> apply;
+        using (await FolderReferenceGate.AcquireAsync(index, Token))
+        {
+            update = needed.ApplyIndexUpdateAsync(remote, 1, 2, [SignedRecordFactory.Create(body, keys, 2)], Token);
+            apply = new FileApplier(Root, index, keys, own).ApplyScheduledAsync("file.txt", async (_, _, _, token) =>
+            {
+                await needed.AnnounceIndexRangeAsync(remote, 2, token).WaitAsync(TimeSpan.FromSeconds(5), token); return New;
+            }, Token);
+            apply.IsCompleted.ShouldBeFalse();
+        }
+        await update; (await apply.WaitAsync(TimeSpan.FromSeconds(10), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        File.ReadAllBytes(Disk("file.txt")).ShouldBe(New);
+    }
+
+    [Fact]
+    public async Task ScheduledResultRequestsScanForPublicPreservedCopy()
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt"); await ReceiveAsync(index, "file.txt", New);
+        var applier = new FileApplier(Root, index, keys, own, new FolderSettings { KeepBothCopies = true });
+        var result = await applier.ApplyScheduledAsync("file.txt", (_, hash, length, token) => Fetch(hash, length, token), Token);
+        result.ShouldBe(new(FileApplyOutcome.Applied, true)); Directory.GetFiles(Root).Select(File.ReadAllBytes).ShouldContain(data => data.SequenceEqual(Old));
+        index.ReadApplyIntents().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ScheduledResultRequestsScanWhenUserChangesTargetDuringDownload()
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt"); await ReceiveAsync(index, "file.txt", New);
+        var result = await new FileApplier(Root, index, keys, own).ApplyScheduledAsync("file.txt", (_, hash, length, token) =>
+        {
+            File.WriteAllText(Disk("file.txt"), "changed by user"); return Fetch(hash, length, token);
+        }, Token);
+        result.ShouldBe(new(FileApplyOutcome.Deferred, true)); File.ReadAllText(Disk("file.txt")).ShouldBe("changed by user");
+        index.ReadApplyIntents().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task CancellingScheduledDeletionWhileWaitingForReferencesLeavesNoIntentAndReleasesFilesystemGate()
+    {
+        File.WriteAllBytes(Disk("file.txt"), Old); await using var index = await PrepareAsync("file.txt"); await ReceiveAsync(index, "file.txt", [], deleted: true);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token); var applier = new FileApplier(Root, index, keys, own);
+        using (await FolderReferenceGate.AcquireAsync(index, Token))
+        {
+            var waiting = applier.ApplyScheduledAsync("file.txt", (_, _, _, _) => throw new InvalidOperationException(), cancellation.Token);
+            waiting.IsCompleted.ShouldBeFalse(); cancellation.Cancel();
+            await Should.ThrowAsync<OperationCanceledException>(() => waiting);
+        }
+        index.ReadApplyIntents().ShouldBeEmpty(); File.ReadAllBytes(Disk("file.txt")).ShouldBe(Old);
+        await new NeededSet(index, keys, own).AnnounceIndexRangeAsync(remote, 1, Token);
+        (await applier.ApplyScheduledAsync("file.txt", (_, _, _, _) => throw new InvalidOperationException(), Token)
+            .WaitAsync(TimeSpan.FromSeconds(5), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+    }
+
     private async Task<FolderIndex> PrepareAsync(string path)
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

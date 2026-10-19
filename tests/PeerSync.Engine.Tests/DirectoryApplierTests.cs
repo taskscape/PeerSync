@@ -307,6 +307,29 @@ public sealed class DirectoryApplierTests : IDisposable
         index.ReadApplyIntents().ShouldBeEmpty(); (await applier.ApplyAsync("private-name", Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScheduledDirectoryDeletionRequiresCompleteIndexAndHoldsTheGuardThroughDeletion(bool nonempty)
+    {
+        Directory.CreateDirectory(Disk("dir")); if (nonempty) File.WriteAllText(Disk("dir/unknown.txt"), "preserve child");
+        await using var index = await PrepareAsync(); await ReceiveAsync(index, "dir", deleted: true);
+        var needed = new NeededSet(index, keys, own); var applier = Directories(index);
+        (await applier.ApplyScheduledAsync("dir", Token)).ShouldBe(new(FileApplyOutcome.Deferred));
+        Directory.Exists(Disk("dir")).ShouldBeTrue(); index.ReadApplyIntents().ShouldBeEmpty();
+        await needed.AnnounceIndexRangeAsync(remote, 2, Token);
+        (await applier.ApplyScheduledAsync("dir", Token)).Outcome.ShouldBe(FileApplyOutcome.Deferred);
+        await needed.ApplyIndexUpdateAsync(remote, 1, 2, [], Token); Task<RemoteIndexRange>? queued = null;
+        applier.Checkpoint = stage =>
+        {
+            if (stage != "before-delete") return; queued = needed.AnnounceIndexRangeAsync(remote, 3, Token); queued.IsCompleted.ShouldBeFalse();
+        };
+        var result = await applier.ApplyScheduledAsync("dir", Token); result.ShouldBe(new(FileApplyOutcome.Applied, nonempty));
+        (await queued!.WaitAsync(TimeSpan.FromSeconds(5), Token)).Complete.ShouldBeFalse();
+        Directory.Exists(Disk("dir")).ShouldBe(nonempty);
+        if (nonempty) File.ReadAllText(Disk("dir/unknown.txt")).ShouldBe("preserve child");
+    }
+
     private async Task<FolderIndex> PrepareAsync()
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

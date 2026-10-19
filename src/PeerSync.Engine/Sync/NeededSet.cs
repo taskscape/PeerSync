@@ -38,6 +38,24 @@ public sealed class NeededSet
         this.journal = journal;
     }
 
+    /// <summary>Call only after transport authenticates the folder and sender.
+    /// Shares the reference gate with receive and scheduled deletion checks.</summary>
+    public async Task<RemoteIndexRange> AnnounceIndexRangeAsync(byte[] sourceDevice, long targetSequence, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sourceDevice); sourceDevice = sourceDevice.ToArray(); Guid session = Guid.NewGuid();
+        try
+        {
+            using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
+            var range = await index.AnnounceRemoteIndexRangeAsync(sourceDevice, targetSequence, cancellationToken).ConfigureAwait(false);
+            journal?.TryWrite(new(range.Complete ? "index.range_complete" : "index.range_pending", "index") { SessionId = session, ItemsVisited = 1 });
+            return range;
+        }
+        catch (Exception error)
+        {
+            journal?.TryWrite(new("index.range_failed", "index") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult }); throw;
+        }
+    }
+
     public async Task<RemoteIndexResult> ApplyIndexUpdateAsync(byte[] sourceDevice, long afterSequence, long lastSequence,
         IReadOnlyList<Envelope> records, CancellationToken cancellationToken = default)
     {

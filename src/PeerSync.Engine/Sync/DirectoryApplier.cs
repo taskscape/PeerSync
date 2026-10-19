@@ -24,6 +24,7 @@ public sealed class DirectoryApplier
     private readonly FolderIndex index;
     private readonly FolderKeys keys;
     private readonly NeededSet needed;
+    private readonly byte[] ownDevice;
     private readonly DiagnosticJournal? journal;
     internal Action<string>? Checkpoint { get; set; }
 
@@ -32,10 +33,14 @@ public sealed class DirectoryApplier
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath); ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(keys);
         this.rootPath = Path.GetFullPath(rootPath); this.index = index; this.keys = keys;
-        needed = new(index, keys, ownDevice, settings, journal: journal); this.journal = journal;
+        needed = new(index, keys, ownDevice, settings, journal: journal); this.journal = journal; this.ownDevice = ownDevice.ToArray();
     }
 
-    public async Task<DirectoryApplyResult> ApplyAsync(string path, CancellationToken cancellationToken = default)
+    public Task<DirectoryApplyResult> ApplyAsync(string path, CancellationToken cancellationToken = default) => ApplyCoreAsync(path, false, cancellationToken);
+
+    public Task<DirectoryApplyResult> ApplyScheduledAsync(string path, CancellationToken cancellationToken = default) => ApplyCoreAsync(path, true, cancellationToken);
+
+    private async Task<DirectoryApplyResult> ApplyCoreAsync(string path, bool scheduled, CancellationToken cancellationToken)
     {
         string key = PathRules.Key(path); Guid session = Guid.NewGuid();
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
@@ -43,10 +48,11 @@ public sealed class DirectoryApplier
         {
             if (index.ReadApplyIntents().Any()) throw new IOException("Recover pending application before changing directories.");
             using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); Signal("start", session);
-            var known = index.LocalFiles.Find(key);
-            var decision = needed.Decide(new(key, known, index.RemotesForPath(path).ToArray()));
+            using var selection = await ScheduledApplySelection.AcquireAsync(index, needed, ownDevice, key, scheduled, cancellationToken).ConfigureAwait(false);
+            var known = selection.Known; var decision = selection.Decision;
             if (decision.BlockedReason is not null) { Signal("blocked", session); return new(FileApplyOutcome.Blocked); }
             if (!decision.RequiresApply) { Signal("unchanged", session); return new(FileApplyOutcome.Unchanged); }
+            if (!selection.RangeComplete) { Signal("index-range-pending", session); return new(FileApplyOutcome.Deferred); }
             if (decision.Winner!.Type != 1) { Signal("unsupported-type", session); return new(FileApplyOutcome.Deferred); }
             var version = VersionView.Open(decision.DesiredRecord!, keys, decision.Winner.SourceDevice.ToArray());
             if (!version.Deleted) FileMetadata.ValidateMtime(version.MtimeTicks);

@@ -106,9 +106,14 @@ public sealed class NeededSetTests : IDisposable
         await needed.ApplyIndexUpdateAsync(Device(1), 0, 1, [record], Token);
         await Should.ThrowAsync<CryptographicException>(() => needed.ApplyIndexUpdateAsync(Device(1), 1, 2,
             [new Envelope(record.Body, new byte[64], 2)], Token));
+        await needed.AnnounceIndexRangeAsync(Device(1), 2, Token);
+        await needed.ApplyIndexUpdateAsync(Device(1), 1, 2, [], Token);
+        await needed.AnnounceIndexRangeAsync(Device(1), 2, Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => needed.AnnounceIndexRangeAsync(Device(1), 1, Token));
         string log = await File.ReadAllTextAsync(Path.Combine(fixture, "logs", "debug.jsonl"), Token);
         log.ShouldContain("index.receive_complete"); log.ShouldContain("index.replay"); log.ShouldContain("index.receive_failed");
         log.ShouldContain("sessionId"); log.ShouldContain("itemsVisited");
+        log.ShouldContain("index.range_pending"); log.ShouldContain("index.range_complete"); log.ShouldContain("index.range_failed");
         log.ShouldNotContain("private sync content"); log.ShouldNotContain(keys.ExportText());
     }
 
