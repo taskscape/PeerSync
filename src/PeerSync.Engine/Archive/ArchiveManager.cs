@@ -15,7 +15,7 @@ public sealed record ArchivePruneResult(int Removed, int Missing, int Deferred, 
 
 /// <summary>Only indexed, verified archive versions are eligible for retention
 /// cleanup. Unknown filesystem data is preserved. The host owns the index/journal.</summary>
-public sealed class ArchiveManager
+public sealed partial class ArchiveManager
 {
     private const string LastSuccessKey = "_archive-last-success";
     private static readonly TimeSpan Daily = TimeSpan.FromDays(1);
@@ -74,19 +74,21 @@ public sealed class ArchiveManager
                 TimeSpan retry = Retry(); Log("archive.wait_recovery", session, code: "pending-apply", retry: retry);
                 return new(0, 0, 0, 0, null, retry, WaitingForRecovery: true);
             }
+            var recovered = await RecoverRetirementsAsync(tree, cancellationToken).ConfigureAwait(false);
+            var pendingRetirements = index.ReadArchiveRetirements().Where(r => r.CompletedTicks is null).Select(r => r.Archive.Id).ToHashSet();
             long now = clock.GetUtcNow().UtcTicks, last = ReadLastSuccess();
             long elapsed = now - last;
             if (!force && last != 0 && elapsed >= 0 && elapsed < Daily.Ticks)
             {
-                TimeSpan remaining = TimeSpan.FromTicks(Daily.Ticks - elapsed); Log("archive.not_due", session, retry: remaining);
-                return new(0, 0, 0, 0, null, remaining, NotDue: true);
+                TimeSpan remaining = recovered.Deferred == 0 ? TimeSpan.FromTicks(Daily.Ticks - elapsed) : Retry(); Log("archive.not_due", session, retry: remaining);
+                return new(recovered.Removed, recovered.Missing, recovered.Deferred, recovered.Bytes, null, remaining, NotDue: recovered.Deferred == 0);
             }
             ulong capacity = CapacityOverride?.Invoke() ?? tree.CapacityBytes;
             if (capacity == 0) throw new IOException("Archive capacity must be positive.");
             long cap = (long)UInt128.Min(long.MaxValue, (UInt128)capacity * (uint)settings.ArchiveMaxPercentOfVolume / 100);
             long cutoff = Math.Max(0, now - (long)settings.ArchiveDays * TimeSpan.TicksPerDay);
-            long bytes = 0, removedBytes = 0; int removed = 0, missing = 0, deferred = 0;
-            bool capBlocked = false;
+            long bytes = 0, removedBytes = recovered.Bytes; int removed = recovered.Removed, missing = recovered.Missing, deferred = recovered.Deferred;
+            bool capBlocked = deferred != 0;
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             // Reconcile all missing rows before cap selection: a missing newer
             // entry must not make an intact older version look over budget.
@@ -102,24 +104,31 @@ public sealed class ArchiveManager
                 }
                 catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { absent = true; }
                 catch (Exception error) when (IsFileError(error)) { /* Inaccessible still counts toward the cap. */ }
-                if (absent) { await index.Archive.DeleteAsync([row.Id], cancellationToken).ConfigureAwait(false); missing++; }
+                if (absent && !pendingRetirements.Contains(row.Id)) { await index.Archive.DeleteAsync([row.Id], cancellationToken).ConfigureAwait(false); missing++; }
                 else bytes = checked(bytes + row.Size);
             }
             foreach (var row in index.ArchivesByAge())
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (pendingRetirements.Contains(row.Id)) continue;
                 if (row.ArchivedTicks > cutoff && (bytes <= cap || capBlocked)) break;
                 try
                 {
                     using var parent = Parent(tree, row);
+                    ArchiveRetirement retirement;
                     using (var file = parent.OpenFile(ApplyState.Name(row.ArchivePath), mutation: true))
                     {
+                        PublishedBlocks.RequireIndependent(file);
                         if (row.FileHash is null || FileSnapshot.Read(file).Length != row.Size
                             || !GuardedFile.Hash(file, cancellationToken).AsSpan().SequenceEqual(row.FileHash))
                         { deferred++; capBlocked = true; Log("archive.defer", session, code: "changed-or-unverified"); continue; }
                         cancellationToken.ThrowIfCancellationRequested();
+                        retirement = new(Guid.NewGuid(), row, tree.Identity.ToArray(), BlockCaptureProof.Identity(file),
+                            row.ArchivedTicks <= cutoff ? ArchiveRetirementReason.Age : ArchiveRetirementReason.Capacity, now);
+                        await index.ReserveArchiveRetirementAsync(retirement, cancellationToken).ConfigureAwait(false);
+                        Log("archive.retirement_prepared", retirement.Id, bytes: row.Size); Checkpoint?.Invoke("retirement-prepared");
                         Log("archive.delete_prepared", session, bytes: row.Size);
-                        Checkpoint?.Invoke("before-delete"); GuardedFile.DeleteOnClose(file);
+                        Checkpoint?.Invoke("before-delete"); cancellationToken.ThrowIfCancellationRequested(); GuardedFile.DeleteOnClose(file);
                     }
                     Checkpoint?.Invoke("data-deleted");
                     Log("archive.delete_requested", session, bytes: row.Size);
@@ -129,7 +138,9 @@ public sealed class ArchiveManager
                     try { using var current = parent.OpenFile(ApplyState.Name(row.ArchivePath)); }
                     catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { gone = true; }
                     if (!gone) { deferred++; capBlocked = true; Log("archive.defer", session, code: "delete-pending-or-concurrent-file"); continue; }
-                    await index.Archive.DeleteAsync([row.Id], cancellationToken).ConfigureAwait(false);
+                    Checkpoint?.Invoke("before-retirement-commit");
+                    await index.CompleteArchiveRetirementAsync(retirement, Math.Max(now, clock.GetUtcNow().UtcTicks), cancellationToken).ConfigureAwait(false);
+                    Log("archive.retirement_complete", retirement.Id, bytes: row.Size); Checkpoint?.Invoke("retirement-committed");
                     removed++; bytes -= row.Size; removedBytes = checked(removedBytes + row.Size);
                 }
                 catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3)

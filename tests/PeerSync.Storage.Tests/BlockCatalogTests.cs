@@ -84,7 +84,7 @@ public sealed class BlockCatalogTests : IDisposable
         {
             connection.Open(); using var command = connection.CreateCommand();
             // The old schema is identical except for the ownership table/index.
-            command.CommandText = "DROP TABLE block_objects; PRAGMA user_version=6; "
+            command.CommandText = "DROP TABLE archive_retirements; DROP TABLE block_objects; PRAGMA user_version=6; "
                 + "INSERT INTO local_files(path_key,path,type,size,mtime_ticks,attributes,deleted,changed_ticks,vv,local_seq,flags,record_body,signature,content_ready) "
                 + "VALUES('LIVE','live',0,1,1,0,0,1,X'00',7,0,X'0102',X'0304',1),"
                 + "('DELETED','deleted',0,0,1,0,1,1,X'00',8,0,X'0506',X'0708',1),"
