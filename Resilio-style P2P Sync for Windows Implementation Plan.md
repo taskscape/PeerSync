@@ -456,6 +456,21 @@ When capture proofs still defer, recovery may cancel a present deletion or
 reconcile already absent data, but must not delete present block data. This
 keeps readiness truthful and frees journal capacity without bypassing the
 capture barrier. Share the 1,000 pending-journal bound across both intent tables.
+Historical metadata cleanup follows a fresh fully covered reference snapshot
+under both gates. FULL-mark explicitly released content manifests as retiring
+before draining at most 1,000 metadata mutations per batch. Active/pending
+readers and capture activation exclude retiring manifests; later captures do
+not cascade-delete their remaining chunks. The durable retiring state permits
+restart continuation without exposing a partially drained active manifest.
+Before renewing any history hold by reusing a guarded native copy, verify and
+durably recapture its exact signed chunks. A renewed source can then use its
+authenticated history/new content while an older retiring manifest finishes.
+Preserve native archive rows and attached provenance. Remove detached released
+sources only after all content, holds, coverage and completed witness links are
+drained; preserve pending or foreign recovery links. Delete only completed,
+unlinked, unneeded policy witnesses older than ArchiveDays. Never infer policy
+release from absence. Keep byte references, needed work, orphan clocks and
+deletion journals unchanged. Report remaining cleanup work for prompt retries.
 - **Renames:** the NTFS FileId shows a path change. It is published as delete plus create with the same chunks, so peers rebuild from local data.
 - **Locked files:** opened with `FileShare.ReadWrite | Delete`. A sharing violation is retried after 10 s, backing off to 10 min.
 - **Start-up speed (later phase):** read the NTFS USN change journal to find what changed while the service was stopped, instead of walking the whole tree.
