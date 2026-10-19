@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | Hand exhausted member attempts to verification without renewing their retry deadline; completion owns remaining backoff. Connected tests advance injected UTC to future scheduler deadlines while retaining all native/content/drain assertions. | Sync engine design: directory case snapshots |
 | 2026-10-20 | Wire an internal connected snapshot preview with one bounded publication pass, needed recomputation and durable wake deadlines before production activation. Preserve public constructor behavior until connected convergence passes. | Sync engine design: directory case snapshots |
 | 2026-10-20 | Tag incoming-root reconstruction separately from ordinary private publication: retain exact received envelopes, permit child arrival, keep GC/parent/final completion holds, and release unchanged only after bounded snapshot equality/native/input proof. Refresh retries on changed input epochs. Production activation still requires convergence evidence. | Sync engine design: directory case snapshots |
 | 2026-10-20 | Retire obsolete subtree member/progress witnesses through root-bound FULL transactions with a shared 1000-row limit, 24-hour completed/member age checks and current-pending-root/recovery guards. Original source/graph retention and native copies remain independent. | Sync engine design: directory case snapshots |

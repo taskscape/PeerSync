@@ -772,6 +772,11 @@ run one bounded publication pass after case preparation and before completion,
 repair needed paths after publication, and include durable publication retry
 deadlines in the puller's wake calculation. Keep the public production path
 inactive until connected acceptance passes; preserve existing public constructors.
+Once member installation is exhausted, preparation yields scheduling authority
+to verification/completion instead of refreshing its retry deadline. Completion
+owns pending scan/publication backoff. Connected simulations advance injected
+UTC to a reported future deadline; they must not spin past a real backoff or
+sleep in wall time to simulate service scheduling.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
