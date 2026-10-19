@@ -58,6 +58,11 @@ public static class SignedRecordFactory
     private static bool IsValid(FileRecordBody body)
     {
         if (!PathRules.IsValid(body.Path)) return false;
+        bool snapshot = body.DirectorySnapshotHash.Length != 0 || body.DirectorySnapshotLength != 0;
+        if (snapshot && (body.Type != 1 || body.Deleted || body.DirectorySnapshotHash.Length != 32
+            || body.DirectorySnapshotLength < Directories.DirectorySnapshotNode.HeaderBytes
+            || body.DirectorySnapshotLength > Directories.DirectorySnapshotNode.MaximumLinksNodeBytes
+            || (body.DirectorySnapshotLength - Directories.DirectorySnapshotNode.HeaderBytes) % Directories.DirectorySnapshotNode.LinkBytes != 0)) return false;
         ulong previous = 0;
         for (int i = 0; i < body.Vv.Count; i++)
         {

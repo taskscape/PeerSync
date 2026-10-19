@@ -21,6 +21,8 @@ message FileRecordBody {
   repeated Chunk chunks = 10;
   bytes file_hash = 11;
   bytes modified_by = 12;
+  bytes directory_snapshot_hash = 13;
+  uint32 directory_snapshot_length = 14;
 }
 message VvEntry { fixed64 device = 1; uint64 counter = 2; }
 message Chunk { uint32 length = 1; bytes hash = 2; }
