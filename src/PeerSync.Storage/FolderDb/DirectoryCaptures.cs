@@ -84,6 +84,37 @@ public sealed partial class FolderIndex
             command.Parameters.AddWithValue("$limit", limit); return command.ExecuteNonQuery();
         }, cancellationToken);
     }
+    /// <summary>Engine has verified the signed root and pinned native directory.
+    /// Publish the local row and release its draft in one FULL transaction.
+    /// Caller has already retained old versions and published child content.</summary>
+    public Task<LocalFileRow> PublishDirectoryCaptureAsync(DirectoryCaptureState expected, LocalFileRow publication, long expectedLocalSequence,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(publication); ArgumentOutOfRangeException.ThrowIfNegative(expectedLocalSequence);
+        var prior = FreezeCapture(expected);
+        if (prior.Hash is not { Length: 32 } || prior.Length is null || prior.Accepted != prior.MemberCount || prior.BuilderState is not null)
+            throw new ArgumentException("Directory capture is incomplete.", nameof(expected));
+        var row = publication with { FileId = publication.FileId?.ToArray(), Vector = new Dictionary<ulong, ulong>(publication.Vector), IndexedChunks = [] };
+        FolderMaps.Local.Validate(row);
+        if (row.Path != prior.ParentPath || row.Type != 1 || row.Deleted || row.Size != 0 || row.Flags != LocalFileState.None
+            || row.FileHash is not null || row.FileId is null || !row.FileId.AsSpan().SequenceEqual(prior.NativeId) || row.Record is null)
+            throw new ArgumentException("Directory publication does not match its capture.", nameof(publication));
+        return database.WriteDurableAsync((connection, transaction) =>
+        {
+            RequireCaptureExpected(connection, transaction, prior); string key = PathRules.Key(prior.ParentPath);
+            using var query = connection.CreateCommand(); query.Transaction = transaction;
+            query.CommandText = "SELECT local_seq FROM local_files WHERE path_key=$key;"; query.Parameters.AddWithValue("$key", key);
+            if ((query.ExecuteScalar() is long sequence ? sequence : 0) != expectedLocalSequence) throw new InvalidOperationException("Directory publication source changed.");
+            LocalFiles.WriteBatch(connection, transaction, [row], cancellationToken);
+            using var remove = connection.CreateCommand(); remove.Transaction = transaction;
+            remove.CommandText = "DELETE FROM directory_captures WHERE parent_key=$key;"; remove.Parameters.AddWithValue("$key", key);
+            if (remove.ExecuteNonQuery() != 1) throw new InvalidOperationException("Directory capture disappeared during publication.");
+            using var result = connection.CreateCommand(); result.Transaction = transaction;
+            result.CommandText = "SELECT " + FolderMaps.LocalColumns + " FROM local_files WHERE path_key=$key;"; result.Parameters.AddWithValue("$key", key);
+            using var reader = result.ExecuteReader(); if (!reader.Read()) throw new InvalidOperationException("Directory publication disappeared.");
+            return FolderMaps.ReadLocal(reader);
+        }, cancellationToken);
+    }
     private static DirectoryCaptureState FreezeCapture(DirectoryCaptureState value) => value with
     { RootId = value.RootId.ToArray(), NativeId = value.NativeId.ToArray(), InputHash = value.InputHash.ToArray(), BuilderState = value.BuilderState?.ToArray(), Hash = value.Hash?.ToArray() };
     private static void RequireCaptureExpected(SqliteConnection connection, SqliteTransaction transaction, DirectoryCaptureState expected)

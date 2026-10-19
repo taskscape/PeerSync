@@ -1,6 +1,7 @@
 using Google.Protobuf;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Scanning;
@@ -24,6 +25,108 @@ public sealed class DirectorySnapshotCaptureTests : IDisposable
     private string Root => Path.Combine(fixture, "tree");
     private string Database => Path.Combine(fixture, "index.db");
     public DirectorySnapshotCaptureTests() => Directory.CreateDirectory(Path.Combine(Root, "topic"));
+
+    [Fact]
+    public async Task PublicationDiagnosticsExposeCommitStageAndNativeCodeWithoutSqlOrSourceDetails()
+    {
+        await using var index = await Open(); var draft = await Advance(index, [], 1000); var prior = index.LocalFiles.Find("topic")!;
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "publish", debugEnabled: true);
+        using var gate = await FolderOperationGate.AcquireAsync(index, Token);
+        var capture = new DirectorySnapshotCapture(Root, index, keys, device, journal); var publication = Publication(index, draft);
+        Sql("CREATE TRIGGER reject_capture_publication BEFORE DELETE ON directory_captures BEGIN SELECT RAISE(ABORT,'private publication failure'); END;");
+        await Should.ThrowAsync<SqliteException>(() => capture.PublishUnderGateAsync(draft, publication, prior.LocalSequence, Token));
+        Sql("DROP TRIGGER reject_capture_publication;"); await capture.PublishUnderGateAsync(draft, publication, prior.LocalSequence, Token);
+        string log = File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl"));
+        log.ShouldContain("directory.publish_start"); log.ShouldContain("directory.publish_complete"); log.ShouldContain("directory.publish_failed");
+        log.ShouldContain("commit-row-and-draft.SqliteException"); log.ShouldContain("1811");
+        log.ShouldNotContain("private publication failure"); log.ShouldNotContain("topic"); log.ShouldNotContain(fixture);
+        log.ShouldNotContain(Convert.ToHexString(draft.Hash!)); log.ShouldNotContain(Convert.ToBase64String(publication.Record!.Body));
+    }
+
+    [Fact]
+    public async Task PublicationInstallsTheSignedRootAndReleasesTheDraftInOneDurableStep()
+    {
+        File.WriteAllText(Path.Combine(Root, "topic", "a"), "published child bytes");
+        await using var index = await Open(); var child = index.LocalFiles.Find("topic/a")!.Record!;
+        var draft = await Advance(index, [child], 1000); var prior = index.LocalFiles.Find("topic")!;
+        var published = await Publish(index, draft, Publication(index, draft), prior.LocalSequence);
+        published.LocalSequence.ShouldBeGreaterThan(prior.LocalSequence); published.Record.ShouldNotBeNull();
+        DirectorySnapshotBlocks.SnapshotOf(VersionView.Open(published.Record!, keys, device)).Hash.ShouldBe(draft.Hash!);
+        index.HasDirectoryCaptures().ShouldBeFalse(); index.ReadDirectoryCapture("topic").ShouldBeNull();
+        var references = await new BlockReferences(Root, index, keys, device).RefreshAsync(Token);
+        references.AllKnownSourcesCovered.ShouldBeTrue(); references.References.ShouldBe(4);
+        File.ReadAllText(Path.Combine(Root, "topic", "a")).ShouldBe("published child bytes");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SqlFailureRollsBackBothPublicationAndDraftRelease(bool afterRow)
+    {
+        await using var index = await Open(); var draft = await Advance(index, [], 1000); var prior = index.LocalFiles.Find("topic")!;
+        long high = index.ReadIndexHighWater(); var publication = Publication(index, draft);
+        Sql(afterRow
+            ? "CREATE TRIGGER reject_capture_publication BEFORE DELETE ON directory_captures BEGIN SELECT RAISE(ABORT,'private publication failure'); END;"
+            : "CREATE TRIGGER reject_capture_publication BEFORE UPDATE ON local_files WHEN NEW.path_key='TOPIC' BEGIN SELECT RAISE(ABORT,'private publication failure'); END;");
+        await Should.ThrowAsync<SqliteException>(() => Publish(index, draft, publication, prior.LocalSequence));
+        index.HasDirectoryCaptures().ShouldBeTrue(); index.ReadIndexHighWater().ShouldBe(high);
+        index.LocalFiles.Find("topic")!.Record!.Body.ToArray().ShouldBe(prior.Record!.Body.ToArray());
+        Sql("DROP TRIGGER reject_capture_publication;");
+        (await Publish(index, draft, publication, prior.LocalSequence)).Record.ShouldNotBeNull(); index.HasDirectoryCaptures().ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task StaleLocalSequenceCannotReleaseAnUnpublishedDraft()
+    {
+        await using var index = await Open(); var draft = await Advance(index, [], 1000); var prior = index.LocalFiles.Find("topic")!;
+        var publication = Publication(index, draft); await index.LocalFiles.UpsertAsync([prior], Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => Publish(index, draft, publication, prior.LocalSequence));
+        index.HasDirectoryCaptures().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task NativeReplacementOrWrongSignedRootCannotPublishOrOverwriteUserData()
+    {
+        await using var index = await Open(); var draft = await Advance(index, [], 1000); var prior = index.LocalFiles.Find("topic")!;
+        var publication = Publication(index, draft); SignedRecordFactory.TryOpen(publication.Record!, keys, out var body).ShouldBeTrue();
+        byte[] wrong = draft.Hash!.ToArray(); wrong[0] ^= 1; body.DirectorySnapshotHash = ByteString.CopyFrom(wrong);
+        await Should.ThrowAsync<InvalidDataException>(() => Publish(index, draft, publication with { Record = SignedRecordFactory.Create(body, keys) }, prior.LocalSequence));
+        Directory.Move(Path.Combine(Root, "topic"), Path.Combine(Root, "old-topic")); Directory.CreateDirectory(Path.Combine(Root, "topic"));
+        File.WriteAllText(Path.Combine(Root, "topic", "user"), "new directory user bytes");
+        await Should.ThrowAsync<IOException>(() => Publish(index, draft, publication, prior.LocalSequence));
+        File.ReadAllText(Path.Combine(Root, "topic", "user")).ShouldBe("new directory user bytes"); index.HasDirectoryCaptures().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task CancellationBeforePublicationCommitRetainsTheDraftAndLocalRow()
+    {
+        await using var index = await Open(); var draft = await Advance(index, [], 1000); var prior = index.LocalFiles.Find("topic")!;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        using var gate = await FolderOperationGate.AcquireAsync(index, Token);
+        var capture = new DirectorySnapshotCapture(Root, index, keys, device) { Checkpoint = stage => { if (stage == "before-publication") stop.Cancel(); } };
+        await Should.ThrowAsync<OperationCanceledException>(() => capture.PublishUnderGateAsync(draft, Publication(index, draft), prior.LocalSequence, stop.Token));
+        index.HasDirectoryCaptures().ShouldBeTrue(); index.LocalFiles.Find("topic")!.LocalSequence.ShouldBe(prior.LocalSequence);
+    }
+
+    private LocalFileRow Publication(FolderIndex index, DirectoryCaptureState draft)
+    {
+        var prior = index.LocalFiles.Find("topic")!; var vector = VersionVector.Increment(prior.Vector, 1);
+        var body = new FileRecordBody { Path = "topic", Type = 1, MtimeTicks = prior.MtimeTicks, ChangedTicks = DateTime.UtcNow.Ticks,
+            Attributes = prior.Attributes & (uint)(FileAttributes.ReadOnly | FileAttributes.Hidden), ModifiedBy = ByteString.CopyFrom(device),
+            DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash!), DirectorySnapshotLength = (uint)draft.Length!.Value };
+        body.Vv.AddRange(vector.Select(entry => new VvEntry { Device = entry.Key, Counter = entry.Value }));
+        return prior with { Vector = vector, Record = SignedRecordFactory.Create(body, keys), ChangedTicks = body.ChangedTicks, ContentReady = true };
+    }
+    private async Task<LocalFileRow> Publish(FolderIndex index, DirectoryCaptureState draft, LocalFileRow publication, long sequence)
+    {
+        using var gate = await FolderOperationGate.AcquireAsync(index, Token);
+        return await new DirectorySnapshotCapture(Root, index, keys, device).PublishUnderGateAsync(draft, publication, sequence, Token);
+    }
+    private void Sql(string sql)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString()); connection.Open();
+        using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
+    }
 
     [Fact]
     public async Task InconsistentCheckpointCountCannotOmitAcceptedMembers()

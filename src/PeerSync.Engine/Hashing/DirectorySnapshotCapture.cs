@@ -15,7 +15,7 @@ namespace PeerSync.Engine.Hashing;
 
 // Caller retains FolderOperationGate. This prepares a logical snapshot draft;
 // it does not publish a directory row or release the GC barrier.
-internal sealed class DirectorySnapshotCapture(string rootPath, FolderIndex index, FolderKeys keys, byte[] peer, DiagnosticJournal? journal = null)
+internal sealed partial class DirectorySnapshotCapture(string rootPath, FolderIndex index, FolderKeys keys, byte[] peer, DiagnosticJournal? journal = null)
 {
     private readonly byte[] sourceHint = peer is { Length: 32 } ? peer.ToArray() : throw new ArgumentException("Invalid directory capture source hint.", nameof(peer));
     internal Action<string>? Checkpoint { get; init; }
