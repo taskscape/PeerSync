@@ -578,6 +578,23 @@ unknown/conflict data outside mutation gates, and continue independent work
 after deferred targets. Case-clash and hierarchy coordination remain required
 parts of the complete puller, not implied by queue metadata alone.
 
+The host owns one pull coordinator per folder. Its bounded passes recover pending
+intents, scan at startup, rebuild legacy needed metadata once, and then consume
+up to 1,000 eligible entries. Filter cached deletion stages awaiting sender ranges
+before LIMIT so waiting deletions cannot starve complete independent work. The
+applier still checks actual work under its gates. A fresh unbound index with no
+intents can bind and scan; unbound recovery state fails closed. All coordinator
+scans share the process-wide rescan budget. Later scans return changed paths for
+incremental needed recomputation. Coalesce preserved/changed-target scans once
+per batch and perform them outside mutation gates. Follow-up history scans and
+transient scan failures request another pass, with bounded delays on failure.
+Recover failed staged operations before attempting another target; if recovery
+itself is unavailable, stop that pass and retry the folder. Preserve exact-work
+backoff through restart and continue other eligible paths after ordinary failures.
+The cancellable loop wakes on coalesced index/local notifications, the next
+eligible durable retry or the periodic scan deadline. Watcher/host notifications
+request scans explicitly; waiting for work holds no mutation or scan gate.
+
 Filesystem mutation primitives open every directory component relative to a
 pinned root, reject reparse traversal and hold directory leases that disallow
 rename while the operation is active. Creates use exclusive-create semantics;
