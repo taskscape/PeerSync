@@ -6,7 +6,7 @@ namespace PeerSync.Storage.FolderDb;
 
 public sealed record IndexBatch(IReadOnlyList<LocalFileRow> Records, long LastSequence);
 
-public sealed class FolderIndex : IAsyncDisposable
+public sealed partial class FolderIndex : IAsyncDisposable
 {
     internal const string SequenceKey = "_local-sequence";
     private readonly Db database;
@@ -34,7 +34,7 @@ public sealed class FolderIndex : IAsyncDisposable
     public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         var migrations = new List<DbMigration>();
-        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql" })
+        foreach (string file in new[] { "0001_initial.sql", "0002_chunk_path.sql", "0003_remote_path.sql" })
         {
             using var resource = typeof(FolderIndex).Assembly.GetManifestResourceStream("PeerSync.Storage.FolderDb.Migrations." + file)
                 ?? throw new InvalidOperationException("Missing folder schema resource.");

@@ -56,18 +56,23 @@ public sealed class FolderIndexTests : IDisposable
             index.FindChunks(Hash).Single().PathKey.ShouldBe("FILE");
         }
         Directory.GetFiles(root, "*.pre-v1-to-v2-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v2-to-v3-*.bak").Length.ShouldBe(1);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        ((long)command.ExecuteScalar()!).ShouldBe(2);
+        ((long)command.ExecuteScalar()!).ShouldBe(3);
         command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
         command.Parameters.AddWithValue("$path", "FILE");
-        using var query = command.ExecuteReader();
         var details = new List<string>();
-        while (query.Read()) details.Add(query.GetString(3));
+        using (var query = command.ExecuteReader()) while (query.Read()) details.Add(query.GetString(3));
         string.Join('\n', details).ShouldContain("ix_chunks_path");
         string.Join('\n', details).ShouldNotContain("SCAN chunks");
+        command.CommandText = "EXPLAIN QUERY PLAN SELECT device_id,vv,record_body,signature FROM remote_files WHERE path_key=$path;";
+        details.Clear();
+        using (var query = command.ExecuteReader()) while (query.Read()) details.Add(query.GetString(3));
+        string.Join('\n', details).ShouldContain("ix_remote_path");
+        string.Join('\n', details).ShouldNotContain("SCAN remote_files");
     }
 
     [Fact]
