@@ -123,3 +123,32 @@ resume after installation coverage. File versions may publish through ordinary
 scanning, but no partially materialized directory is presented as an empty or
 complete subtree. Installation coverage releases this publication hold only;
 incoming mutation remains blocked until whole-source completion proof succeeds.
+
+## Bounded completion verification
+
+Schema 29 adds a separate verification cursor bound to the installed root ID,
+current local mutation epoch, copied-root local sequence and RW/RO mode. Begin
+only after installation exhaustion. Verify original graph members in bounded
+pages, retaining authenticated envelopes, native root/parent/member IDs and
+guarded file size/hash proof. Match each observed local row; RW requires ready
+signed files and signed snapshot-bearing directories. The copied RW root must
+also have its exact publication-cache identity/current epoch and no pending
+namespace publication. RO never signs or manufactures a copied-root envelope.
+
+FULL progress compares the witness and exact next graph-key prefix, checks
+observed local sequences/native IDs and advances only that verified prefix.
+Any local-index epoch, root sequence or authority-mode change resets verification.
+This conservatively requires a stable input window; publication and normal
+scanning must settle before final release. A root identity change or mismatched
+visible bytes preserves the earlier tree and starts another root attempt.
+Missing publication/scan proof defers rather than declaring lost bytes.
+
+FULL completion rechecks root/source/graph/coverage/verification, mutation epoch,
+copied-root sequence and absence of unresolved application/publication work,
+then releases the source barrier and retries atomically. RW relies on the normal
+authenticated copied snapshot/ready records. Completed RO directory sources
+retain their original signed envelope/graph references for ArchiveDays (at least
+one day), independently of the 24-hour completed-case envelope compactor.
+Expiry releases metadata/reference protection only and never deletes visible
+copies. Immutable RW publication preserves verified bytes through later normal
+native edits; RO history protection covers the configured preservation window.

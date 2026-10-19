@@ -744,6 +744,14 @@ ancestor/range logic with late/recovery and FULL commit guards. Hold directory
 advertisements at/above/below unfinished copied roots until identity-bound
 member coverage is exhausted, preserving signed rows and pausing templates.
 Coverage releases only publication holding, never case-source completion.
+Complete subtree sources through a separate bounded verification cursor bound
+to root native identity, local mutation epoch, root publication sequence and
+RW/RO mode. Reauthenticate members, verify guarded native bytes and observed
+rows, require current cached signed snapshot/ready records for RW and unsigned
+preservation for RO, and FULL-release only after complete stable coverage.
+Keep completed RO original graphs/envelopes referenced for ArchiveDays rather
+than dropping them through the generic 24-hour case compactor. Expiry authorizes
+no native deletion. See the subtree proposal for witness/reset/commit details.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
