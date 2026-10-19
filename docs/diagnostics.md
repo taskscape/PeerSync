@@ -1,5 +1,31 @@
 # Debugging deployments
 
+## Development executable signing
+
+`build/Sign.ps1` uses the supplied certificate thumbprint in `LocalMachine\My`.
+It locates `signtool.exe` on PATH or in installed Windows SDK version folders.
+For a custom installation, pass `-SignToolPath <full-path-to-signtool.exe>` or
+set `PEERSYNC_SIGNTOOL_PATH`. If no tool is installed, install Windows SDK
+Signing Tools. The selected executable path is printed before signing.
+
+On 2026-10-18 the user-created `CN=PeerSync Development` certificate signed
+`artifacts/deploy/QuicBasics/QuicBasics.exe` locally. SHA-256 RFC3161 timestamping,
+SignTool `/pa /all` verification and PowerShell Authenticode status `Valid`
+passed. This is development signing with explicit local trust; CI signing and
+publicly trusted release signing are not verified by this local check.
+
+CI runs `build/Test-Signing.ps1` for x64 and Arm64 after publishing. This signs
+a separate test copy using a fresh, non-exportable development certificate,
+verifies its SHA-256/RFC3161 signature, and verifies that changing a PE section
+produces `HashMismatch`. It removes the temporary certificate, private key and
+runner-local test trust in `finally`. Only the signed smoke EXE, public `.cer`
+and JSON evidence are retained under `artifacts/signing/<runtime>/`.
+Published deployment probes are not signed with this disposable identity.
+This exercises the CI signing path; publicly trusted release signing still
+requires a release signing identity.
+
+## Deployment status
+
 The product is in P0. The production service, tracker, relay, CLI and installer
 are scaffold projects and do not synchronize files yet. The P0 probes below
 are deployable test executables, not a v1 release.
@@ -20,6 +46,11 @@ on both machines immediately after reproducing. It collects only structured
 debug JSONL and environment metadata. Add `-IncludeNetworkAddresses` when
 investigating routing. It excludes settings, databases, certificates, keys,
 arbitrary logs and crash dumps. Review the bundle before sharing it.
+The collector prints the number of included files/events and refuses to create
+an archive with no recent valid debug events. If it reports no files, use the
+exact `LOGS` directory printed by the probe, including its process-ID child
+directory. Collect after the failed run, not before it. Check both PCs' clocks
+if every event is filtered as expired.
 
 Compare timestamps and session IDs. A transport failure before folder auth is
 different from a rejected folder proof, approval wait, missing block, or failed
@@ -28,6 +59,9 @@ Those production-stage event hooks are added with their implementing phases;
 the QUIC probe already records start, TLS authentication, completion and errors.
 
 ## P0: two-machine QUIC test
+
+For a fresh two-PC diagnostic package, use the step-by-step
+[retry runbook](quic-two-pc-retest.md).
 
 After `dotnet build -c Release`, copy the entire output directory
 `spikes/QuicBasics/bin/Release/net10.0-windows10.0.20348.0/` to a machine with
@@ -44,6 +78,35 @@ separate directories, and the collector reads live logs without blocking writes
 or rotation.
 The same session ID appears in both processes' JSON and transfer events.
 Self-signed certificates are created per probe run and deleted afterwards.
+There is no manual TLS certificate or root-store setup for this test. These
+device certificates are separate from the development code-signing certificate.
+
+Use matching, newly published binaries on both PCs. The probe prints `LOGS`
+on stderr at startup and again on failure, with phase, bytes, elapsed time,
+QUIC error, HRESULT and protocol error numbers. Progress appears every five
+seconds during an active transfer. HRESULT is not a native socket error.
+The receiver waits up to three minutes for a connection; once authenticated,
+each peer gets a fresh 15-minute transfer budget. Set a different transfer
+budget on both peers with `--timeout-seconds <1..86400>` after the byte count.
+Keep the receiver and sender byte counts equal. Start with `16777216` (16 MiB),
+then repeat with `1073741824` (1 GiB), restarting the receiver for each run.
+
+For a newly extracted probe path, an existing program-specific firewall rule
+for the old path may not apply. On the receiver, an administrator can add a
+temporary rule scoped to the new EXE, the UDP port and the sender's IP:
+
+```powershell
+New-NetFirewallRule -DisplayName 'PeerSync QUIC probe retry' `
+    -Direction Inbound -Action Allow -Protocol UDP -LocalPort 47821 `
+    -Program (Join-Path $PWD 'QuicBasics.exe') -RemoteAddress <sender-IP> -Profile Any
+```
+
+Run it from the extracted probe folder. Remove the temporary rule after testing
+with `Get-NetFirewallRule -DisplayName 'PeerSync QUIC probe retry' | Remove-NetFirewallRule`.
+Use the sender's Tailscale address for a Tailscale test or its LAN address for
+a LAN test. A Tailscale transfer verifies the overlay path; it does not measure
+native 1-Gbit LAN performance or prove PeerSync's own NAT traversal. Do not use
+`Test-NetConnection -Port` as proof of UDP reachability: it tests TCP.
 
 This establishes reachability only. It does not implement folder authorization,
 pinning, discovery, relay fallback or NAT hole punching.

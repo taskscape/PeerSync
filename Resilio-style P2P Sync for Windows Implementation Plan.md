@@ -167,6 +167,12 @@ Open technical question: step 3 needs outgoing QUIC connections to leave from th
 
 P0 local result (2026-10-18): outgoing QUIC on the listener port failed with WSAEADDRINUSE on Windows build 26300, .NET 10.0.13 / MsQuic 2.5.11. Direct MsQuic with shared binding and TCP simultaneous open also failed locally. Provisionally retain direct QUIC/TCP for reachable endpoints and relay fallback after 5 seconds for hard NATs. Do not advertise coordinated punching until the physical NAT matrix confirms a supported option. See `docs/spikes/P0.2.2-quic-punch.md`; that matrix remains open.
 
+User-approved implementation baseline (2026-10-19): proceed with reachable
+direct QUIC/TCP connections and relay fallback after five seconds while the
+native NAT matrix is pending. Working coordinated punching is not claimed.
+The final native transport decision and full required matrix remain mandatory
+before the WAN gate, including a real relay fallback check.
+
 ## Sync engine design
 
 Each folder runs an independent loop: detect local changes, publish them as signed records, pull what remote peers have that is newer, and apply it safely. The model follows Resilio's (a database per share, watcher plus 600 s rescans, archive on overwrite) with version vectors added so concurrent edits are detected and the losing version is always archived.
@@ -350,6 +356,14 @@ loopback, LAN, WAN, container and VM evidence. The P0 journal, collector and
 probe runbook establish the mechanism; production event hooks ship with their
 components in P2 and P4.
 
+Cross-machine diagnostic refinement (2026-10-18): retain managed HRESULT,
+native socket error and QUIC transport/application error numbers as separate
+metadata. Failed probes report the operation stage and transferred bytes;
+progress is emitted at bounded intervals. Collection must reject a bundle
+with no recent valid debug events and report file/event counts. The P0 QUIC
+probe gives connection establishment and the transfer independent deadlines,
+so waiting for the second operator does not consume the transfer budget.
+
 ## WPF control app
 
 `PeerSync.exe` is a small WPF app that only controls the service: closing it never stops syncing. It is built on .NET 10 WPF with `CommunityToolkit.Mvvm`, the built-in Fluent theme and a tray icon (`H.NotifyIcon.Wpf`).
@@ -472,6 +486,17 @@ In-box with no package: `System.Net.Quic`, `SslStream`, `HKDF`, `HMACSHA256`, `A
 ## Phased roadmap
 
 Version 1.0 (LAN and internet sync, the service, the WPF app and the installer) takes about 26 weeks for one senior .NET developer. Two developers can run phases 3 and 4 side by side and finish in about 20 weeks. No phase starts until the previous gate passes.
+
+User-approved external-validation phasing (2026-10-19): Gate P0 may pass with
+only P0.2.1's physical 1-Gbit LAN measurement and P0.2.2's native NAT matrix
+explicitly deferred. Their tasks stay unchecked and their acceptance criteria
+remain intact. The LAN measurement is mandatory before Gate P2; the same-LAN,
+full-cone, port-restricted and mobile/CGNAT matrix plus final transport decision
+are mandatory before Gate P4. All other P0 requirements must pass first.
+Existing Tailscale and public rendezvous-probe successes retain their actual
+scope. No unexecuted test is marked passed or dropped by this phasing change.
+All other phase gates, security, soak, installer and release checks remain
+unchanged.
 
 &#91;embedded content: phased roadmap · 7 phases, 7 gates\]
 
@@ -599,6 +624,15 @@ end;
 **Uninstall:** stops and deletes the service, removes the binaries, firewall rule and local group. A `CurUninstallStepChanged` prompt asks whether to delete `%ProgramData%\PeerSync` (default: keep it). It never touches the contents of synced folders.
 
 **Signing:** define a sign tool once (the IDE's Configure Sign Tools, or ISCC's `--signtool` option) that calls `signtool sign ... $f`. Then `SignTool=signtool` signs the setup, `SignedUninstaller=yes` signs the uninstaller, and the `signonce` flag signs the EXEs. Azure Trusted Signing or a standard code-signing certificate both work. Unsigned, SmartScreen warns every user.
+
+P0 signing-path verification (2026-10-19) uses a fresh, non-exportable
+development certificate generated on each CI runner. Sign and timestamp a
+separate test EXE, verify its signature, and reject a changed PE section.
+Remove the temporary machine-store signing key and root trust entry afterwards;
+retain only the public certificate, signed smoke EXE and verification metadata.
+This does not sign deployment artifacts with a disposable identity or provide
+public release trust. A production signing identity remains required for
+publicly trusted v1 EXEs and installers.
 
 **Silent installs:** `PeerSync-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart" /LOG="setup.log"` installs unattended, for scripted roll-outs. Phase 5 auto-update uses the same path: the service downloads a newer setup, checks its signature, and starts it from a short-lived helper process, because Setup stops the service.
 

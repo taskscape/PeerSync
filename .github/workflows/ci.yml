@@ -28,6 +28,9 @@ jobs:
         run: |
           $skip = '${{ matrix.runtime }}' -eq 'win-arm64'
           ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipFuzz
+      - name: Sign and verify a test EXE with a temporary development identity
+        shell: pwsh
+        run: ./build/Test-Signing.ps1 -Runtime '${{ matrix.runtime }}'
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -39,6 +42,7 @@ jobs:
             artifacts/tests/
             artifacts/p0/
             artifacts/fuzz/
+            artifacts/signing/
       - name: Upload P0 probe bundle (not the product)
         uses: actions/upload-artifact@v7
         with:

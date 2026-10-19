@@ -14,7 +14,14 @@ try {
     # Deliberately exclude settings, databases, keys, certificates, arbitrary text logs and crash dumps.
     $cutoff = [DateTimeOffset]::UtcNow.AddHours(-24)
     $index = 0
-    foreach ($file in Get-ChildItem -LiteralPath $source -Filter 'debug*.jsonl' -File -Recurse) {
+    $collectedEvents = 0
+    $expiredEvents = 0
+    $invalidEvents = 0
+    $debugFiles = @(Get-ChildItem -LiteralPath $source -Filter 'debug*.jsonl' -File -Recurse)
+    if ($debugFiles.Count -eq 0) {
+        throw "No debug*.jsonl files found under '$source'. Pass -Logs with the exact LOGS directory printed by the probe after reproducing the failure."
+    }
+    foreach ($file in $debugFiles) {
         if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
         # Collection must coexist with the live writer and with file rotation.
         try {
@@ -34,15 +41,29 @@ try {
                     } else {
                         [DateTimeOffset]::Parse([string]$entry.timestampUtc, [Globalization.CultureInfo]::InvariantCulture)
                     }
-                    if ($timestamp -ge $cutoff) { $line }
-                } catch { } # A torn final line must not prevent collection.
+                    if ($timestamp -ge $cutoff) { $line } else { $expiredEvents++ }
+                } catch { $invalidEvents++ } # A torn final line must not prevent collection.
             }
         } finally { $reader.Dispose() }
-        if ($lines) { $lines | Set-Content (Join-Path $staging "debug-$index.jsonl"); $index++ }
+        if ($lines) {
+            $lines | Set-Content (Join-Path $staging "debug-$index.jsonl")
+            $collectedEvents += @($lines).Count
+            $index++
+        }
+    }
+    if ($collectedEvents -eq 0) {
+        throw "No recent valid debug events found under '$source' (files=$($debugFiles.Count), expired=$expiredEvents, invalid=$invalidEvents). Reproduce the failure, check both PCs' clocks, and collect the LOGS directory printed by that run."
     }
     $os = Get-CimInstance Win32_OperatingSystem
     $metadata = [ordered]@{
         collectedUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        collection = [ordered]@{
+            debugFilesFound = $debugFiles.Count
+            debugFilesIncluded = $index
+            eventsIncluded = $collectedEvents
+            expiredEvents = $expiredEvents
+            invalidEvents = $invalidEvents
+        }
         os = $os.Caption
         osVersion = $os.Version
         architecture = $os.OSArchitecture
@@ -56,6 +77,7 @@ try {
     }
     $metadata | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $staging 'environment.json')
     Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $target
+    Write-Host "Collected $collectedEvents events from $index debug files under '$source'."
     Write-Output $target
 }
 finally {

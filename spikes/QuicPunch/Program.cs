@@ -96,6 +96,9 @@ catch (Exception ex) when (ex is QuicException or SocketException or OperationCa
     timeout.Cancel();
     try { await accept; } catch (OperationCanceledException) { }
     Console.WriteLine(JsonSerializer.Serialize(new { option = "System.Net.Quic.LocalEndPoint", topology = "loopback", success = false,
-        error = ex.GetType().Name, nativeError = ex.HResult, natMatrixVerified = false }));
+        error = ex.GetType().Name, hResult = ex.HResult,
+        nativeError = (ex.GetBaseException() as SocketException)?.NativeErrorCode,
+        quicError = (ex as QuicException)?.QuicError.ToString(),
+        transportErrorCode = (ex as QuicException)?.TransportErrorCode, natMatrixVerified = false }));
     return 3; // Observed unsupported binding; not a passing hole-punch test.
 }

@@ -56,7 +56,8 @@ public sealed class ProbeService(DiagnosticJournal? diagnostics = null) : Probe.
         catch (Exception ex) when (ex is RpcException or OperationCanceledException or IOException)
         {
             diagnostics?.Write(new("probe.session.failed", "session") { SessionId = session, Level = DiagnosticLevel.Error,
-                Transport = Transport(context), ErrorCode = ex.GetType().Name, NativeError = ex.HResult,
+                Transport = Transport(context), ErrorCode = ex.GetType().Name, HResult = ex.HResult,
+                NativeError = (ex.GetBaseException() as System.Net.Sockets.SocketException)?.NativeErrorCode,
                 ElapsedMilliseconds = clock.Elapsed.TotalMilliseconds });
             throw;
         }

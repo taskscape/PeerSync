@@ -118,6 +118,11 @@ try {
     Finish-Probe (Start-Probe 'Rendezvous99' @('client','https://localhost:99','3') 'rendezvous-http3') 30
     Stop-Probe $server
     $server = $null
+    Finish-Probe (Start-Probe 'Rendezvous99' @('client','https://127.0.0.1:99','2') 'rendezvous-unreachable') 30 -ExpectFailure
+    $unreachable = Get-Content (Join-Path $out 'rendezvous-unreachable.stdout.log') | ConvertFrom-Json
+    if ($unreachable.mutualTls -or $unreachable.hResult -ge 0 -or $unreachable.nativeError -ne 10061) {
+        throw 'Unreachable HTTP/2 probe did not distinguish HRESULT from native WSAECONNREFUSED'
+    }
     Finish-Probe (Start-Probe 'WatcherStress' @("$WatcherOperations") 'watcher') 180
     @{status='local-probes-completed';finishedUtc=[DateTime]::UtcNow.ToString('O');transferBytes=$TransferBytes;watcherOperations=$WatcherOperations;scope='single-host native Windows; no NAT or second physical PC';gateP0Passed=$false} | ConvertTo-Json | Set-Content (Join-Path $out 'summary.json')
 }

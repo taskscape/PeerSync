@@ -58,7 +58,10 @@ public sealed class DiagnosticJournal : IDisposable
             bytes = entry.Bytes,
             elapsedMs = entry.ElapsedMilliseconds,
             errorCode = entry.ErrorCode,
+            hResult = entry.HResult,
             nativeError = entry.NativeError,
+            transportErrorCode = entry.TransportErrorCode,
+            applicationErrorCode = entry.ApplicationErrorCode,
             retryInMs = entry.RetryInMilliseconds,
             remoteAddress = entry.RemoteAddress?.ToString(),
         }, Json);
@@ -115,7 +118,10 @@ public sealed record DiagnosticEvent(string Event, string Operation)
     public long? Bytes { get; init; }
     public double? ElapsedMilliseconds { get; init; }
     public string? ErrorCode { get; init; }
+    public int? HResult { get; init; }
     public int? NativeError { get; init; }
+    public long? TransportErrorCode { get; init; }
+    public long? ApplicationErrorCode { get; init; }
     public int? RetryInMilliseconds { get; init; }
     public System.Net.IPAddress? RemoteAddress { get; init; }
 }

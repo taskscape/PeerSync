@@ -28,6 +28,20 @@ public sealed class DiagnosticJournalTests : IDisposable
     }
 
     [Fact]
+    public void ErrorNumbersKeepHResultNativeAndProtocolCodesDistinct()
+    {
+        using (var log = new DiagnosticJournal(directory, "test"))
+            log.Write(new("transfer.failed", "send") { ErrorCode = "QuicException.TransportError",
+                HResult = unchecked((int)0x80131620), NativeError = 10060,
+                TransportErrorCode = 0x100000000, ApplicationErrorCode = 0x200000000 });
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "debug.jsonl")));
+        json.RootElement.GetProperty("hResult").GetInt32().ShouldBe(unchecked((int)0x80131620));
+        json.RootElement.GetProperty("nativeError").GetInt32().ShouldBe(10060);
+        json.RootElement.GetProperty("transportErrorCode").GetInt64().ShouldBe(0x100000000);
+        json.RootElement.GetProperty("applicationErrorCode").GetInt64().ShouldBe(0x200000000);
+    }
+
+    [Fact]
     public void RotatesAndExpiresOldFiles()
     {
         Directory.CreateDirectory(directory);

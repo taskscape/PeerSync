@@ -86,8 +86,10 @@ try
 catch (Exception ex) when (ex is Grpc.Core.RpcException or HttpRequestException or OperationCanceledException)
 {
     Console.WriteLine(JsonSerializer.Serialize(new { sessionId, httpVersion = args[2], mutualTls = false, error = ex.GetType().Name,
-        rpcStatus = (ex as Grpc.Core.RpcException)?.StatusCode.ToString(), nativeError = ex.HResult,
+        rpcStatus = (ex as Grpc.Core.RpcException)?.StatusCode.ToString(), hResult = ex.HResult,
+        nativeError = ((ex as Grpc.Core.RpcException)?.Status.DebugException?.GetBaseException() as System.Net.Sockets.SocketException)?.NativeErrorCode
+            ?? (ex.GetBaseException() as System.Net.Sockets.SocketException)?.NativeErrorCode,
         cause = (ex as Grpc.Core.RpcException)?.Status.DebugException?.GetBaseException().GetType().Name,
-        causeError = (ex as Grpc.Core.RpcException)?.Status.DebugException?.GetBaseException().HResult }));
+        causeHResult = (ex as Grpc.Core.RpcException)?.Status.DebugException?.GetBaseException().HResult }));
     return 1;
 }
