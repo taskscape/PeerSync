@@ -1000,6 +1000,7 @@ public static class PathRules
           - Done when: capture retained archive content references before cleanup, preserve archive-creation/missing-row/legacy-migration provenance, apply explicit policy retirement safely, expire eligible owned orphans with grace/cap limits, and recover interrupted verified sweeps. Preserve current/needed/pending/history and unknown/changed/locked/reparse data; production simulations exercise cleanup before Gate P1.
           - [ ] **P1.2.4b2b2a Transactional archive provenance** (`PeerSync.Storage/FolderDb/`) [WIP @Codex 2026-10-19]
             - Done when: migrate existing archive rows and transactionally preserve exact source/root metadata on every insert, update and removal, including apply/history/restore completion and missing reconciliation. Stable IDs survive archive-ID reuse, cancellation/rollback and reopening; original archive writes fail if provenance cannot commit. Content manifests and policy release remain mandatory parent work.
+            - Implemented locally with [verification](docs/verification/P1.2.4b2b2a-archive-provenance-2026-10-19.md): 14 Storage additions and native missing/retirement assertions pass with all 647 canonical cases plus native/probe/publishing in 110.14 s, exit 0 (separate CI fuzz skipped locally). CI/merge pending; no content release/deletion is enabled.
 
 ### 7.5 Code: FastCDC (P1.2.1)
 
