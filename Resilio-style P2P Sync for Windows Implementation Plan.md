@@ -1051,6 +1051,20 @@ process ID. Verification must select the exact invocation using process lifetime
 role and run ID; historical events must neither satisfy nor fail its assertions.
 Keep earlier logs for diagnosis and retain the existing timeout/progress checks.
 
+App and service debug runs keep separate GUID directories under their respective
+log roots. Shared startup/periodic/close retention removes only inactive owned run
+directories: cap eligible inactive runs at eight and 100 MB and expire their
+debug files after 24 hours. Active writers retain per-run rotation and are never
+deleted to meet a quota. Unknown/unmarked content and inaccessible/linked/reparse
+objects are preserved with a deferred/pressure diagnostic. Pin roots/ancestors
+and owned run directories, use relative no-reparse handles, verify ownership
+markers and remove exact guarded objects, never recursive pathname deletion.
+Concurrent processes keep distinct journals and coordinate the shared sweep.
+Close the journal before releasing its native active-writer lease; then sweep
+the newly inactive run before releasing the root. Bound contention waits and
+defer inaccessible work. Preserve unmarked legacy directories, since a filename
+alone cannot establish their ownership or inactivity.
+
 - **Logs:** Serilog rolling files, 7 days and 100 MB total (Resilio's defaults). Warnings and errors also go to the Windows Event Log. Keys and file contents are never logged.
 - **Metrics:** `System.Diagnostics.Metrics` counters (bytes up and down, peers, queue depth, hashing rate), streamed to the UI.
 - **Upgrades:** running a newer Inno Setup installer stops the service, replaces the binaries and restarts it. On first start, migrations back up each database and then upgrade its schema. Signed auto-update comes in phase 5, by running the new installer silently.
@@ -1153,11 +1167,48 @@ accepted state. Test actual local named-pipe identity, stream lifecycle and
 runtime snapshots, then render the real WPF controls and retain images for
 inspection. Service installation/configuration, full production engine hosting
 and the rest of the control API remain their required later tasks.
+The initial WPF status view owns one cancellable reconnect loop and marshals
+all model updates onto its dispatcher. Each attempt clears prior successful
+rows and assigns a new client generation; its first valid snapshot binds the
+service epoch, subsequent snapshots must keep that epoch and increase sequence.
+Late results or errors from old attempts cannot change the active view. Stream
+completion is a disconnect, including an empty clean completion. Treat 15 seconds
+without a stream update as failure, cancel and drain the pending read before
+disposing its enumerator. Retry failures
+with a bounded delay and release the channel/stream on cancellation or close.
+Present clock reasons, signed numeric minutes (peer UTC minus local UTC),
+connected/disconnected peer state, truncation and explicit production availability.
+Render and inspect actual WPF controls for skew, recovery and service failure;
+internal test factories must not expose a production arbitrary endpoint switch.
+App diagnostics correlate each connection attempt and record bounded counts,
+RPC status, HRESULT and true native error codes. Inspect at most eight nested
+causes, including gRPC's debug exception, without serializing raw error messages,
+paths, peer IDs, account SIDs or keys. Wrapped pipe-identity failures must retain
+an actionable identity reason in the UI and sanitized diagnostic cause metadata.
 
 The named-pipe configuration follows the installed .NET 10/Grpc 2.84 packages
 and [Microsoft's named-pipe guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess-namedpipes?view=aspnetcore-10.0),
 including separate server-instance and client rights. Kernel PID verification
 also protects the local client from additional-instance impersonation.
+
+The shared client resolves only the installed `PeerSync` service and fixed
+`PeerSync.Control` pipe. Query SCM with configuration/status read rights, require
+Running and a nonzero PID, resolve its configured logon account to a SID, and
+fail closed on missing/stopped/changing configuration. Bound native configuration
+buffers to the documented 8 KiB and validate native strings within that buffer.
+Each pipe connection uses identification-level impersonation, verifies owner
+and kernel server PID before returning the stream to HTTP/2, and has a three-
+second cancellable connection deadline. A service restart creates a fresh client
+generation and SCM lookup. Raw fixture endpoints remain internal test seams.
+
+The status server uses an explicit named-pipe-only host and rechecks caller
+token membership in Administrators or the installer-created `PeerSync Users`
+group for each RPC. Its status runtime registers actual TransportFolder objects
+using their derived folder IDs, without transferring engine ownership. Empty
+status-only hosting reports production availability false. Limit WatchEvents
+to 32 subscriptions, emit at one-second intervals, await writes and release the
+slot on cancellation/failure. Installation, service-account provisioning and
+production folder/network supervision remain P2 work.
 
 ## Central rendezvous server
 
@@ -1329,13 +1380,41 @@ the same update otherwise starts independent push and PR matrices, and
 per-ref concurrency cannot cancel that duplication. Keep every required job,
 the full fuzz duration, publishing and evidence. Combine related local work
 before submitting a new head, and inspect the causal failure before retrying.
-The required Server 2022 and Server 2025 security jobs each run the complete
-native Engine suite. The x64 packaging job runs the remaining unit suites,
+The required Server 2022 security job runs the complete native Engine suite.
+Server 2025 runs every Engine case except the duplicate 1,001-conflict startup
+capacity stress method; the full method remains required on Server 2022 and
+in default local verification. All native case-copy recovery, collision,
+attribute and cancellation tests still run on both Servers. Record this exact
+partition and per-test/long-running timing output. The x64 packaging job runs the remaining unit suites,
 simulation and native probes; avoid a third duplicate Engine execution there.
 Keep all five required jobs, full 1,001-object boundary tests, strict durability
 and 15-minute limits. The canonical local runner includes Engine by default;
 an explicit CI partition switch records its omission in verification evidence.
 Collect all required jobs before treating the partitioned workflow as passing.
+After the immutable build, overlap each Server job's no-build Engine
+run with its independent P0 and cross-account security probes. The latter publish
+only Core/SpikeSupport probe outputs, not active Engine test output. Capture
+stdout/stderr/TRX and both exit results, bound waits, and terminate the owned
+test process on failure/cancellation. Keep all checks, 600-second fuzz and
+15-minute limits. This avoids exhausting the budget on serial setup/probes
+before native Engine tests start; do not blindly rerun timed-out old heads.
+Native probe clients must wait for actual server readiness rather than fixed
+startup sleeps. Bind a fresh readiness file to the server PID and retain strict
+connection/RPC deadlines and identity checks. A deliberately delayed real pipe
+server must reproduce the old race and pass the readiness-based path. Record
+bounded sanitized RPC/native causes so a later failure is diagnosable.
+Keep the complete 100,000-operation watcher stress check in the required x64
+canonical job. Server security jobs omit that duplicate disk stress while
+retaining all other native/cross-account
+probes. Their evidence explicitly records the watcher omission. Running the
+same stress concurrently with flush-heavy Engine fixtures exhausted its own
+deadline on Server 2022; do not increase deadlines or drop workflow coverage.
+After readiness/watcher fixes, Server 2025's Engine still exceeded its eleven
+minute child deadline while every P0/security probe passed. A prior partial
+Server 2025 TRX lacked the capacity method and fifteen later cases in that
+class; the same full 720-case head passed on Server 2022. Do not repeatedly pay
+to run this generic saturation boundary twice; preserve it as required once
+and keep the per-operation/native recovery matrix on both Windows versions.
 P0 diagnostic bundles use self-contained JIT publication for both architectures.
 Do not spend each CI job compiling six temporary probes into ReadyToRun images:
 those bundles exercise protocol/diagnostic behavior, and can use the included

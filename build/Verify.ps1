@@ -30,8 +30,9 @@ try {
             $fuzzError = $fuzz.StandardError.ReadToEndAsync()
         }
         & "$PSScriptRoot/Test-Diagnostics.ps1"
+        & "$PSScriptRoot/Test-ControlPipeReadiness.ps1"
         # Only projects with real tests are counted; future-phase skeletons are excluded.
-        foreach ($name in @('Core','Crypto','Protocol','Net','Engine','Storage','Control.Contracts')) {
+        foreach ($name in @('Core','Crypto','Protocol','Net','Engine','Storage','Control.Contracts','Service','App')) {
             # Required Server 2022 and Server 2025 jobs each run the complete Engine
             # suite. Packaging CI can omit its third copy; local default stays full.
             if ($name -eq 'Engine' -and $SkipEngineTests) { continue }
