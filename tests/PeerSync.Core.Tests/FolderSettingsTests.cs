@@ -19,15 +19,20 @@ public sealed class FolderSettingsTests
         settings.KeepBothCopies.ShouldBeFalse(); settings.OverwriteLocalChanges.ShouldBeFalse();
     }
 
-    [Fact]
-    public void ConfiguredFieldsAndHostEndpointsRoundTrip()
+    [Theory]
+    [InlineData(TransferPriority.Default)]
+    [InlineData(TransferPriority.SmallerFirst)]
+    [InlineData(TransferPriority.LargerFirst)]
+    [InlineData(TransferPriority.OlderFirst)]
+    [InlineData(TransferPriority.NewerFirst)]
+    public void ConfiguredFieldsAndHostEndpointsRoundTrip(TransferPriority priority)
     {
         var settings = new FolderSettings
         {
             RescanIntervalSeconds = 90, UseLan = false, UseTracker = false, UseRelay = false,
             PredefinedHosts = ["example.test:47821", "192.0.2.1:1234", "[2001:db8::1]:47821"],
             RequireApproval = true, KeepBothCopies = true, OverwriteLocalChanges = true,
-            ArchiveDays = 7, ArchiveMaxFileBytes = 0, ArchiveMaxPercentOfVolume = 20, Priority = TransferPriority.High,
+            ArchiveDays = 7, ArchiveMaxFileBytes = 0, ArchiveMaxPercentOfVolume = 20, Priority = priority,
         };
         var copy = FolderSettings.FromJson(settings.ToJson());
         copy.ToJson().ShouldBe(settings.ToJson()); copy.PredefinedHosts.ShouldBe(settings.PredefinedHosts);

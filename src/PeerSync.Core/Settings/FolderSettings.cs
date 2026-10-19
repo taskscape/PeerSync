@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace PeerSync.Core.Settings;
 
-public enum TransferPriority { Low = -1, Default = 0, High = 1 }
+public enum TransferPriority { Default = 0, SmallerFirst = 1, LargerFirst = 2, OlderFirst = 3, NewerFirst = 4 }
 
 public sealed record FolderSettings
 {
