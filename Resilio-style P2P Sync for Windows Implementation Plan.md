@@ -660,6 +660,13 @@ attributes. Native metadata and ACL helpers borrow handles without closing the
 caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
 
 1. Create new directories, shallowest first.
+   Parent integration must also cover receiving nested tombstones on a fresh
+   node where the former parent is absent or is now a file. Such a descendant
+   has no physical object to remove: preserve every existing ancestor and user
+   object, retain the sender-range barrier and durable metadata rules, and
+   converge the signed deletion without attempting to create/traverse a parent
+   file. Test this through connected production folder engines, including
+   retained old child bytes and restart/concurrent parent changes.
 2. Download files in the folder's priority order: default, smaller first, larger first, older first or newer first. Resilio offers the same five.
 3. For each file, assemble it in an exclusively created hidden `GUID.!psp`
    sibling next to the target, from local chunks first, then network chunks.

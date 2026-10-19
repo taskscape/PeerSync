@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | Start parent hierarchy integration with connected-engine regressions for nested tombstones whose former parent is absent or now a file. Preserve ancestors/user objects and all prior versions; retain range barriers and durable metadata completion. Diagnose actual failures before changing guarded path/recovery behavior. | Applying remote changes: hierarchy integration |
 | 2026-10-19 | Begin reproducible real-engine property scenarios on 3–7 NTFS roots over the injected in-memory fabric. Record published payloads, heal and compare visible bytes, and require every version in current/archive/conflict bytes rather than private cache alone. Save replay cases/traces. Initial flat-path smoke is separate from full scenario coverage, 1,000 CI cases and five-day/100k-file gate evidence. | Testing strategy: property harness |
 | 2026-10-19 | Start transport-backed engine simulation: per-connection identity-bound handlers, frozen bounded messages, independently scheduled requests and deterministic directional delay/drop/partition delivery. Drain cancellation before handler disposal. Route connected index/chunk exchanges through IPeerTransport and retain symmetric clock admission; trusted fabric identity does not prove real TLS/folder authentication. | Testing strategy: in-memory transport |
 | 2026-10-19 | Ordered pull scheduling: transactionally cache authenticated work descriptors/fingerprints, persist monotonic sender-range targets and exact-work root-bound backoff, and query bounded priority work without loading every envelope. Guard destructive range rechecks, route downloads from the applier's actual winner, recover before scans and rescan preserved data outside mutation gates. Case/hierarchy coordination and production simulations remain required parent integration. | Applying remote changes |
@@ -1485,6 +1486,9 @@ Our own writes need no special suppression: the puller records the new state in 
     - Local [facade/transaction evidence](docs/verification/P1.5.5b-peer-index-admission-2026-10-19.md): eleven Engine, four Storage and three Core additions pass with all 935 canonical tests/native/probe/publishing in 110.20 seconds, exit 0 (CI fuzz skipped locally). Pure checks under writer/reference gates, rollback, identity binding, immutable pages and private trace/session diagnostics are covered. Production transport wiring, UI and main/CI remain pending.
   - [ ] **P1.5.5c Present clock status in the control UI** (`PeerSync.App/`)
     - Done when: the real control UI presents the peer clock reason and numeric minute difference from service status, and clears it on recovery. Remains required before the parent closes.
+
+  - [ ] **P1.5.3f Hierarchy integration for absent descendants** (`PeerSync.Engine/Sync/`) [WIP @codex 2026-10-19]
+    - Done when: connected engines converge nested tombstones on fresh nodes with absent/file ancestors without creating parents, deleting user objects, stranding needed work or losing prior child bytes. Native/recovery/concurrent-parent regressions pass. General case mapping and stale-temp cleanup remain separate parent requirements.
 
 ### 7.10 Code: resolving concurrent versions (P1.5.1, P1.5.2)
 
