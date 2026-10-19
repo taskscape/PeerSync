@@ -22,7 +22,7 @@ internal sealed class VerifiedControlEndpoint
 
 internal static partial class InstalledControlEndpoint
 {
-    internal const string ServiceName = "PeerSync", PipeName = "PeerSync.Control";
+    internal const string ServiceName = ControlServiceNames.ServiceName, PipeName = ControlServiceNames.PipeName;
     internal static VerifiedControlEndpoint Resolve()
     {
         var identity = ReadRunningService(ServiceName);

@@ -19,6 +19,7 @@ public sealed class TransportFolder : IAsyncDisposable
 {
     private readonly FolderIndex index;
     private readonly byte[] own;
+    private readonly byte[] folderId;
     private readonly TimeProvider clock;
     private readonly string rootPath;
     private readonly Puller puller;
@@ -32,14 +33,17 @@ public sealed class TransportFolder : IAsyncDisposable
         FolderSettings? settings = null, TimeProvider? timeProvider = null, DiagnosticJournal? journal = null)
     {
         ArgumentNullException.ThrowIfNull(ownDevice);
+        ArgumentNullException.ThrowIfNull(keys);
         if (ownDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(ownDevice));
         this.rootPath = rootPath; this.index = index; own = ownDevice.ToArray(); clock = timeProvider ?? TimeProvider.System;
+        folderId = keys.FolderId();
         puller = new(rootPath, index, keys, own, FetchAsync, settings, clock, journal);
     }
 
     public Task<PullPassResult> RunPassAsync(CancellationToken cancellationToken = default)
     { RequireOpen(); return puller.RunPassAsync(cancellationToken); }
     public void RequestScan() { RequireOpen(); puller.RequestScan(); }
+    public byte[] FolderId { get { RequireOpen(); return folderId.ToArray(); } }
 
     /// <summary>Active authenticated-session clocks and bounded recent closed
     /// failures, for service status. Truncation is explicit; this grants no admission.</summary>
