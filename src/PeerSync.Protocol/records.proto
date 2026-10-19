@@ -1,0 +1,26 @@
+syntax = "proto3";
+package peersync.records;
+option csharp_namespace = "PeerSync.Protocol.Records";
+
+message SignedRecord {
+  bytes body = 1;
+  bytes signature = 2;
+  uint64 local_seq = 3;
+}
+
+message FileRecordBody {
+  string path = 1;
+  uint32 type = 2;
+  uint64 size = 3;
+  int64 mtime_ticks = 4;
+  uint32 attributes = 5;
+  bool deleted = 6;
+  int64 changed_ticks = 7;
+  repeated VvEntry vv = 8;
+  uint32 chunk_class = 9;
+  repeated Chunk chunks = 10;
+  bytes file_hash = 11;
+  bytes modified_by = 12;
+}
+message VvEntry { fixed64 device = 1; uint64 counter = 2; }
+message Chunk { uint32 length = 1; bytes hash = 2; }

@@ -161,7 +161,7 @@ Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`.
 | `Ping` / `Pong` | Keep-alive every 30 s, RTT sample |
 | `Close {reason}` | Orderly shutdown with a reason code |
 
-**FileRecord** fields: path (relative, `/`-separated, Unicode NFC), type (file, directory, symlink), size, mtime (100 ns UTC ticks), Windows attributes (read-only, hidden), deleted flag, version vector, ordered chunk list `(length, BLAKE3 hash)`, whole-file BLAKE3 hash, modifying DeviceId, local sequence number. Records are signed with sk over their canonical Protobuf encoding, excluding the local sequence number. Peers forward other devices' records with the original signature. Receivers drop any record whose signature fails.
+**FileRecord** fields: path (relative, `/`-separated, Unicode NFC), type (file, directory, symlink), size, mtime (100 ns UTC ticks), Windows attributes (read-only, hidden), deleted flag, version vector, ordered chunk list `(length, BLAKE3 hash)`, whole-file BLAKE3 hash, modifying DeviceId, local sequence number. The originating peer serializes the body once and signs `"psp1 record" || FolderId || body`. Store and forward those exact body bytes and the original signature; only the local sequence is rewritten. Receivers verify before parsing, then validate the parsed record. Reserializing a parsed Protobuf message is not a valid way to recover the signed bytes, because field order and unknown fields may differ.
 
 ### Block transfer and swarming
 
@@ -212,6 +212,13 @@ One SQLite file per folder at `%ProgramData%\PeerSync\state\folders\<FolderId>.d
 | `meta` | Schema version, folder settings, local sequence counter |
 
 Version vectors use an 8-byte short device id (the first 8 bytes of DeviceId) to keep records small.
+Missing counters are zero; canonical vectors omit zero entries. Incrementing
+an exhausted 64-bit counter fails instead of wrapping. The Core compact
+storage encoding is an unsigned LEB128 entry count followed by ascending
+unsigned device IDs (fixed 8-byte little endian) and unsigned LEB128 counters.
+Readers reject zero counters, duplicate/unsorted IDs, nonminimal/overflowing
+varints, truncation and trailing bytes. Protobuf records use the equivalent
+sorted `VvEntry` list; the compact storage encoding is not a protocol frame.
 
 ### Detecting local changes
 
@@ -252,7 +259,7 @@ Because mtime picks the winner, peers whose clocks differ by more than 10 minute
 ### Archive, ignore rules and special files
 
 - **Archive:** `.psp\archive\` keeps replaced and deleted files for 30 days, up to 1,000 MB per file, plus a total cap (default 10% of the volume). A daily task prunes it. Restore is in the UI from phase 5.
-- **Ignore rules:** `.psp\ignore` uses gitignore-style patterns (`*`, `?`, `**`, `#`, a leading `/` anchors to the root), case-insensitive on Windows. The defaults ignore `Thumbs.db`, `desktop.ini`, `~$*`, `*.tmp`, `$RECYCLE.BIN` and `System Volume Information`. Like Resilio's IgnoreList, it is local to each device.
+- **Ignore rules:** `.psp\ignore` uses gitignore-style patterns (`*`, `?`, `**`, `#`, a leading `/` anchors to the root), case-insensitive on Windows. A slash inside a pattern also anchors it; a trailing slash matches directories and their descendants. `**` as a whole component spans zero or more directories; trailing `/**` matches descendants, not the parent itself. Rules may use Windows backslashes as separators. `!` negates an earlier match, but children cannot be re-included while their parent remains excluded. Escape an initial `#` or `!` with a backslash for a literal name. Wildcards match Unicode scalar values. This is the stated glob subset, without bracket character classes. The defaults ignore `Thumbs.db`, `desktop.ini`, `~$*`, `*.tmp`, `$RECYCLE.BIN` and `System Volume Information`. Built-in path rules always exclude root `.psp`, temp suffixes and invalid paths. Like Resilio's IgnoreList, rules are local to each device.
 - **Read-only folders:** local edits are never sent. An "Overwrite local changes" option restores the swarm's version, as Resilio's `overwrite_changes` does.
 - **`.psp` folder:** hidden and system attributes, holding `id`, `ignore` and `archive\`. It is never synced. Temp files (`*.!psp`) are hidden and skipped by the scanner.
 - **Not synced in v1:** NTFS ACLs and alternate data streams (Resilio syncs streams through its StreamsList), symlinks and junctions (recorded, not followed), and files that are open with exclusive locks.
@@ -477,6 +484,13 @@ One .NET 10 solution with eleven projects. References only point down the stack,
 | `PeerSync.Cli` | Console app | `psp.exe status, add, join, peers, dump-index`, probe for scripting and debugging |
 
 Outside `src\`: `installer\` (Inno Setup script PeerSync.iss), and `tests\` with unit, multi-node integration, fuzz (`SharpFuzz`) and benchmark (`BenchmarkDotNet`) projects.
+
+Core's signed-record envelope owns immutable copies of body/signature bytes.
+Protocol's signing factory references Crypto and Core and handles generated
+Protobuf records; Core has no Crypto/Protocol dependency. Path rules perform
+pure lexical validation and root containment. Filesystem callers must also
+reject reparse-point traversal when applying records; lexical containment
+alone cannot stop a junction from leaving the root.
 
 ### Packages
 

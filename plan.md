@@ -72,6 +72,9 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-19 | P1.1.5: specify the ignore glob subset and ancestry/negation behavior, accept Windows pattern separators, and match Unicode scalars without regex backtracking. Local rule text is bounded at 64 KiB, 1,024 rules and 4,096 characters per line. Invalid paths and internal metadata remain excluded. | Sync engine design: Archive, ignore rules and special files |
+| 2026-10-19 | P1.1.3/P1.1.4: Core owns the immutable signed envelope and pure path rules; the factory lives in Protocol (references Core/Crypto) to avoid a Core-Crypto cycle. Sign and forward exact body bytes with folder/domain binding; verify before parsing. Path containment is lexical; filesystem layers must also reject reparse traversal. | Protocol specification: FileRecord; solution structure |
+| 2026-10-19 | P1.1.2: canonical version vectors omit zero counters and reject increment overflow. Compact storage is count + sorted fixed64 little-endian device IDs + unsigned LEB128 counters, rejecting noncanonical and malformed encodings. Protobuf remains the record wire representation. | Sync engine design: metadata and version vectors |
 | 2026-10-19 | P1.1.1: use CRC-10/ATM for the two-character key checksum, preserving lengths and normalization, so every single Base32-symbol typo is detected. The draft's ten SHA bits admitted a reproduced single-symbol collision. HKDF/signing/security domains are unchanged; independent OpenSSL vectors and exhaustive typo tests cover the correction before any folder keys ship. | Protocol: Keys and identifiers |
 | 2026-10-19 | User approved deferring only P0.2.1's physical LAN measurement to Gate P2 and P0.2.2's native NAT matrix/final decision to Gate P4. Keep both tasks unchecked, preserve all acceptance requirements, and permit Gate P0 after its other checks pass. Use direct QUIC/TCP plus relay after 5 s as the implementation baseline; no coordinated-punch success is claimed. | Phased roadmap; NAT traversal |
 | 2026-10-18 | Shared diagnostic metadata/journaling lives in Core without upstream project dependencies. Domain models remain free of filesystem I/O; bounded log-file I/O is an explicit exception for the new deployment diagnostics requirement. Each concurrent process uses its own journal directory. | Solution structure and tech stack |
@@ -685,14 +688,14 @@ Goal: the whole sync engine, proven with simulated nodes in one process. No real
   - Done when: RW, RO and F keys round-trip through text. The checksum rejects any single-character typo. RO and F keys derived from an RW key match fixed test vectors. Keys are never printed by `ToString()`.
   - Ref: Protocol specification, Keys and identifiers.
   - Evidence: [key verification](docs/verification/P1.1.1-folder-keys-2026-10-19.md), [green five-job CI](https://github.com/taskscape/PeerSync/actions/runs/39181190139). Merged tree equals the tested head.
-- [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`)
+- [ ] **P1.1.2 Version vector** (`PeerSync.Core/Sync/VersionVector.cs`) [WIP @Codex 2026-10-19]
   - Done when: compare, merge and increment are covered by property tests (compare is antisymmetric, merge is commutative and idempotent). Compact binary serialization is sorted by device.
-- [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`)
+- [ ] **P1.1.3 FileRecord and signed envelope** (`PeerSync.Protocol/records.proto`, `PeerSync.Core/Sync/SignedRecord.cs`) [WIP @Codex 2026-10-19]
   - Done when: records are signed over the exact body bytes (see 7.3). Tampering with any byte fails verification. A forwarded record keeps its original signature.
-- [ ] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`)
+- [ ] **P1.1.4 Path rules** (`PeerSync.Core/Paths/PathRules.cs`) [WIP @Codex 2026-10-19]
   - Done when: all hostile cases in 7.4 are rejected, valid Unicode names pass, and a fuzz target exists.
   - Ref: Security model, hostile paths.
-- [ ] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`)
+- [ ] **P1.1.5 Ignore matcher** (`PeerSync.Core/Ignore/IgnoreMatcher.cs`) [WIP @Codex 2026-10-19]
   - Done when: it supports gitignore-style `*`, `?`, `**`, `#` comments, a leading `/` to anchor at the root, a trailing `/` for directories only, and case-insensitive matching. Default rules are included. Resilio's IgnoreList examples pass as tests.
 
 ### 7.1 Code: key chain (P1.1.1)
@@ -761,6 +764,10 @@ Key text: prefix letter (`A` RW, `B` RO, `F` encrypted), then RFC 4648 Base32 wi
 
 ### 7.2 Code: version vector (P1.1.2)
 
+Superseded by `src/PeerSync.Core/Sync/VersionVector.cs`, which additionally
+normalizes zero entries, checks increment overflow, and implements strict,
+canonical compact serialization (count + sorted fixed64-LE/ULEB128 entries).
+
 ```csharp
 // src/PeerSync.Core/Sync/VersionVector.cs
 public enum VvOrder { Equal, Dominates, DominatedBy, Concurrent }
@@ -800,6 +807,10 @@ public static class VersionVector
 ```
 
 ### 7.3 Code: signed record envelope (P1.1.3)
+
+Superseded by `src/PeerSync.Core/Sync/SignedRecord.cs` and
+`src/PeerSync.Protocol/Signing/SignedRecordFactory.cs`. The factory lives in
+Protocol so Core stays independent of Crypto and generated Protobuf types.
 
 **Tricky:** never verify or forward a record by re-serializing the parsed message. Protobuf doesn't guarantee byte-identical output (unknown fields, map ordering, library versions). Sign the body bytes once, then store and forward those exact bytes.
 
@@ -855,6 +866,10 @@ static byte[] SigningInput(ReadOnlySpan<byte> folderId, ReadOnlySpan<byte> body)
 ```
 
 ### 7.4 Code: path rules (P1.1.4)
+
+Superseded by `src/PeerSync.Core/Paths/PathRules.cs`, which validates before
+mapping a record to an absolute folder root and rejects malformed UTF-16.
+This is a lexical guard; filesystem code also checks reparse points.
 
 ```csharp
 // src/PeerSync.Core/Paths/PathRules.cs

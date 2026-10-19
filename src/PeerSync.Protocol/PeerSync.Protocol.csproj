@@ -1,1 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
+    <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
+    <Protobuf Include="records.proto" GrpcServices="None" />
+  </ItemGroup>
+</Project>
