@@ -12,9 +12,6 @@ public sealed record ScanOutcome(Scanner Scanner, ScanResult? Result, string? Er
 /// <summary>The caller owns scanners, keys and indexes. Cancel and await RunAsync before disposing them.</summary>
 public sealed class RescanScheduler
 {
-    // Process lifetime. This conservative budget also covers shared physical disks,
-    // partitions and volumes whose physical device mapping is unavailable.
-    private static readonly SemaphoreSlim ScanBudget = new(1);
     private readonly ScheduledFolder[] folders;
     private readonly TimeProvider clock;
     private readonly DiagnosticJournal? journal;
@@ -75,7 +72,7 @@ public sealed class RescanScheduler
             {
                 ScanResult? result = null;
                 string? errorCode = null;
-                await ScanBudget.WaitAsync(stopped.Token).ConfigureAwait(false);
+                var scanLease = await FolderScanBudget.AcquireAsync(stopped.Token).ConfigureAwait(false);
                 using var activity = new Activity("PeerSync.ScheduledScan").SetIdFormat(ActivityIdFormat.W3C).Start();
                 try
                 {
@@ -101,7 +98,7 @@ public sealed class RescanScheduler
                             _ => null,
                         } });
                 }
-                finally { ScanBudget.Release(); }
+                finally { scanLease.Dispose(); }
                 if (errorCode is null) attempt = 0;
                 int retry = errorCode is null ? 0 : BackoffSeconds(attempt);
                 if (errorCode is not null) attempt = Math.Min(attempt + 1, 6);

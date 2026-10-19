@@ -215,6 +215,39 @@ public sealed class PullWorkTests : IDisposable
         upgraded.ReadDuePullWork(Root, Now).Single().PathKey.ShouldBe("LEGACY");
     }
 
+    [Fact]
+    public async Task ScheduledSelectionFiltersOneThousandWaitingDeletesBeforeLimitAndComputesExactWake()
+    {
+        await using var index=await PrepareAsync(); byte[] own=Hash(9), ready=Hash(3);
+        await index.Needed.UpsertAsync(Enumerable.Range(0,1000).Select(i=>Row($"blocked{i:D4}",2)).ToArray(),Token);
+        await index.Needed.UpsertAsync([Row("z-ready",2) with { SourceDevice=ready },Row("z-local",2) with { SourceDevice=own }],Token);
+        await index.AnnounceRemoteIndexRangeAsync(Peer,2,Token); await index.AnnounceRemoteIndexRangeAsync(ready,1,Token);
+        await index.ApplyRemoteIndexAsync(ready,0,1,[],_=>null,Token);
+        index.ReadScheduledPullWork(Root,own,Now,limit:1).Single().PathKey.ShouldBe("Z-LOCAL");
+        index.ReadScheduledPullWork(Root,own,Now).Select(r=>r.PathKey).ShouldBe(["Z-LOCAL","Z-READY"]);
+        index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBe(Now);
+        await index.RecordPullFailureAsync("z-local",Root,Hash(1),Now,Token); await index.RecordPullFailureAsync("z-ready",Root,Hash(1),Now,Token);
+        index.ReadScheduledPullWork(Root,own,Now).ShouldBeEmpty(); index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBe(Now+10*TimeSpan.TicksPerSecond);
+        index.ReadNextScheduledPullTicks(Root,own,Now-1).ShouldBe(Now-1);
+        await index.ApplyRemoteIndexAsync(Peer,0,2,[],_=>null,Token);
+        index.ReadScheduledPullWork(Root,own,Now).Count.ShouldBe(1000); index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task PendingOrUndeclaredSenderHasNoScheduledWakeUntilCompleteAndInvalidRootsAreRejected()
+    {
+        await using var index=await PrepareAsync(); byte[] own=Hash(9);
+        await index.Needed.UpsertAsync([Row("deleted",3)],Token);
+        index.ReadScheduledPullWork(Root,own,Now).ShouldBeEmpty(); index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBeNull();
+        await index.AnnounceRemoteIndexRangeAsync(Peer,1,Token);
+        index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBeNull();
+        byte[] foreign=Root.ToArray(); foreign[0]=1;
+        Should.Throw<InvalidOperationException>(()=>index.ReadNextScheduledPullTicks(foreign,own,Now));
+        Should.Throw<ArgumentException>(()=>index.ReadScheduledPullWork(Root,new byte[1],Now));
+        await index.ApplyRemoteIndexAsync(Peer,0,1,[],_=>null,Token);
+        index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBe(Now);
+    }
+
     private async Task<FolderIndex> PrepareAsync()
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

@@ -46,19 +46,45 @@ public sealed partial class FolderIndex
     /// <summary>Bounded scheduling metadata only. Caller revalidates work and
     /// range/target state inside the applier before performing native mutation.</summary>
     public IReadOnlyList<NeededRow> ReadDuePullWork(byte[] rootId, long nowTicks, TransferPriority priority = TransferPriority.Default, int limit = 1000)
+        => ReadDuePullWorkCore(rootId, nowTicks, priority, limit, null);
+
+    /// <summary>Filter incomplete cached deletion stages before applying the batch limit.
+    /// The actual applier must still recheck range and signed work under its gates.</summary>
+    public IReadOnlyList<NeededRow> ReadScheduledPullWork(byte[] rootId, byte[] localDevice, long nowTicks,
+        TransferPriority priority = TransferPriority.Default, int limit = 1000)
+    {
+        FolderMaps.RequireBytes(localDevice, 32); return ReadDuePullWorkCore(rootId, nowTicks, priority, limit, localDevice.ToArray());
+    }
+
+    private const string PullRangeFilter = " AND ($own IS NULL OR n.work_stage<2 OR n.source_device=$own OR EXISTS("
+        + "SELECT 1 FROM remote_index_ranges q JOIN devices d ON d.device_id=q.device_id WHERE q.device_id=n.source_device AND d.last_seq_received>=q.target_sequence)) ";
+
+    private System.Collections.ObjectModel.ReadOnlyCollection<NeededRow> ReadDuePullWorkCore(byte[] rootId, long nowTicks, TransferPriority priority, int limit, byte[]? own)
     {
         byte[] root = FreezeSweep(rootId, nowTicks, 1, limit); if (!Enum.IsDefined(priority)) throw new ArgumentOutOfRangeException(nameof(priority));
         using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true); RequireBlockReferenceRoot(connection, transaction, root);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT n.path_key,n.source_device,n.priority,n.work_stage,n.work_size,n.work_mtime,n.work_hash FROM needed n "
             + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root "
-            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) "
+            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) " + PullRangeFilter
             + "ORDER BY n.work_stage,CASE WHEN n.work_stage=0 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END,"
             + "CASE WHEN n.work_stage=3 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END DESC,n.priority DESC,"
             + "CASE WHEN n.work_stage=1 AND $priority=1 THEN n.work_size END,CASE WHEN n.work_stage=1 AND $priority=2 THEN n.work_size END DESC,"
             + "CASE WHEN n.work_stage=1 AND $priority=3 THEN n.work_mtime END,CASE WHEN n.work_stage=1 AND $priority=4 THEN n.work_mtime END DESC,n.path_key LIMIT $limit;";
         command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$priority", (int)priority); command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$own", (object?)own ?? DBNull.Value);
         var rows = new List<NeededRow>(limit); using var reader = command.ExecuteReader(); while (reader.Read()) rows.Add(FolderMaps.ReadNeeded(reader)); return rows.AsReadOnly();
+    }
+
+    public long? ReadNextScheduledPullTicks(byte[] rootId, byte[] localDevice, long nowTicks)
+    {
+        byte[] root = FreezeSweep(rootId, nowTicks, 1, 1000); FolderMaps.RequireBytes(localDevice, 32);
+        using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true); RequireBlockReferenceRoot(connection, transaction, root);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT MIN(CASE WHEN r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now THEN $now ELSE r.next_ticks END) FROM needed n "
+            + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root WHERE n.work_stage IS NOT NULL " + PullRangeFilter;
+        command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$own", localDevice);
+        return command.ExecuteScalar() is long ticks ? ticks : null;
     }
 
     public PullRetry? ReadPullRetry(string path)

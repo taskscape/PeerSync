@@ -32,4 +32,9 @@ All submitted/prospective/actual trees match:
 P0.1.2c meets its main/green-PR-CI acceptance. P1.2.4b2b2c and its parent tasks
 remain WIP pending production simulation invariants; the production service,
 P1 gate and externally deferred physical LAN/native NAT checks are not closed.
-The automatic main workflow is separate follow-up evidence.
+The automatic main workflow is separate follow-up evidence. Run 39250207275
+passes all 834 unit tests, both native Server jobs, ARM64 and fuzz, then fails
+x64's QUIC progress smoke. [The causal timing diagnosis and repair](P0.1.2d-initial-quic-progress-2026-10-19.md)
+are included with the pending coordinator batch. No unstarted billing failure
+or test failure is inferred from that diagnostic regression; main is currently
+red pending its repair.
