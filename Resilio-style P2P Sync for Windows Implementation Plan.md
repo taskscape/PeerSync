@@ -336,6 +336,14 @@ archive/conflict moves use handle-based no-overwrite renames into a pinned
 destination directory. Private `.psp` paths and generated temp suffixes have
 separate internal validation, never a public remote-path escape hatch.
 
+The atomic existing-target replacement primitive must retain its verified
+target guard across installation. Validate native FileRenameInformationEx
+replacement/POSIX semantics with that guard held before using it in the
+coordinator. Preserve the old object through a no-overwrite archive link/copy
+before the atomic replacement. Ordinary no-overwrite moves remain appropriate
+for new targets. Unsupported filesystem behavior must fail without reducing
+the atomic-replacement or no-lost-version requirements.
+
 Replacement preparation reads the original file's DACL/inheritance protection
 and creation time through its held handle and applies them to the sibling
 temporary file before moving the original. New files inherit their parent.
