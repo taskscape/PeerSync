@@ -31,23 +31,29 @@ public sealed class ClockGuard
         lock (gate)
         {
             sample = new(hello.UtcTicks, clock.GetTimestamp());
-            return StatusAndLog();
         }
+        return StatusAndLog();
     }
 
-    public PeerClockStatus GetStatus() { lock (gate) return StatusAndLog(); }
-    public void Reset() { lock (gate) { sample = null; _ = StatusAndLog(); } }
+    public PeerClockStatus GetStatus() => StatusAndLog();
+    public void Reset() { lock (gate) sample = null; _ = StatusAndLog(); }
     public void RequireIndexExchangeAllowed()
     {
         var status = GetStatus(); if (!status.IndexExchangeAllowed) throw new PeerClockException(status);
     }
 
+    internal void RequireIndexExchangeAllowedWithoutDiagnostics()
+    {
+        PeerClockStatus status; lock (gate) status = Evaluate();
+        if (!status.IndexExchangeAllowed) throw new PeerClockException(status);
+    }
+
     private PeerClockStatus StatusAndLog()
     {
-        var status = Evaluate();
-        if (logged != status.State)
+        PeerClockStatus status; bool changed;
+        lock (gate) { status = Evaluate(); changed = logged != status.State; logged = status.State; }
+        if (changed)
         {
-            logged = status.State;
             journal?.TryWrite(new(status.IndexExchangeAllowed ? "clock.accepted" : "clock.blocked", "peer-clock")
             {
                 SessionId = session, Level = status.IndexExchangeAllowed ? DiagnosticLevel.Information : DiagnosticLevel.Warning,

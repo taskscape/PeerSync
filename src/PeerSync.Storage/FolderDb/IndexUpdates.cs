@@ -14,6 +14,20 @@ public sealed partial class FolderIndex
     public Task<RemoteIndexResult> ApplyRemoteIndexAsync(byte[] deviceId, long afterSequence, long lastSequence,
         IReadOnlyList<RemoteFileRow> records, Func<FolderPathSnapshot, NeededRow?> resolver,
         CancellationToken cancellationToken = default)
+        => ApplyRemoteIndexCoreAsync(deviceId, afterSequence, lastSequence, records, resolver, null, cancellationToken);
+
+    /// <summary>Admission runs synchronously at writer entry and before commit;
+    /// it must be bounded, perform no I/O and never reenter this database.</summary>
+    public Task<RemoteIndexResult> ApplyRemoteIndexWithAdmissionAsync(byte[] deviceId, long afterSequence, long lastSequence,
+        IReadOnlyList<RemoteFileRow> records, Func<FolderPathSnapshot, NeededRow?> resolver, Action admission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        return ApplyRemoteIndexCoreAsync(deviceId, afterSequence, lastSequence, records, resolver, admission, cancellationToken);
+    }
+
+    private Task<RemoteIndexResult> ApplyRemoteIndexCoreAsync(byte[] deviceId, long afterSequence, long lastSequence,
+        IReadOnlyList<RemoteFileRow> records, Func<FolderPathSnapshot, NeededRow?> resolver, Action? admission, CancellationToken cancellationToken)
     {
         FolderMaps.RequireBytes(deviceId, 32);
         ArgumentNullException.ThrowIfNull(records); ArgumentNullException.ThrowIfNull(resolver);
@@ -35,6 +49,7 @@ public sealed partial class FolderIndex
         }
         return database.WriteAsync((connection, transaction) =>
         {
+            admission?.Invoke();
             using var cursor = connection.CreateCommand(); cursor.Transaction = transaction;
             cursor.CommandText = "SELECT last_seq_received FROM devices WHERE device_id=$device;";
             cursor.Parameters.AddWithValue("$device", device);
@@ -58,6 +73,7 @@ public sealed partial class FolderIndex
             foreach (string path in paths) { cancellationToken.ThrowIfCancellationRequested(); needed.Update(path); }
             cursor.CommandText = "INSERT INTO devices(device_id,last_seq_received) VALUES($device,$sequence) ON CONFLICT(device_id) DO UPDATE SET last_seq_received=excluded.last_seq_received;";
             cursor.Parameters.AddWithValue("$sequence", lastSequence); cursor.ExecuteNonQuery();
+            admission?.Invoke();
             return new RemoteIndexResult(true, lastSequence, paths.Count);
         }, cancellationToken);
     }

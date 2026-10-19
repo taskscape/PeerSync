@@ -63,6 +63,16 @@ public sealed class Puller : IDisposable
     }
     public void RequestScan() { Volatile.Write(ref scanRequested, 1); NotifyWorkAvailable(); }
 
+    /// <summary>The caller must authenticate both the TLS device identity and
+    /// folder membership before exposing this facade to a remote peer.</summary>
+    public PeerIndexSession OpenPeerIndexSession(byte[] authenticatedDevice)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this); ArgumentNullException.ThrowIfNull(authenticatedDevice);
+        if (authenticatedDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(authenticatedDevice));
+        Guid session = Guid.NewGuid();
+        return new(this, index, needed, authenticatedDevice, new ClockGuard(clock, journal, session), journal, session);
+    }
+
     public async Task<RemoteIndexResult> ReceiveIndexAsync(byte[] source, long afterSequence, long lastSequence,
         IReadOnlyList<Envelope> records, CancellationToken cancellationToken = default)
     {
