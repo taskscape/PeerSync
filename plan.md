@@ -1468,6 +1468,8 @@ Our own writes need no special suppression: the puller records the new state in 
     - [x] **P1.5.3e4 Scheduled recovery and incremental scan hardening** (`PeerSync.Engine/Sync/`, `PeerSync.Engine/Scanning/`) (#33)
       - Done when: prepared scheduled file/directory deletion recovery retains its barrier across restart and new targets, direct/legacy recovery remains compatible, unsupported live native timestamps stay per-item, invalid wire names and cache-only edits do not strand work, and partial scan/recompute failures force repair. Native regressions, canonical checks and required CI/main merge evidence pass.
       - Local [review repair evidence](docs/verification/P1.5.3e4-recovery-scan-hardening-2026-10-19.md): all five confirmed review findings have native regressions; 15 additions pass with all 897 canonical tests/native/probe/publishing in 109.41 seconds, exit 0 (CI fuzz skipped locally). Final-head green CI, resolved review threads and the exact main tree are audited above.
+  - [ ] **P1.5.3f Hierarchy integration for absent descendants** (`PeerSync.Engine/Sync/`) [WIP @codex 2026-10-19]
+    - Done when: connected engines converge nested tombstones on fresh nodes with absent/file ancestors without creating parents, deleting user objects, stranding needed work or losing prior child bytes. Native/recovery/concurrent-parent regressions pass. General case mapping and stale-temp cleanup remain separate parent requirements.
 - [x] **P1.5.4 Archive manager** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23, #24)
   - Done when: archived files go to `.psp\archive\<relative dir>\<name>~20261018-142233.<ext>`, with a `-2` suffix on collisions. Daily pruning applies the age limit (30 days) and the volume cap (10%). Restores go through the normal "local change" path.
   - [x] **P1.5.4a Archive placement and retention** (`PeerSync.Engine/Archive/ArchiveManager.cs`) (#23)
@@ -1486,9 +1488,6 @@ Our own writes need no special suppression: the puller records the new state in 
     - Local [facade/transaction evidence](docs/verification/P1.5.5b-peer-index-admission-2026-10-19.md): eleven Engine, four Storage and three Core additions pass with all 935 canonical tests/native/probe/publishing in 110.20 seconds, exit 0 (CI fuzz skipped locally). Pure checks under writer/reference gates, rollback, identity binding, immutable pages and private trace/session diagnostics are covered. Production transport wiring, UI and main/CI remain pending.
   - [ ] **P1.5.5c Present clock status in the control UI** (`PeerSync.App/`)
     - Done when: the real control UI presents the peer clock reason and numeric minute difference from service status, and clears it on recovery. Remains required before the parent closes.
-
-  - [ ] **P1.5.3f Hierarchy integration for absent descendants** (`PeerSync.Engine/Sync/`) [WIP @codex 2026-10-19]
-    - Done when: connected engines converge nested tombstones on fresh nodes with absent/file ancestors without creating parents, deleting user objects, stranding needed work or losing prior child bytes. Native/recovery/concurrent-parent regressions pass. General case mapping and stale-temp cleanup remain separate parent requirements.
 
 ### 7.10 Code: resolving concurrent versions (P1.5.1, P1.5.2)
 

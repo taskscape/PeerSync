@@ -163,6 +163,25 @@ public sealed class TransportFolderTests : IDisposable
         File.ReadAllText(Path.Combine(a.Root, "file")).ShouldBe("existing peer stays connected");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FreshNodeConvergesNestedTombstoneWhenAncestorIsMissingOrAFile(bool fileAncestor)
+    {
+        var time = new NodeClock(); await using var a = await NodeAsync(1, time); await using var b = await NodeAsync(2, new NodeClock());
+        Directory.CreateDirectory(Path.Combine(b.Root, "parent")); File.WriteAllText(Path.Combine(b.Root, "parent", "child"), "old child bytes"); await Scan(b);
+        Directory.Delete(Path.Combine(b.Root, "parent"), true);
+        if (fileAncestor) File.WriteAllText(Path.Combine(b.Root, "parent"), "new ancestor file");
+        await Scan(b);
+        var network = new InMemoryNetwork(); var ea = network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        await using var peer = await a.Engine.ConnectAsync(ea.Connect(b.Id), Token); await peer.SynchronizeAsync(cancellationToken: Token);
+        for (int pass = 0; pass < 3; pass++) { time.Advance(TimeSpan.FromSeconds(601)); await a.Engine.RunPassAsync(Token); }
+        a.Index.Needed.Count().ShouldBe(0); a.Index.LocalFiles.Find("parent/child")!.Deleted.ShouldBeTrue();
+        File.Exists(Path.Combine(a.Root, "parent")).ShouldBe(fileAncestor); Directory.Exists(Path.Combine(a.Root, "parent")).ShouldBeFalse();
+        if (fileAncestor) File.ReadAllText(Path.Combine(a.Root, "parent")).ShouldBe("new ancestor file");
+        b.Index.Archive.ReadAll().Any(row => File.ReadAllText(Path.Combine(b.Root, row.ArchivePath.Replace('/', Path.DirectorySeparatorChar))) == "old child bytes").ShouldBeTrue();
+    }
+
     private async Task<Node> NodeAsync(ulong identity, TimeProvider? time = null)
     {
         string directory = Path.Combine(fixture, identity.ToString(System.Globalization.CultureInfo.InvariantCulture)); string root = Path.Combine(directory, "tree"); Directory.CreateDirectory(root);
