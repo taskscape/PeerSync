@@ -17,7 +17,7 @@ namespace PeerSync.Engine.Sync;
 
 public enum FileApplyOutcome { Applied, Unchanged, Deferred, Blocked }
 
-/// <summary>Serializes regular-file application/recovery with scanning. The host
+/// <summary>Serializes file application and file/directory transitions with scanning. The host
 /// must recover before its first scan; errors retain durable recovery state.
 /// No path, content, hash or envelope is written to diagnostic output.</summary>
 public sealed partial class FileApplier
@@ -61,21 +61,23 @@ public sealed partial class FileApplier
         var decision = needed.Decide(new(key, known, index.RemotesForPath(path).ToArray()));
         if (decision.BlockedReason is not null) return FileApplyOutcome.Blocked;
         if (!decision.RequiresApply) return FileApplyOutcome.Unchanged;
-        // Directory/type changes are coordinated by the puller; never open a
-        // directory as a file or remove unknown children here.
         var winner = decision.Winner!;
-        if (winner.Type != 0 || known is { Deleted: false, Type: not 0 }) return FileApplyOutcome.Deferred;
+        // Directory-only operations use DirectoryApplier. A type transition
+        // preserves the exact old node without traversing any of its children.
+        if (winner.Type > 1 || winner.Type == 1 && known is not { Deleted: false, Type: 0 }) return FileApplyOutcome.Deferred;
         var desired = VersionView.Open(decision.DesiredRecord!, keys, winner.SourceDevice.ToArray());
         if (!desired.Deleted) FileMetadata.ValidateMtime(desired.MtimeTicks);
         using var parent = tree.Directory(ApplyState.Parent(desired.Path));
         string temporary = ""; byte[] temporaryId = [];
-        using var tempHandle = decision.RequiresContent ? OpenTemporary(tree, parent, desired.Path, out temporary, out temporaryId) : null;
+        bool replaceKind = known is { Deleted: false } && known.Type != desired.Type;
+        using var tempHandle = !desired.Deleted && (decision.RequiresContent || replaceKind)
+            ? OpenTemporary(tree, parent, desired.Path, out temporary, out temporaryId, desired.Type == 1) : null;
         var state = new ApplyState { Root = tree.Identity.ToArray(), Version = desired, Vector = decision.Vector,
             Temporary = temporary, TemporaryId = temporaryId };
         var intent = new ApplyIntent(session, path, known?.LocalSequence, state.Encode());
         await index.ReserveApplyAsync(intent, cancellationToken).ConfigureAwait(false);
         Signal("staging", intent.Id);
-        if (tempHandle is not null)
+        if (tempHandle is not null && desired.Type == 0)
         {
             using var borrowed = new SafeFileHandle(tempHandle.DangerousGetHandle(), ownsHandle: false);
             using var stream = new FileStream(borrowed, FileAccess.ReadWrite, 0, isAsync: false);
@@ -103,7 +105,8 @@ public sealed partial class FileApplier
         if (tempHandle is not null)
         {
             if (original is null) FileMetadata.PrepareNewFile(parent, tempHandle);
-            FileMetadata.SetMtime(tempHandle, desired.MtimeTicks); RandomAccess.FlushToDisk(tempHandle);
+            FileMetadata.SetMtime(tempHandle, desired.MtimeTicks);
+            if (desired.Type == 0) RandomAccess.FlushToDisk(tempHandle);
             state.TemporaryAttributes = (uint)FileSnapshot.Read(tempHandle).Attributes;
         }
         state.Prepared = true;
@@ -240,6 +243,16 @@ public sealed partial class FileApplier
                 parent.MoveHere(original, ApplyState.Name(state.Path));
                 Signal("case-renamed", intent.Id);
             }
+            if (state.Deleted)
+            {
+                using var parent = tree.Directory(ApplyState.Parent(state.Path));
+                using var concurrent = TryOpen(parent, ApplyState.Name(state.Path));
+                if (concurrent is not null)
+                {
+                    await DeferAsync(tree, state, intent, original ?? retained?.File, token).ConfigureAwait(false);
+                    return FileApplyOutcome.Deferred;
+                }
+            }
             await CompleteAsync(tree, state, intent, temporary ?? (state.Deleted ? null : original), original ?? retained?.File, token).ConfigureAwait(false);
             return FileApplyOutcome.Applied;
         }
@@ -264,18 +277,20 @@ public sealed partial class FileApplier
         {
             // Restoration is a local filesystem edit. Withhold stale metadata;
             // the normal scanner signs once (RW) or leaves it unpublished (RO).
-            await index.DeferApplyAsync(intent, archives, token).ConfigureAwait(false);
+            await CommitDeferredAsync(state, intent, archives, token).ConfigureAwait(false);
             Signal("committed", intent.Id); return;
         }
         var version = state.Version!; var body = version.ExportBody();
         FileSnapshot? actual = installed is null ? null : FileSnapshot.Read(installed);
         var chunks = new List<LocalChunk>(); long offset = 0;
         foreach (var chunk in body.Chunks) { chunks.Add(new(offset, checked((int)chunk.Length), chunk.Hash.ToByteArray())); offset += chunk.Length; }
-        var row = new LocalFileRow(version.Path, 0, version.Size, version.MtimeTicks,
+        var row = new LocalFileRow(version.Path, version.Type, version.Size, version.MtimeTicks,
             actual is null ? body.Attributes : (uint)actual.Value.Attributes, version.Deleted, version.ChangedTicks,
-            version.Deleted ? null : version.FileHash.ToArray(), state.Vector, version.Record,
+            version.Deleted || version.Type == 1 ? null : version.FileHash.ToArray(), state.Vector, version.Record,
             actual is null ? null : Identity(actual.Value)) { IndexedChunks = chunks };
-        await index.CommitApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);
+        if (state.OriginalIsDirectory && state.Retained.Length != 0)
+            await index.CommitMovedDirectoryApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);
+        else await index.CommitApplyAsync(intent, row, archives, needed.ToNeededRow, token).ConfigureAwait(false);
         Signal("committed", intent.Id);
     }
 
@@ -284,9 +299,13 @@ public sealed partial class FileApplier
         using var retained = Retain(tree, state, heldOriginal);
         var archives = ReadArchives(state, retained?.File, token);
         await ParkAsync(state, token).ConfigureAwait(false);
-        await index.DeferApplyAsync(intent, archives, token).ConfigureAwait(false);
+        await CommitDeferredAsync(state, intent, archives, token).ConfigureAwait(false);
         Signal("concurrent-target", intent.Id);
     }
+
+    private Task<bool> CommitDeferredAsync(ApplyState state, ApplyIntent intent, ArchiveRow[] archives, CancellationToken token) =>
+        state.OriginalIsDirectory && state.Retained.Length != 0
+            ? index.DeferMovedDirectoryApplyAsync(intent, archives, token) : index.DeferApplyAsync(intent, archives, token);
 
     private static ArchiveRow[] ReadArchives(ApplyState state, SafeFileHandle? file, CancellationToken token)
     {
@@ -309,7 +328,7 @@ public sealed partial class FileApplier
         internal RetainedLease(SafeFileTree tree, string path, SafeFileHandle? held)
         {
             parent = tree.Directory(ApplyState.Parent(path), privatePath: path.StartsWith(".psp/", StringComparison.Ordinal));
-            try { owned = held is null ? parent.OpenFile(ApplyState.Name(path), mutation: true) : null; File = held ?? owned!; }
+            try { owned = held is null ? TryOpen(parent, ApplyState.Name(path)) ?? throw new IOException("Retained node is missing.") : null; File = held ?? owned!; }
             catch { parent.Dispose(); throw; }
         }
         public void Dispose() { owned?.Dispose(); parent.Dispose(); }
@@ -321,9 +340,9 @@ public sealed partial class FileApplier
             throw new IOException("Scan and bind the sync root before application.");
     }
 
-    private SafeFileHandle OpenTemporary(SafeFileTree tree, DirectoryLease parent, string path, out string temporary, out byte[] identity)
+    private SafeFileHandle OpenTemporary(SafeFileTree tree, DirectoryLease parent, string path, out string temporary, out byte[] identity, bool directory = false)
     {
-        if (index.Meta.Find(StagingKey(path))?.Value is { Length: > 40 and <= 17448 } parked
+        if (index.Meta.Find(StagingKey(path, directory))?.Value is { Length: > 40 and <= 17448 } parked
             && parked.AsSpan(0, 24).SequenceEqual(tree.Identity))
         {
             string candidate = new UTF8Encoding(false, true).GetString(parked.AsSpan(40));
@@ -332,7 +351,7 @@ public sealed partial class FileApplier
                 SafeFileHandle? handle = null;
                 try
                 {
-                    handle = parent.OpenOwnedTemporary(ApplyState.Name(candidate));
+                    handle = directory ? parent.OwnedTemporaryDirectory(ApplyState.Name(candidate), create: false) : parent.OpenOwnedTemporary(ApplyState.Name(candidate));
                     if (HasIdentity(handle, parked.AsSpan(24, 16))) { temporary = candidate; identity = parked.AsSpan(24, 16).ToArray(); return handle; }
                 }
                 catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { }
@@ -340,29 +359,41 @@ public sealed partial class FileApplier
             }
         }
         string name = Guid.NewGuid().ToString("N") + ".!psp";
-        var created = parent.CreateFile(name, temporary: true);
+        var created = directory ? parent.OwnedTemporaryDirectory(name, create: true) : parent.CreateFile(name, temporary: true);
         temporary = ApplyState.Join(ApplyState.Parent(path), name); identity = Identity(FileSnapshot.Read(created)); return created;
     }
 
     private Task<int> ParkAsync(ApplyState state, CancellationToken token) => state.Temporary.Length == 0 ? Task.FromResult(0)
-        : index.Meta.UpsertAsync([new(StagingKey(state.Path), [.. state.Root, .. state.TemporaryId, .. Encoding.UTF8.GetBytes(state.Temporary)])], token);
-    private static string StagingKey(string path) => "_apply-staging-" + Convert.ToHexString(Blake3.Hasher.Hash(Encoding.UTF8.GetBytes(PathRules.Key(path))).AsSpan());
+        : index.Meta.UpsertAsync([new(StagingKey(state.Path, state.Type == 1), [.. state.Root, .. state.TemporaryId, .. Encoding.UTF8.GetBytes(state.Temporary)])], token);
+    private static string StagingKey(string path, bool directory = false) => "_apply-staging-" + Convert.ToHexString(Blake3.Hasher.Hash(Encoding.UTF8.GetBytes(PathRules.Key(path))).AsSpan())
+        + (directory ? "-directory" : "");
     private static bool NameIsTemporary(string path) => ApplyState.Name(path).EndsWith(".!psp", StringComparison.Ordinal)
         && Guid.TryParseExact(ApplyState.Name(path)[..^5], "N", out _);
 
     private static SafeFileHandle? TryOpen(DirectoryLease parent, string name, bool temporary = false)
     {
-        try { return parent.OpenFile(name, mutation: true, temporary); }
+        try
+        {
+            var node = parent.OpenNode(name, temporary);
+            try { if ((FileSnapshot.Read(node).Attributes & FileAttributes.Directory) != 0) return node; }
+            catch { node.Dispose(); throw; }
+            node.Dispose();
+            // Classification is not a file content guard. Reopen with write
+            // sharing excluded, rechecking all expectations under that handle.
+            return parent.OpenFile(name, mutation: true, temporary);
+        }
         catch (Win32Exception error) when (error.NativeErrorCode is 2 or 3) { return null; }
     }
 
     private static bool MatchesKnown(SafeFileHandle? file, LocalFileRow? known, CancellationToken token)
     {
         if (file is null) return known is null or { Deleted: true };
-        if (known is not { Deleted: false, FileId: not null, FileHash: not null }) return false;
+        if (known is not { Deleted: false, FileId: not null }) return false;
         var actual = FileSnapshot.Read(file);
-        return HasIdentity(file, known.FileId) && actual.Length == known.Size && (uint)actual.Attributes == known.Attributes
-            && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == known.MtimeTicks && Hash(file, token).AsSpan().SequenceEqual(known.FileHash);
+        bool directory = (actual.Attributes & FileAttributes.Directory) != 0;
+        return HasIdentity(file, known.FileId) && directory == (known.Type == 1) && actual.Length == known.Size && (uint)actual.Attributes == known.Attributes
+            && (directory || DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == known.MtimeTicks
+                && known.FileHash is not null && Hash(file, token).AsSpan().SequenceEqual(known.FileHash));
     }
     private static void VerifyOld(SafeFileHandle file, ApplyState state, CancellationToken token)
     {
@@ -372,13 +403,14 @@ public sealed partial class FileApplier
         const uint incidental = (uint)(FileAttributes.Normal | FileAttributes.Archive);
         uint attributes = (uint)actual.Attributes & ~incidental, original = state.OriginalAttributes & ~incidental;
         uint cleared = original & ~(uint)FileAttributes.ReadOnly;
-        if (!HasIdentity(file, state.OriginalId) || actual.Length != state.OriginalSize
-            || DateTime.FromFileTimeUtc(actual.LastWrite).Ticks != state.OriginalMtime
+        if (!HasIdentity(file, state.OriginalId) || ((actual.Attributes & FileAttributes.Directory) != 0) != state.OriginalIsDirectory
+            || actual.Length != state.OriginalSize
+            || !state.OriginalIsDirectory && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks != state.OriginalMtime
                 && !(state.Temporary.Length == 0 && !state.Deleted && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.MtimeTicks)
             || attributes != original && attributes != cleared
                 && !(state.Temporary.Length == 0 && !state.Deleted && attributes ==
                     state.Attributes)
-            || !Hash(file, token).AsSpan().SequenceEqual(state.OriginalHash))
+            || !state.OriginalIsDirectory && !Hash(file, token).AsSpan().SequenceEqual(state.OriginalHash))
             throw new IOException("Retained original changed; recovery requires attention.");
     }
     private static void VerifyNew(SafeFileHandle file, ApplyState state, CancellationToken token)
@@ -389,11 +421,11 @@ public sealed partial class FileApplier
     private static bool MatchesNew(SafeFileHandle file, ApplyState state, CancellationToken token)
     {
         var actual = FileSnapshot.Read(file);
-        return HasIdentity(file, state.TemporaryId) && actual.Length == state.Size
-            && DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.MtimeTicks
+        return HasIdentity(file, state.TemporaryId) && ((actual.Attributes & FileAttributes.Directory) != 0) == (state.Type == 1) && actual.Length == state.Size
+            && (state.Type == 1 || DateTime.FromFileTimeUtc(actual.LastWrite).Ticks == state.MtimeTicks)
             && ((uint)actual.Attributes == state.TemporaryAttributes || (uint)actual.Attributes ==
-                (state.Attributes is 0 ? (uint)FileAttributes.Normal : state.Attributes))
-            && Hash(file, token).AsSpan().SequenceEqual(state.FileHash);
+                (state.Type == 1 ? state.Attributes | (uint)FileAttributes.Directory : state.Attributes is 0 ? (uint)FileAttributes.Normal : state.Attributes))
+            && (state.Type == 1 || Hash(file, token).AsSpan().SequenceEqual(state.FileHash));
     }
     private static bool HasIdentity(SafeFileHandle file, ReadOnlySpan<byte> identity) => identity.Length == 16
         && Identity(FileSnapshot.Read(file)).AsSpan().SequenceEqual(identity);
@@ -406,7 +438,7 @@ public sealed partial class FileApplier
     private static string RetainedPath(ApplyState state, LoserFate fate, int collision)
     {
         var at = new DateTimeOffset(state.ArchivedTicks, TimeSpan.Zero);
-        if (fate == LoserFate.ConflictCopy) return ConflictNames.CopyPath(state.Original, at, state.OriginalDevice, collision);
+        if (state.OriginalIsDirectory || fate == LoserFate.ConflictCopy) return ConflictNames.CopyPath(state.Original, at, state.OriginalDevice, collision);
         return ArchiveNames.Candidate(state.Original, at, collision);
     }
     private void Signal(string stage, Guid session)

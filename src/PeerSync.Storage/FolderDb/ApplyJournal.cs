@@ -44,7 +44,15 @@ public sealed partial class FolderIndex
     /// for retained originals, withhold the stale local record until rescan, and
     /// remove the exact intent together. The caller has already verified archives.</summary>
     public Task<bool> DeferApplyAsync(ApplyIntent expected, IReadOnlyList<ArchiveRow> archives,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) => DeferApplyCoreAsync(expected, archives, false, cancellationToken);
+
+    /// <summary>Complete a deferred replacement after retaining a whole directory.
+    /// Withhold its former live descendants and remove their needed work until rescan.</summary>
+    public Task<bool> DeferMovedDirectoryApplyAsync(ApplyIntent expected, IReadOnlyList<ArchiveRow> archives,
+        CancellationToken cancellationToken = default) => DeferApplyCoreAsync(expected, archives, true, cancellationToken);
+
+    private Task<bool> DeferApplyCoreAsync(ApplyIntent expected, IReadOnlyList<ArchiveRow> archives,
+        bool movedDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(archives);
         if (archives.Count > 1000) throw new ArgumentOutOfRangeException(nameof(archives));
@@ -65,6 +73,7 @@ public sealed partial class FolderIndex
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "UPDATE local_files SET flags=flags|4 WHERE path_key=$path;";
             command.Parameters.AddWithValue("$path", expected.PathKey); command.ExecuteNonQuery();
+            if (movedDirectory) WithholdDescendants(connection, transaction, expected.PathKey);
             cancellationToken.ThrowIfCancellationRequested();
             RemoveIntent(connection, transaction, expected.Id); return true;
         }, cancellationToken);
@@ -124,7 +133,17 @@ public sealed partial class FolderIndex
     /// <summary>Commit metadata only after verifying successful filesystem application. Resolver is CPU-only,
     /// cannot re-enter this DB or retain its snapshot. Changed local state retains the intent for recovery.</summary>
     public Task<bool> CommitApplyAsync(ApplyIntent expected, LocalFileRow applied, IReadOnlyList<ArchiveRow> archives,
-        Func<FolderPathSnapshot, NeededRow?> resolver, CancellationToken cancellationToken = default)
+        Func<FolderPathSnapshot, NeededRow?> resolver, CancellationToken cancellationToken = default) =>
+        CommitApplyCoreAsync(expected, applied, archives, resolver, false, cancellationToken);
+
+    /// <summary>Commit replacement of a retained whole directory and atomically
+    /// withhold former descendants/remove their needed work until rescan.</summary>
+    public Task<bool> CommitMovedDirectoryApplyAsync(ApplyIntent expected, LocalFileRow applied, IReadOnlyList<ArchiveRow> archives,
+        Func<FolderPathSnapshot, NeededRow?> resolver, CancellationToken cancellationToken = default) =>
+        CommitApplyCoreAsync(expected, applied, archives, resolver, true, cancellationToken);
+
+    private Task<bool> CommitApplyCoreAsync(ApplyIntent expected, LocalFileRow applied, IReadOnlyList<ArchiveRow> archives,
+        Func<FolderPathSnapshot, NeededRow?> resolver, bool movedDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(applied);
         ArgumentNullException.ThrowIfNull(archives); ArgumentNullException.ThrowIfNull(resolver);
@@ -150,9 +169,20 @@ public sealed partial class FolderIndex
             Archive.WriteBatch(connection, transaction, retained, cancellationToken);
             using var needed = new NeededRewrite(connection, transaction, resolver);
             needed.Update(expected.PathKey);
+            if (movedDirectory) WithholdDescendants(connection, transaction, expected.PathKey);
             cancellationToken.ThrowIfCancellationRequested();
             RemoveIntent(connection, transaction, expected.Id); return true;
         }, cancellationToken);
+    }
+
+    private static void WithholdDescendants(SqliteConnection connection, SqliteTransaction transaction, string key)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        // Indexed BINARY range, not LIKE: percent/underscore are legal path characters.
+        command.CommandText = "UPDATE local_files SET flags=flags|4 WHERE deleted=0 AND path_key >= $low AND path_key < $high;"
+            + "DELETE FROM needed WHERE path_key >= $low AND path_key < $high;";
+        command.Parameters.AddWithValue("$low", key + "/"); command.Parameters.AddWithValue("$high", key + "0");
+        command.ExecuteNonQuery();
     }
 
     private static LocalFileRow Freeze(LocalFileRow row) => row with
