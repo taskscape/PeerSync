@@ -96,9 +96,15 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
         if (lost.Length != 0) throw new InvalidDataException("Published versions missing from current/archive/conflict bytes: " + string.Join(',', lost));
     }
 
-    private sealed record CaseResult(int Seed, int Nodes, int Operations, int Writes, int Renames, int Deletes, int Versions, int Rounds, int StagingFiles, double Seconds);
+    private sealed record CaseResult(int Seed, int Nodes, int Operations, int Writes, int Renames, int Deletes, int Versions, int Rounds, int StagingFiles, double Seconds)
+    {
+        public int DirectoriesCreated { get; init; }
+        public int DirectoryRenames { get; init; }
+        public int SubtreeDeletes { get; init; }
+        public int KindChanges { get; init; }
+    }
 
-    private sealed class Scenario
+    private sealed partial class Scenario
     {
         private readonly int seed;
         private readonly string evidence;
@@ -114,13 +120,16 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
         private int operations;
         private int writes, renames, deletes;
 
-        private Scenario(int seed, string evidence, CancellationToken token)
-        { this.seed = seed; this.evidence = evidence; this.token = token; random = new(seed); }
+        private Scenario(int seed, string evidence, bool hierarchical, CancellationToken token)
+        { this.seed = seed; this.evidence = evidence; this.token = token; this.hierarchical = hierarchical; random = new(seed); }
 
-        public static async Task<CaseResult> RunAsync(int seed, string evidence, CancellationToken token)
+        public static Task<CaseResult> RunAsync(int seed, string evidence, CancellationToken token) => RunAsync(seed, evidence, false, token);
+        public static async Task<CaseResult> RunAsync(int seed, string evidence, bool hierarchical, CancellationToken token)
         {
-            var scenario = new Scenario(seed, evidence, token); Exception? failure = null;
-            using var keys = FolderKeys.CreateNew();
+            var scenario = new Scenario(seed, evidence, hierarchical, token); Exception? failure = null;
+            byte[]? testSecret = hierarchical ? SHA256.HashData(Encoding.UTF8.GetBytes("PeerSync hierarchical simulation v1:" + seed.ToString(CultureInfo.InvariantCulture))) : null;
+            using var keys = testSecret is null ? FolderKeys.CreateNew() : FolderKeys.FromReadWrite(testSecret);
+            if (testSecret is not null) CryptographicOperations.ZeroMemory(testSecret);
             try { return await scenario.ExecuteAsync(keys); }
             catch (Exception error) { failure = error; throw; }
             finally
@@ -134,16 +143,19 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
 
         private async Task<CaseResult> ExecuteAsync(FolderKeys keys)
         {
+            publicationKeys = keys;
             int nodeCount = random.Next(3, 8); operations = random.Next(8, 21);
             for (int number = 0; number < nodeCount; number++)
             {
                 string directory = Path.Combine(fixture, "node-" + number.ToString(CultureInfo.InvariantCulture)); string root = Path.Combine(directory, "tree"); Directory.CreateDirectory(root);
                 byte[] id = new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(id, (ulong)number + 1);
                 var index = await FolderIndex.OpenAsync(Path.Combine(directory, "index.db"), token); var time = new NodeClock();
-                var journal = new DiagnosticJournal(Path.Combine(directory, "logs"), "simulation");
+                var journal = new DiagnosticJournal(Path.Combine(directory, "logs"), "simulation", debugEnabled: hierarchical);
                 var engine = new TransportFolder(root, index, keys, id, timeProvider: time, journal: journal);
                 var node = new Node(root, id, index, engine, time, journal); nodes.Add(node);
-                Write(node, "shared", Payload(number, -1)); await Scan(node);
+                Write(node, "shared", Payload(number, -1));
+                if (hierarchical) InitializeHierarchy(node, number);
+                await Scan(node);
             }
             var endpoints = nodes.Select(node => network.Register(node.Id, node.Engine.CreateHandler)).ToArray();
             for (int from = 0; from < nodes.Count; from++)
@@ -153,8 +165,11 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
             for (int operation = 0; operation < operations; operation++)
             {
                 token.ThrowIfCancellationRequested(); AdvanceAll(TimeSpan.FromSeconds(1));
-                int selected = random.Next(nodes.Count); var node = nodes[selected]; string name = "file-" + random.Next(4).ToString(CultureInfo.InvariantCulture);
-                string path = Path.Combine(node.Root, name);
+                int selected = random.Next(nodes.Count); var node = nodes[selected];
+                if (hierarchical) MutateHierarchy(node, selected, operation);
+                else
+                {
+                string name = "file-" + random.Next(4).ToString(CultureInfo.InvariantCulture); string path = Path.Combine(node.Root, name);
                 switch (random.Next(3))
                 {
                     case 0:
@@ -167,6 +182,7 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
                         break;
                     default:
                         trace.Add($"{operation}: node={selected} delete={name}"); if (File.Exists(path)) { File.Delete(path); deletes++; } break;
+                }
                 }
                 await Scan(node);
                 var link = connections[random.Next(connections.Count)]; int condition = random.Next(4);
@@ -181,6 +197,7 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
                     try { await connection.Peer.SynchronizeAsync(cancellationToken: token); }
                     catch (IOException error) when (error is not PeerClockException) { trace.Add($"{operation}: delivery-failed={connection.From}->{connection.To}"); }
                     await nodes[connection.From].Engine.RunPassAsync(token);
+                    if (hierarchical) RecordPublished(nodes[connection.From]);
                 }
             }
             foreach (var link in connections) network.ConfigureLink(nodes[link.From].Id, nodes[link.To].Id, new());
@@ -192,16 +209,24 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
                 foreach (var node in nodes)
                 {
                     var result = await node.Engine.RunPassAsync(token);
-                    if (result.Failed != 0) throw new InvalidDataException($"Healed pass failed: round={round} failed={result.Failed}");
+                    if (result.Failed != 0)
+                    {
+                        if (!hierarchical) throw new InvalidDataException($"Healed pass failed: round={round} failed={result.Failed}");
+                        trace.Add($"heal={round} retrying node={nodes.IndexOf(node)} failed={result.Failed}");
+                    }
+                    if (hierarchical) RecordPublished(node);
                 }
                 var trees = nodes.Select(node => Visible(node.Root)).ToArray(); long[] high = nodes.Select(node => node.Index.ReadIndexHighWater()).ToArray();
                 bool same = trees.Skip(1).All(tree => tree.Count == trees[0].Count && tree.All(entry => trees[0].TryGetValue(entry.Key, out string? hash) && hash == entry.Value));
                 trace.Add($"heal={round} same={same} high={string.Join(',', high)} needed={string.Join(',', nodes.Select(node => node.Index.Needed.Count()))}");
-                if (same && previous is not null && high.SequenceEqual(previous) && nodes.All(node => node.Index.Needed.Count() == 0 && !node.Index.ReadApplyIntents().Any()))
+                if (same && previous is not null && high.SequenceEqual(previous) && nodes.All(node => node.Index.Needed.Count() == 0 && !node.Index.ReadApplyIntents().Any()
+                    && !node.Index.HasPendingDirectoryPublications() && node.Index.ReadPendingCasePreservations().Count == 0))
                 {
+                    if (hierarchical && !await ReferencesCovered()) { previous = high; continue; }
                     RequireVersions(published.Keys, nodes.Select(node => (node.Root, node.Index)));
                     int staging = nodes.Sum(node => Directory.EnumerateFiles(node.Root, "*.!psp").Count());
-                    return new(seed, nodes.Count, operations, writes, renames, deletes, published.Count, round, staging, watch.Elapsed.TotalSeconds);
+                    return new(seed, nodes.Count, operations, writes, renames, deletes, published.Count, round, staging, watch.Elapsed.TotalSeconds)
+                    { DirectoriesCreated = directoriesCreated, DirectoryRenames = directoryRenames, SubtreeDeletes = subtreeDeletes, KindChanges = kindChanges };
                 }
                 previous = high;
             }
@@ -211,11 +236,13 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
         private void Write(Node node, string relative, byte[] bytes)
         {
             File.WriteAllBytes(Path.Combine(node.Root, relative), bytes); File.SetLastWriteTimeUtc(Path.Combine(node.Root, relative), node.Clock.GetUtcNow().UtcDateTime);
-            published.TryAdd(Hash(bytes), bytes);
+            if (hierarchical) candidates.TryAdd(Convert.ToHexString(Blake3.Hasher.Hash(bytes).AsSpan()), bytes);
+            else published.TryAdd(Hash(bytes), bytes);
             writes++;
         }
         private byte[] Payload(int node, int operation) => Encoding.UTF8.GetBytes($"case={seed};node={node};operation={operation};value={random.NextInt64()}");
-        private async Task Scan(Node node) { node.Engine.RequestScan(); var result = await node.Engine.RunPassAsync(token); if (result.Failed != 0) trace.Add($"scan-pull-failed={result.Failed}"); }
+        private async Task Scan(Node node)
+        { node.Engine.RequestScan(); var result = await node.Engine.RunPassAsync(token); if (result.Failed != 0) trace.Add($"scan-pull-failed={result.Failed}"); if (hierarchical) RecordPublished(node); }
         private void AdvanceAll(TimeSpan duration) { foreach (var node in nodes) node.Clock.Advance(duration); }
         private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
         private static SortedDictionary<string, string> Visible(string root)
@@ -224,8 +251,9 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
         {
             string failure = Path.Combine(evidence, "failures", seed.ToString(CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(failure);
             File.WriteAllText(Path.Combine(failure, "replay.json"), JsonSerializer.Serialize(new
-            { seed, scenario = "real-engine-flat-path-v1", error = error.ToString(), trace, published = published.Keys, retainedFixture = fixture,
-                replay = $"$env:PEERSYNC_SIMULATION_CASE='{seed}'; dotnet test --project tests/PeerSync.Simulation -c Release --no-build" }, Json));
+            { seed, scenario = hierarchical ? "real-engine-hierarchical-v1" : "real-engine-flat-path-v1", error = error.ToString(), trace, published = published.Keys, retainedFixture = fixture,
+                replay = hierarchical ? $"$env:PEERSYNC_SIMULATION_HIERARCHY_CASE='{seed}'; dotnet test --project tests/PeerSync.Simulation -c Release --no-build --filter-method '*GeneratedHierarchical*'"
+                    : $"$env:PEERSYNC_SIMULATION_CASE='{seed}'; dotnet test --project tests/PeerSync.Simulation -c Release --no-build --filter-method '*GeneratedFlat*'" }, Json));
             try { ZipFile.CreateFromDirectory(fixture, Path.Combine(failure, "generated-fixture.zip")); }
             catch (Exception packing) when (packing is IOException or UnauthorizedAccessException)
             { File.WriteAllText(Path.Combine(failure, "packing-error.txt"), packing.ToString()); }
