@@ -36,3 +36,32 @@ probes and other four jobs retain their existing scope. No new job or schedule
 is added. This ceiling allows the observed slower hosted native/SQLite work;
 it does not require the full duration to be consumed. Final repaired-head CI,
 merge and main CI remain pending.
+
+## Second hosted measurement
+
+Run [39363534643](https://github.com/taskscape/PeerSync/actions/runs/39363534643)
+on ad37f8d reaches the 40-minute ceiling during publishing. All four other
+jobs pass again. Its preserved Simulation TRX has nine executed/passed cases,
+zero failures or skips. Eight flat samples take 59.278 seconds; four hierarchy
+samples take 703.525 seconds. Fixed seeds 1044729930/1648781653/1878823561
+pass in 509.65/266.10/358.85 scenario seconds. No replay failure is produced.
+All QUIC/pipe/rendezvous probes, 100000-operation watcher and QUIC diagnostic
+controls pass. Cancellation occurs after restore in the publishing phase;
+signing/bundle completion and the overall job are not passing evidence.
+
+Preserved primary artifacts: `artifacts/ci38-x64-second.log` and
+`artifacts/ci38-x64-second-evidence/`, including
+`simulation/20261020T032329-e93cc9a6459341c6915aab143681be79/` and the nine-case
+Simulation TRX. This establishes complete hosted simulation acceptance on
+that source, independently of the unsuccessful packaging job.
+
+Move that unchanged simulation workload out of packaging and alongside the
+required 600-second fuzz in its existing job. Build both outputs before either
+starts, execute only immutable binaries and preserve both results even on
+failure. Fuzz duration/targets/seeds/crashes remain strictly validated. Default
+local canonical verification still runs all tests; only packaging explicitly
+delegates Simulation coverage to the boundary/simulation job. Both packaging
+jobs return to 15 minutes; boundary/simulation gets 50 minutes based on the
+observed 32-minute suite plus setup/cleanup headroom. This preserves five jobs
+and every check while overlapping the independent workloads. Local overlap
+validation and the repaired-head CI/main remain pending.

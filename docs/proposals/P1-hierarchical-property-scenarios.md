@@ -53,3 +53,16 @@ win-x64 a 40-minute ceiling for this measured scope, and return Arm64 to its
 15-minute ceiling. Other jobs remain unchanged. Do not rerun an unchanged
 20-minute job, discard the preserved cancellation fixture or report its
 incomplete cases as passes.
+
+The second hosted run 39363534643 passes all nine Simulation cases, all three
+fixed seeds, both generated batches and native probes, but reaches 40 minutes
+during publishing. Hierarchy work takes 704 seconds and the three fixed cases
+take 510/266/359 seconds on that host. Remove that serial dependency from the
+packaging job: run the unchanged bounded Simulation suite alongside the
+600-second boundary fuzz in its existing required job, after both immutable
+outputs are built. Keep five jobs, every test and default local Verify scope.
+The dedicated boundary/simulation job gets a 50-minute failure ceiling from
+the measured 32-minute simulation plus build/cleanup headroom. Restore both
+packaging jobs to 15 minutes. Explicitly record simulation ownership in the
+canonical summary; skip it only in those packaging jobs. No publishing/probe
+build may run against the active fuzz/simulation outputs.
