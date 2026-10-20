@@ -65,3 +65,32 @@ jobs return to 15 minutes; boundary/simulation gets 50 minutes based on the
 observed 32-minute suite plus setup/cleanup headroom. This preserves five jobs
 and every check while overlapping the independent workloads. Local overlap
 validation and the repaired-head CI/main remain pending.
+
+## Local overlap and delegated packaging verification
+
+The new boundary/simulation supervisor passes with exit 0 in 614.974565
+seconds. Actual fuzz output proves 600.003851 seconds, 190444 seeds, zero
+crashes and the required FastCDC/PathRules/VersionVector/IgnoreMatcher targets.
+All nine Simulation cases pass alongside it, including eight flat/four
+hierarchy samples and all three retained regressions. Both output sets were
+built before either process started; no binary rebuild/publish occurred
+during their lifetimes. The supervisor owns cancellation/drain/disposal and
+preserves both evidence sets.
+
+The corresponding packaging command
+`build/Verify.ps1 -Runtime win-x64 -SkipEngineTests -SkipSimulation -SkipFuzz`
+passes with exit 0 in 148.8558336 seconds: all 551 owned unit cases, native/
+transport/control/diagnostic probes, 100000 watcher operations and win-x64
+publishing. Its summary explicitly reports `engineTestsRun=false` and
+`simulationRun=false`; the existing two Server jobs own Engine coverage and
+the boundary job owns the unchanged Simulation suite. Default local Verify
+still runs both scopes when the explicit switches are absent.
+
+Primary evidence: `artifacts/p1-boundary-simulation-overlap.log`,
+`artifacts/fuzz/boundary-simulation.json`, `artifacts/fuzz/summary.log`,
+`artifacts/fuzz/verification.json`, `artifacts/p1-delegated-packaging.log`,
+`artifacts/verification-win-x64.json`, and
+`artifacts/simulation/20261020T040442-a4269de8961648a0bc617aae0f44b041/`.
+Local assertions and overlap are verified; repaired-head CI, merge and main
+CI are still required. No source-level engine change follows the hosted
+timeout, and no existing test is dropped.
