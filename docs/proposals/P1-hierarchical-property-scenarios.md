@@ -39,7 +39,17 @@ in the same directory-repair PR, so CI exercises the defects that motivated
 the repair. Locally the three fixed cases take 181 seconds and a fresh
 20-case batch takes 363 seconds. The previous x64 packaging job took about
 ten minutes before this added scope. Allow that existing build job a
-20-minute ceiling to accommodate the additional real-engine work; add no
+20-minute initial ceiling to accommodate the additional real-engine work; add no
 jobs, schedules or duplicate runs. Timeout is a failure ceiling, not an
 instruction to consume the entire interval. Required boundary fuzz and both
 native Server jobs retain their existing scope and limits.
+
+Hosted run 39361484050 demonstrates that ceiling is insufficient: all 551
+non-Engine unit cases, eight flat/four hierarchy samples and fixed seed
+1044729930 pass, but the 20-minute job deadline cancels the next fixed seed.
+The four-sample hierarchy batch takes 466 hosted seconds; the six-node fixed
+case takes 341 seconds. Keep every check and fixed case enabled, give only
+win-x64 a 40-minute ceiling for this measured scope, and return Arm64 to its
+15-minute ceiling. Other jobs remain unchanged. Do not rerun an unchanged
+20-minute job, discard the preserved cancellation fixture or report its
+incomplete cases as passes.
