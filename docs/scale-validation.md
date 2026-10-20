@@ -32,6 +32,12 @@ checking the exact generated path, normal root and ownership marker. Native
 oracle controls reject missing nested bytes, private cache-only copies and
 reparse aliases. No failure ZIP is automatically created for a large corpus.
 
+Folder keys are synthetic and reproducible only for this generated fixture:
+SHA-256 of UTF-8 `PeerSync scale corpus test keys v1:` followed by the exact
+public `owner.txt` value supplies `FolderKeys.FromReadWrite`. This lets the
+retained signed/encrypted test metadata be inspected after exit. Never use
+these public test keys for real folders. Production key creation is unchanged.
+
 `SCALE_EVIDENCE` identifies the unique report directory beneath
 `artifacts/scale/`. Inspect `summary.json`, `source-state.json`,
 `progress.jsonl`, `rounds.jsonl`, `initial-native.json` and `final-native.json`.

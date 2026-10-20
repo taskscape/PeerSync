@@ -58,7 +58,9 @@ internal sealed partial class ScaleScenario
         File.WriteAllText(Path.Combine(run.fixture, "owner.txt"), run.owner);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         using var heartbeatStop = new CancellationTokenSource(); var heartbeat = run.Heartbeat(heartbeatStop.Token);
-        using var keys = FolderKeys.CreateNew(); Exception? failure = null; bool removed = false;
+        byte[] testSecret = SHA256.HashData(Encoding.UTF8.GetBytes("PeerSync scale corpus test keys v1:" + run.owner));
+        using var keys = FolderKeys.FromReadWrite(testSecret); CryptographicOperations.ZeroMemory(testSecret);
+        Exception? failure = null; bool removed = false;
         try
         {
             ScaleOracle.SelfCheck(run.fixture, deadline.Token);
