@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | PR #39 review identifies failed-job reruns reusing successful planner outputs. Require first attempt before every campaign job allocation and independently in daily/history evidence, preserving explicit preflight reruns. Reproduce uniform-rerun and cached-plan controls before repair. | Campaign first-attempt allocation and evidence |
 | 2026-10-20 | Close the explicit P1 cleanup-simulation gap with three public connected peers, a delayed needed transfer, real archive expiry and block eviction under injected clocks, then unchanged native/global version oracles. Include it in every campaign baseline. | Connected production maintenance validation |
 | 2026-10-20 | Hierarchy seed 1583987140 exposes a staged-parent/child-reconstruction cycle. Permit only scheduled newer regular-file tombstone metadata for an already deleted local row after complete range, case-barrier and guarded native-absence proof; retain all publication/graph guards. | Metadata-only tombstone progress under directory publication |
 | 2026-10-20 | PR #38 review identifies pre-reconstruction metadata loss, legacy-root pass abort, suspended-child wake gaps and receive-before-scan initialization. Reproduce each; retain observed attributes beside immutable originals, defer unavailable sources, rebuild on unblock and pin/bind roots before admitted pages. Batch locally verified fixes before one CI update. | Directory integration hardening |
@@ -1790,7 +1791,10 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
 
 - [ ] **P1.6.4 Bounded thousand-seed CI campaign and five-day evidence** [WIP @codex 2026-10-20]
   - Done when: the [campaign design](docs/proposals/P1-bounded-ci-campaign.md) is implemented and validated locally/with hosted preflight; five consecutive UTC campaign days from the same source each prove 1000 distinct flat seeds, explicit hierarchy coverage and all retained regressions through unchanged production oracles. Source/run/count/history evidence is preserved, scheduling is bounded and retired after acceptance, and merged green CI requirements hold. Preflight and partial days never close this task or Gate P1.
-  - The [local tooling checkpoint](docs/verification/P1-bounded-campaign-tooling-2026-10-20.md) records 16 passing planner/evidence controls and all five actual preflight shards (ten distinct flat/five hierarchy samples, exact six-method TRX scope). Scheduling remains inactive. Clean full-shard, hosted preflight, merged CI and five actual days remain pending.
+  - The [expanded local tooling checkpoint](docs/verification/P1-bounded-campaign-tooling-2026-10-20.md) records 17 passing planner/evidence controls, a clean-built 200-flat/one-hierarchy full shard with all four retained regressions and connected maintenance (eleven methods), and all five actual preflight shards (ten distinct flat/five hierarchy samples, seven methods each, five maintenance cases with ten native archive retirements and ten block evictions). Scheduling remains inactive. Hosted preflight, final merged CI and five actual campaign dates remain pending.
+
+  - [ ] **P1.6.4a Campaign rerun resource-bound review hardening** [WIP @codex 2026-10-20]
+    - Done when: cached successful planner outputs cannot allocate campaign plan/shard/report runners on later attempts; daily/history reject uniformly rerun evidence, manual preflight reruns remain non-gating, and failing/fixed allocation/evidence controls plus CI/main acceptance pass. Follow the [rerun repair design](docs/proposals/P1-campaign-rerun-budget-repair.md).
 
 ### Gate P1
 

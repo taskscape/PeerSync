@@ -1882,3 +1882,12 @@ The delayed peer's fresh archive preserves the earlier version after the updated
 peers' older archives expire; the native loss oracle remains unchanged.
 See docs/proposals/P1-connected-maintenance-simulation.md. Host timer supervision
 remains in its existing service phase; this test invokes the production worker.
+
+### Campaign first-attempt allocation and evidence
+
+The five-attempt campaign resource bound applies at each job allocation boundary,
+including failed-job reruns that reuse successful planner outputs. Campaign plan,
+shard and report jobs require github.run_attempt=1 before runner allocation.
+Daily and standalone history validation independently require integer attempt 1.
+Explicit manual preflight reruns remain supported and non-gating. See
+ docs/proposals/P1-campaign-rerun-budget-repair.md for regression controls.
