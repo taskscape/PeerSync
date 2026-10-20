@@ -1785,6 +1785,7 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
 
 - [ ] **P1.6.4 Bounded thousand-seed CI campaign and five-day evidence** [WIP @codex 2026-10-20]
   - Done when: the [campaign design](docs/proposals/P1-bounded-ci-campaign.md) is implemented and validated locally/with hosted preflight; five consecutive UTC campaign days from the same source each prove 1000 distinct flat seeds, explicit hierarchy coverage and all retained regressions through unchanged production oracles. Source/run/count/history evidence is preserved, scheduling is bounded and retired after acceptance, and merged green CI requirements hold. Preflight and partial days never close this task or Gate P1.
+  - The [local tooling checkpoint](docs/verification/P1-bounded-campaign-tooling-2026-10-20.md) records 16 passing planner/evidence controls and all five actual preflight shards (ten distinct flat/five hierarchy samples, exact six-method TRX scope). Scheduling remains inactive. Clean full-shard, hosted preflight, merged CI and five actual days remain pending.
 
 ### Gate P1
 
