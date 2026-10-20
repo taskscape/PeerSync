@@ -21,7 +21,7 @@ public sealed record DirectoryParentProof(string PathKey, byte[] RootId, byte[] 
 public sealed record DirectoryParentPreparation(DirectoryParentProof Proof, int ResetWork);
 public sealed record DirectoryParentRoot(string PathKey, DirectoryMetadataSource Source, long Generation, string? Cursor, bool Complete)
 { public override string ToString() => "Directory parent root proof (redacted)"; }
-public sealed record DirectoryParentPage(long Revision, byte[]? After, byte[]? NextAfter, bool More, IReadOnlyList<RemoteFileRow> Rows);
+public sealed record DirectoryParentPage(int Limit, long Revision, byte[]? After, byte[]? NextAfter, bool More, IReadOnlyList<RemoteFileRow> Rows);
 
 public sealed partial class FolderIndex
 {

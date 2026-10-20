@@ -34,7 +34,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
         foreach (var initial in index.ReadDueDirectoryPublications(clock.GetUtcNow().UtcTicks, maximumDirectories))
         {
             if (remaining == 0) break;
-            token.ThrowIfCancellationRequested(); visited++; Guid session = initial.Version; string stage = "dependencies";
+            token.ThrowIfCancellationRequested(); visited++; int offered = remaining; Guid session = initial.Version; string stage = "dependencies";
             var queued = initial;
             try
             {
@@ -55,7 +55,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 // Empty/completed roots also consume a scheduling unit, so one
                 // pass is bounded even if no new member bytes were captured.
                 long accepted = before is not null && before.InputHash.AsSpan().SequenceEqual(draft.InputHash) ? before.Accepted : 0;
-                bool resumeRebase = queued.ReconstructionOnly && before?.Hash is not null && before.InputEpoch == draft.InputEpoch;
+                bool resumeRebase = before?.Hash is not null && before.InputEpoch == draft.InputEpoch;
                 if (!resumeRebase) remaining -= (int)Math.Clamp(draft.Accepted - accepted, 1, remaining);
                 if (draft.Hash is null)
                 {
@@ -93,6 +93,14 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                         Checkpoint?.Invoke("rebase-proven");
                     }
                     else if (template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
+                    stage = "parent-roots";
+                    DirectoryRebasePass parents;
+                    try { parents = await DirectoryParentRootProof.AdvanceAsync(rootPath, index, keys, source, queued, draft, remaining, clock, journal, token).ConfigureAwait(false); }
+                    catch { remaining = 0; throw; }
+                    remaining -= parents.Visited;
+                    journal?.TryWrite(new(parents.Complete ? "directory.parent_roots_complete" : "directory.parent_roots_pending", "directory-publication")
+                    { SessionId = session, Level = DiagnosticLevel.Debug, ItemsVisited = parents.Visited, ItemsDeferred = parents.Waiting ? 1 : 0 });
+                    if (!parents.Complete) { if (parents.Waiting) await Retry(null).ConfigureAwait(false); continue; }
                     var body = DirectoryPublicationClock.Template(index, keys, source, queued, clock.GetUtcNow().UtcTicks, journal);
                     body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
                     var record = SignedRecordFactory.Create(body, keys);
@@ -104,7 +112,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                         scan |= await new SnapshotHistory(index, keys, source, settings, journal, clock).EnsureAsync(tree, previous, publication, null, token).ConfigureAwait(false);
                     }
                 }
-                else if (resumeRebase) remaining--; // Identical empty/completed roots still consume one unit.
+                if (remaining == offered) remaining--; // Completed captures still consume one scheduling unit.
                 stage = "commit";
                 var committed = await capture.CommitQueuedUnderGateAsync(queued, draft, publication, clock.GetUtcNow().UtcTicks, token).ConfigureAwait(false);
                 if (committed.Changed)

@@ -6,6 +6,13 @@ public sealed record DirectoryParentSourcePage(IReadOnlyList<DirectoryMetadataSo
 
 public sealed partial class FolderIndex
 {
+    public bool HasDirectoryParentSources(byte[] rootId)
+    {
+        FolderMaps.RequireBytes(rootId, 24); using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM directory_parent_roots r JOIN directory_parent_proofs p ON p.path_key=r.path_key WHERE p.root_id=$root);";
+        command.Parameters.AddWithValue("$root", rootId); return (long)command.ExecuteScalar()! != 0;
+    }
+
     public DirectoryParentSourcePage ReadDirectoryParentSources(byte[] rootId, byte[]? afterSourceId = null, int limit = 32, int byteBudget = 8 * 1024 * 1024)
     {
         FolderMaps.RequireBytes(rootId, 24); if (afterSourceId is not null) FolderMaps.RequireBytes(afterSourceId, 32);

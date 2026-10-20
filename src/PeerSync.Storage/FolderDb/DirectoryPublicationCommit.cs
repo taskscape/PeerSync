@@ -47,6 +47,8 @@ public sealed partial class FolderIndex
             if (queued.ReconstructionOnly && (prior?.Record is null || !prior.Record.Body.SequenceEqual(queued.Template.Body) || !prior.Record.Signature.SequenceEqual(queued.Template.Signature)))
                 throw new InvalidOperationException("Received reconstruction template changed.");
             if ((prior?.LocalSequence ?? 0) != queued.ExpectedLocalSequence) throw new InvalidOperationException("Directory publication source changed.");
+            if (row is not null && FindParentProof(connection, transaction, key) is { } parentProof && parentProof.QueueVersion == queued.Version)
+                RequireParentProofReady(connection, transaction, queued, draft);
             if (row is not null) LocalFiles.WriteBatch(connection, transaction, [row], cancellationToken);
             var current = row is null ? prior : ReadCurrent();
             if (current is null) throw new InvalidOperationException("Directory publication has no current row.");
@@ -67,6 +69,7 @@ public sealed partial class FolderIndex
             release.CommandText = "DELETE FROM directory_captures WHERE parent_key=$key; DELETE FROM directory_publications WHERE path_key=$key AND version=$version;";
             release.Parameters.AddWithValue("$key", key); release.Parameters.AddWithValue("$version", queued.Version.ToString("N"));
             if (release.ExecuteNonQuery() != 2) throw new InvalidOperationException("Directory publication release changed.");
+            release.CommandText = "DELETE FROM directory_parent_proofs WHERE path_key=$key;"; release.ExecuteNonQuery();
             return new DirectoryPublicationCommit(current, row is not null);
 
             LocalFileRow? ReadCurrent()

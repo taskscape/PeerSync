@@ -28,7 +28,9 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
     Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, DiagnosticJournal? journal = null)
 {
     private const string RetainedCursor = "_directory-metadata-retained-cursor";
-    private long nextRetainedTicks;
+    private long nextRetainedTicks, nextParentTicks;
+    private bool parentSources;
+    private const string ParentCursor = "_directory-parent-metadata-cursor";
     private bool retainedDirectories;
     internal Action<string>? Checkpoint { get; init; }
 
@@ -51,6 +53,16 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
             try { await DiscoverRetained(root, now, token).ConfigureAwait(false); }
             catch (DirectoryMetadataCapacityException) { nextRetainedTicks = AddSeconds(now, 10); deferred++; }
         }
+        if (index.HasDirectoryParentSources(root))
+        {
+            if (!parentSources || now >= nextParentTicks)
+            {
+                try { await DiscoverParents(root, now, token).ConfigureAwait(false); }
+                catch (DirectoryMetadataCapacityException) { nextParentTicks = AddSeconds(now, 10); deferred++; }
+            }
+            parentSources = true;
+        }
+        else parentSources = false;
         foreach (var job in index.ReadDueDirectoryMetadataSources(root, now, maximumSources))
         {
             if (remaining == 0) break;
@@ -121,6 +133,7 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
         long? next = index.ReadNextDirectoryMetadataTicks(root, Now);
         if (retiring) next = next is null ? Now : Math.Min(next.Value, Now);
         if (nextRetainedTicks <= Now || retainedDirectories) next = next is null ? nextRetainedTicks : Math.Min(next.Value, nextRetainedTicks);
+        if (parentSources) next = next is null ? nextParentTicks : Math.Min(next.Value, nextParentTicks);
         return new(visited, completed, deferred, next);
     }
 
@@ -142,6 +155,24 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
             await index.Meta.UpsertAsync([new(RetainedCursor, page.More ? page.NextSourceId! : [])], token).ConfigureAwait(false);
         }
         nextRetainedTicks = page.More ? now : AddSeconds(now, 3600);
+    }
+    private async Task DiscoverParents(byte[] root, long now, CancellationToken token)
+    {
+        byte[]? cursor = index.Meta.Find(ParentCursor)?.Value; if (cursor?.Length == 0) cursor = null;
+        var page = index.ReadDirectoryParentSources(root, cursor); var sources = new List<DirectoryMetadataSource>();
+        foreach (var source in page.Sources)
+        {
+            var version = VersionView.Open(source.Record, keys, source.RouteHint); var verified = DirectoryMetadataSources.FromVersion(version);
+            if (verified is null || verified.Path != source.Path || verified.Length != source.Length || !verified.SourceId.AsSpan().SequenceEqual(source.SourceId)
+                || !verified.Hash.AsSpan().SequenceEqual(source.Hash)) throw new InvalidDataException("Parent metadata representative changed.");
+            sources.Add(source);
+        }
+        using (await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false))
+        {
+            await index.AdmitDirectoryMetadataSourcesAsync(root, sources, now, token).ConfigureAwait(false);
+            await index.Meta.UpsertAsync([new(ParentCursor, page.More ? page.NextSourceId! : [])], token).ConfigureAwait(false);
+        }
+        nextParentTicks = page.More || page.Sources.Count == 0 && cursor is not null ? now : AddSeconds(now, 3600);
     }
     private long Now => Math.Max(1, clock.GetUtcNow().UtcTicks);
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);

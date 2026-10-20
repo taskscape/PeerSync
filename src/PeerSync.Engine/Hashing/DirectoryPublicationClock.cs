@@ -24,8 +24,10 @@ internal static class DirectoryPublicationClock
         var original = VersionView.Open(prior.Record, keys, own);
         var metadata = original.ExportBody();
         if (metadata.DirectorySnapshotHash.Length != 32) return body;
-        metadata.Vv.Clear(); IReadOnlyDictionary<ulong, ulong> floor = original.Vector; int absorbed = 0;
-        foreach (var remote in index.RemotesForPath(queued.Path))
+        metadata.Vv.Clear(); IReadOnlyDictionary<ulong, ulong> floor = original.Vector; int absorbed = 0; string reason = "same-body-floor";
+        if (index.ReadDirectoryParentProof(queued.Path) is not null)
+        { floor = index.ReadProvenDirectoryParentClock(queued); absorbed = 1; reason = "proven-root-floor"; }
+        else foreach (var remote in index.RemotesForPath(queued.Path))
         {
             var version = VersionView.Open(remote.Record, keys, remote.DeviceId); var other = version.ExportBody(); other.Vv.Clear();
             if (metadata.Equals(other))
@@ -37,7 +39,7 @@ internal static class DirectoryPublicationClock
         }
         if (VersionVector.Compare(floor, original.Vector) == VvOrder.Equal) return body;
         journal?.TryWrite(new("directory.parent_clock_template", "directory-publication")
-        { SessionId = queued.Version, Level = DiagnosticLevel.Debug, ErrorCode = "same-body-floor", ItemsVisited = absorbed, ItemsChanged = 1 });
+        { SessionId = queued.Version, Level = DiagnosticLevel.Debug, ErrorCode = reason, ItemsVisited = absorbed, ItemsChanged = 1 });
         var vector = VersionVector.Merge(body.Vv.ToDictionary(entry => entry.Device, entry => entry.Counter),
             VersionVector.Increment(floor, BinaryPrimitives.ReadUInt64LittleEndian(own)));
         var entries = body.Vv.ToDictionary(entry => entry.Device);

@@ -18,6 +18,7 @@ public sealed partial class DirectorySnapshotCaptureTests
         Directory.CreateDirectory(Path.Combine(Root, "topic", "nested")); File.WriteAllText(Path.Combine(Root, "topic", "nested", "a"), "original bytes");
         await using var index = await FolderIndex.OpenAsync(Database, Token); await PreviewScan(index); await Worker(index).RunAsync(token: Token);
         var child = index.LocalFiles.Find("topic/nested/a")!; var body = VersionView.Open(child.Record!, keys, device).ExportBody(); body.Path = "TOPIC/NeStEd/a";
+        body.Vv.Single(entry => entry.Device == 1).Counter++; // A newly signed path spelling is a causal version, not equal-vector different bytes.
         var original = SignedRecordFactory.Create(body, keys); await index.LocalFiles.UpsertAsync([child with { Path = body.Path, Record = original }], Token);
         await PreviewScan(index); await Worker(index).RunAsync(token: Token); var root = index.LocalFiles.Find("topic")!.Record!; await CompleteProjectionGraph(index, root);
         var page = await Project(index, root); page.Members.Count.ShouldBe(2); page.More.ShouldBeFalse();

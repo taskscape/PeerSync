@@ -85,7 +85,13 @@ public sealed partial class DirectorySnapshotCaptureTests
             index.ReadApplyIntents().ShouldBeEmpty();
             clock.AdvanceTo(index.ReadNextDirectoryPublicationTicks(index.Meta.Find("_root-identity")!.Value!, clock.GetUtcNow().UtcTicks)!.Value);
         }
-        (await new DirectoryPublicationWorker(root, index, keys, own, new FolderSettings(), clock).RunAsync(token: Token)).ChangedPaths.ShouldBe(["topic"]);
+        var result = await new DirectoryPublicationWorker(root, index, keys, own, new FolderSettings(), clock).RunAsync(token: Token);
+        if (difference == "snapshot")
+        {
+            result.Deferred.ShouldBe(1); result.ChangedPaths.ShouldBeEmpty();
+            index.LocalFiles.Find("topic")!.Record!.Body.ToArray().ShouldBe(prior.Record!.Body.ToArray()); return;
+        }
+        result.ChangedPaths.ShouldBe(["topic"]);
         var current = index.LocalFiles.Find("topic")!; var published = VersionView.Open(current.Record!, keys, own);
         if (difference is not null)
         {

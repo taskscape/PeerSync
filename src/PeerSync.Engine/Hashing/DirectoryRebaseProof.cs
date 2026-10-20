@@ -33,27 +33,13 @@ internal static class DirectoryRebaseProof
         var graph = index.ReadDirectoryGraph(graphId);
         if (graph is null || !graph.Complete || graph.Retiring) return new(false, true, 1);
         var proof = await index.BeginDirectoryRebaseAsync(queued, draft, graphId, token).ConfigureAwait(false);
-        if (proof.Complete) return new(true, false, 1);
+        if (proof.Complete) return new(true, false, 0); // Parent root-set work supplies the scheduling unit.
         using var blocks = new DirectorySnapshotBlocks(rootPath, index, keys, own);
         var verified = new List<DirectoryGraphMember>(); int visited = 0; bool waiting = false;
         foreach (var member in index.ReadDirectoryGraphMemberPage(graphId, proof.Cursor, limit))
         {
             token.ThrowIfCancellationRequested(); visited++;
-            if (ApplyState.Parent(member.PathKey) == PathRules.Key(queued.Path))
-            {
-                var prior = await blocks.ReadMemberAsync(queued.Path, new(member.RecordHash, member.RecordLength),
-                    (_, _, _) => throw new IOException("Rebase original metadata is unavailable."), token).ConfigureAwait(false);
-                if (PathRules.Key(prior.Path) != member.PathKey) throw new InvalidDataException("Rebase original member path changed.");
-                var row = index.LocalFiles.Find(member.PathKey);
-                if (row?.Record is null || row.Flags != LocalFileState.None || (!row.Deleted && row.Type == 0 && !row.ContentReady)) { waiting = true; break; }
-                var current = VersionView.Open(row.Record, keys, own);
-                if (PathRules.Key(current.Path) != member.PathKey || current.Type != row.Type || current.Deleted != row.Deleted
-                    || (!current.Deleted && current.Type == 0 && (current.Size != row.Size || row.FileHash is null || !current.FileHash.SequenceEqual(row.FileHash))))
-                    throw new InvalidDataException("Rebase signed child does not match its local row.");
-                var order = VersionVector.Compare(current.Vector, prior.Vector);
-                if (order != VvOrder.Dominates && (order != VvOrder.Equal || !current.Record.Body.SequenceEqual(prior.Record.Body)
-                    || !current.Record.Signature.SequenceEqual(prior.Record.Signature))) { waiting = true; break; }
-            }
+            if (!await DirectoryChildCausality.IncludesAsync(blocks, index, keys, own, queued.Path, member, token).ConfigureAwait(false)) { waiting = true; break; }
             verified.Add(member);
         }
         await blocks.FlushAsync(token).ConfigureAwait(false);

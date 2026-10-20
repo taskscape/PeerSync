@@ -22,6 +22,7 @@ CREATE TABLE directory_parent_proofs (
   touched_ticks INTEGER NOT NULL CHECK(touched_ticks>0)
 ) WITHOUT ROWID;
 CREATE INDEX ix_directory_parent_proof_age ON directory_parent_proofs(touched_ticks,path_key);
+CREATE INDEX ix_directory_parent_proof_root ON directory_parent_proofs(root_id,path_key);
 CREATE TABLE directory_parent_roots (
   path_key TEXT NOT NULL REFERENCES directory_parent_proofs(path_key) ON DELETE CASCADE,
   node_hash BLOB NOT NULL CHECK(length(node_hash)=32),

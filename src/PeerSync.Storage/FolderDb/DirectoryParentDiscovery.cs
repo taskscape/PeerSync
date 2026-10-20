@@ -6,10 +6,11 @@ namespace PeerSync.Storage.FolderDb;
 
 public sealed partial class FolderIndex
 {
-    public DirectoryParentPage ReadDirectoryParentPage(DirectoryParentProof expected)
+    public DirectoryParentPage ReadDirectoryParentPage(DirectoryParentProof expected, int limit = 32)
     {
+        if (limit is < 1 or > 32) throw new ArgumentOutOfRangeException(nameof(limit));
         var proof = FreezeParentProof(expected); using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true);
-        var actual = RequireParentState(connection, transaction, proof); return ReadParentPage(connection, transaction, actual);
+        var actual = RequireParentState(connection, transaction, proof); return ReadParentPage(connection, transaction, actual, limit);
     }
 
     /// <summary>Admit only authenticated representatives selected from this exact discovery page.</summary>
@@ -19,13 +20,13 @@ public sealed partial class FolderIndex
         var publication = FreezePublication(queued); var capture = FreezeCapture(draft); var proof = FreezeParentProof(expected);
         var sources = FreezeMetadataSources(accepted); RequireStagingNow(nowTicks);
         var snapshot = page with { After = page.After?.ToArray(), NextAfter = page.NextAfter?.ToArray(), Rows = page.Rows.Select(row => row with { DeviceId = row.DeviceId.ToArray(), Vector = new Dictionary<ulong, ulong>(row.Vector) }).ToArray() };
-        if (sources.Length > 32) throw new ArgumentOutOfRangeException(nameof(accepted));
+        if (page.Limit is < 1 or > 32 || sources.Length > page.Limit) throw new ArgumentOutOfRangeException(nameof(accepted));
         return database.WriteDurableAsync((connection, transaction) =>
         {
             RequireParentInputs(connection, transaction, publication, capture); var actual = RequireParentState(connection, transaction, proof);
             if (actual.RemoteRevision != actual.DiscoveryRevision || actual.RemoteRevision != snapshot.Revision || actual.DiscoveryComplete)
                 throw new InvalidOperationException("Parent discovery revision changed.");
-            var current = ReadParentPage(connection, transaction, actual);
+            var current = ReadParentPage(connection, transaction, actual, snapshot.Limit);
             if (current.More != snapshot.More || !SameParentBytes(current.After, snapshot.After) || !SameParentBytes(current.NextAfter, snapshot.NextAfter)
                 || current.Rows.Count != snapshot.Rows.Count || current.Rows.Where((row, n) => !row.DeviceId.AsSpan().SequenceEqual(snapshot.Rows[n].DeviceId)
                     || VersionVector.Compare(row.Vector, snapshot.Rows[n].Vector) != VvOrder.Equal || !row.Record.Body.SequenceEqual(snapshot.Rows[n].Record.Body) || !row.Record.Signature.SequenceEqual(snapshot.Rows[n].Record.Signature)).Any())
@@ -50,22 +51,23 @@ public sealed partial class FolderIndex
         }, cancellationToken);
     }
 
-    private static DirectoryParentPage ReadParentPage(SqliteConnection connection, SqliteTransaction transaction, DirectoryParentProof proof)
+    private static DirectoryParentPage ReadParentPage(SqliteConnection connection, SqliteTransaction transaction, DirectoryParentProof proof, int limit)
     {
         if (proof.Resetting || proof.DiscoveryComplete) throw new InvalidOperationException("Parent discovery is not open.");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT device_id,path_key,vv,record_body,signature,length(record_body)+64 FROM remote_files WHERE path_key=$path "
-            + (proof.DiscoveryAfter is null ? "" : "AND device_id>$after ") + "ORDER BY device_id LIMIT 33;";
+            + (proof.DiscoveryAfter is null ? "" : "AND device_id>$after ") + "ORDER BY device_id LIMIT $limit;";
+        command.Parameters.AddWithValue("$limit", limit + 1);
         command.Parameters.AddWithValue("$path", proof.PathKey); if (proof.DiscoveryAfter is not null) command.Parameters.AddWithValue("$after", proof.DiscoveryAfter);
         var rows = new List<RemoteFileRow>(); long bytes = 0; bool more = false; byte[]? after = proof.DiscoveryAfter; using var reader = command.ExecuteReader();
         while (reader.Read())
         {
             long size = reader.GetInt64(5);
-            if (rows.Count == 32 || rows.Count != 0 && size > 8 * 1024 * 1024 - bytes) { more = true; break; }
+            if (rows.Count == limit || rows.Count != 0 && size > 8 * 1024 * 1024 - bytes) { more = true; break; }
             after = reader.GetFieldValue<byte[]>(0); bytes += size;
             rows.Add(new(after, reader.GetString(1), VersionVector.Deserialize(reader.GetFieldValue<byte[]>(2)), new(reader.GetFieldValue<byte[]>(3), reader.GetFieldValue<byte[]>(4))));
         }
-        return new(proof.RemoteRevision, proof.DiscoveryAfter?.ToArray(), after?.ToArray(), more, rows.AsReadOnly());
+        return new(limit, proof.RemoteRevision, proof.DiscoveryAfter?.ToArray(), after?.ToArray(), more, rows.AsReadOnly());
     }
 
     private static void AddParentRoot(SqliteConnection connection, SqliteTransaction transaction, DirectoryParentProof proof, DirectoryMetadataSource source, long nowTicks)
