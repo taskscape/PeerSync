@@ -184,7 +184,7 @@ public sealed partial class DirectorySnapshotCaptureTests
         receiver.ReadDirectoryCaseProgress(sourceId, installed.InstalledFileId!).Exhausted.ShouldBeTrue(); receiver.HasPendingCasePreservation("topic").ShouldBeTrue();
         var proof = receiver.ReadDirectoryCaseMember(sourceId, installed.InstalledFileId!, "topic/a")!;
         proof.MemberSourceId.ShouldBe(CaseConflictPolicy.SourceId(VersionView.Open(sender.LocalFiles.Find("topic/a")!.Record!, keys, device)));
-        File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")).ShouldContain("case-root-source-failover");
+        File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")).ShouldContain("case-route-failover");
     }
     [Fact]
     public async Task MemberRecoveryCannotHashThroughAnExistingWriterAndPreservesTheGuardedFile()

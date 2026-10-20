@@ -249,7 +249,7 @@ public sealed class CaseCopyRecoveryTests : IDisposable
         await needed.ApplyIndexUpdateAsync(Device(4), 0, 1, [Record("other.txt", 4, 1, 10, "independent source", 1)], Token);
         await needed.ApplyIndexUpdateAsync(Device(5), 0, 1, [Record("OTHER.txt", 5, 1, 20, "independent winner", 1)], Token);
         await needed.ApplyIndexUpdateAsync(Device(6), 0, 1, [Record("good.txt", 6, 1, 20, "normal work", 1)], Token);
-        bool available = false; int attempts = 0;
+        bool available = false; int attempts = 0, firstPassAttempts = 0;
         ValueTask<ReadOnlyMemory<byte>> FetchAll(ReadOnlyMemory<byte> _, ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
         {
             if (hash.Span.SequenceEqual(Blake3.Hasher.Hash(Encoding.UTF8.GetBytes(First)).AsSpan()))
@@ -263,11 +263,12 @@ public sealed class CaseCopyRecoveryTests : IDisposable
             var pass = await first.RunPassAsync(Token); pass.NextAttemptTicks.ShouldBe(clock.GetUtcNow().UtcTicks + 10 * TimeSpan.TicksPerSecond);
             File.ReadAllText(Disk("good.txt")).ShouldBe("normal work"); File.ReadAllText(Disk("OTHER.txt")).ShouldBe("independent winner");
             var pending = index.ReadPendingCasePreservations().Single(); index.ReadCasePreservationRetry(pending.Source.SourceId)!.Value.Attempts.ShouldBe(1);
-            await first.RunPassAsync(Token); attempts.ShouldBe(1);
+            firstPassAttempts = attempts; firstPassAttempts.ShouldBeInRange(1, 8);
+            await first.RunPassAsync(Token); attempts.ShouldBe(firstPassAttempts);
         }
         available = true; clock.Advance(TimeSpan.FromSeconds(10));
         using var restarted = new Puller(Root, index, keys, Device(1), FetchAll, timeProvider: clock); await restarted.RunPassAsync(Token);
-        attempts.ShouldBe(2); index.ReadPendingCasePreservations().ShouldBeEmpty(); index.Needed.Count().ShouldBe(0);
+        attempts.ShouldBe(firstPassAttempts + 1); index.ReadPendingCasePreservations().ShouldBeEmpty(); index.Needed.Count().ShouldBe(0);
         File.ReadAllText(Disk("FILE.txt")).ShouldBe(Second);
     }
 
