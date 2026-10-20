@@ -55,7 +55,8 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 // Empty/completed roots also consume a scheduling unit, so one
                 // pass is bounded even if no new member bytes were captured.
                 long accepted = before is not null && before.InputHash.AsSpan().SequenceEqual(draft.InputHash) ? before.Accepted : 0;
-                remaining -= (int)Math.Clamp(draft.Accepted - accepted, 1, remaining);
+                bool resumeRebase = queued.ReconstructionOnly && before?.Hash is not null && before.InputEpoch == draft.InputEpoch;
+                if (!resumeRebase) remaining -= (int)Math.Clamp(draft.Accepted - accepted, 1, remaining);
                 if (draft.Hash is null)
                 {
                     journal?.TryWrite(new("directory.publication_pending", "directory-publication") { SessionId = session, Level = DiagnosticLevel.Debug,
@@ -77,8 +78,23 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 }
                 if (!identical)
                 {
-                    if (queued.ReconstructionOnly || !keys.CanWrite || template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
-                    var body = template.ExportBody(); body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
+                    if (!keys.CanWrite) { await Retry(null).ConfigureAwait(false); continue; }
+                    if (queued.ReconstructionOnly)
+                    {
+                        if (remaining == 0) continue;
+                        stage = "rebase";
+                        DirectoryRebasePass proof;
+                        try { proof = await DirectoryRebaseProof.AdvanceAsync(rootPath, index, keys, source, queued, draft, remaining, token).ConfigureAwait(false); }
+                        catch { remaining = 0; throw; } // Failure may follow a fully persisted offered prefix.
+                        remaining -= proof.Visited;
+                        journal?.TryWrite(new(proof.Complete ? "directory.rebase_complete" : "directory.rebase_pending", "directory-publication")
+                        { SessionId = session, Level = DiagnosticLevel.Debug, ItemsVisited = proof.Visited, ItemsDeferred = proof.Waiting ? 1 : 0 });
+                        if (!proof.Complete) { if (proof.Waiting) await Retry(null).ConfigureAwait(false); continue; }
+                        Checkpoint?.Invoke("rebase-proven");
+                    }
+                    else if (template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
+                    var body = queued.ReconstructionOnly ? DirectoryRebaseProof.CreateTemplate(template, source, clock.GetUtcNow().UtcTicks) : template.ExportBody();
+                    body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
                     var record = SignedRecordFactory.Create(body, keys);
                     publication = new(queued.Path, 1, 0, body.MtimeTicks, queued.Attributes, false, body.ChangedTicks, null,
                         body.Vv.ToDictionary(entry => entry.Device, entry => entry.Counter), record, queued.NativeId.ToArray());
@@ -88,6 +104,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                         scan |= await new SnapshotHistory(index, keys, source, settings, journal, clock).EnsureAsync(tree, previous, publication, null, token).ConfigureAwait(false);
                     }
                 }
+                else if (resumeRebase) remaining--; // Identical empty/completed roots still consume one unit.
                 stage = "commit";
                 var committed = await capture.CommitQueuedUnderGateAsync(queued, draft, publication, clock.GetUtcNow().UtcTicks, token).ConfigureAwait(false);
                 if (committed.Changed)
@@ -96,7 +113,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                     rebuild |= previous is { Type: 0, Deleted: false, Record: not null };
                 }
             }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or CryptographicException or SqliteException or InvalidOperationException)
+            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException or SqliteException or InvalidOperationException)
             { await Retry(error).ConfigureAwait(false); }
 
             async Task Retry(Exception? error)

@@ -17,7 +17,6 @@ public sealed partial class FolderIndex
     {
         ArgumentNullException.ThrowIfNull(expected); ArgumentNullException.ThrowIfNull(capture);
         var queued = FreezePublication(expected); ValidatePublication(queued); var draft = FreezeCapture(capture);
-        if (queued.ReconstructionOnly && publication is not null) throw new InvalidDataException("Reconstruction cannot replace its received signed row.");
         if (nowTicks is < 1 or > 3155378975999999999) throw new ArgumentOutOfRangeException(nameof(nowTicks));
         if (draft.Hash is not { Length: 32 } || draft.Length is null || draft.BuilderState is not null || draft.Accepted != draft.MemberCount
             || draft.ParentPath != queued.Path || draft.MemberCount != queued.ExpectedChildren || draft.InputEpoch is null
@@ -30,6 +29,13 @@ public sealed partial class FolderIndex
             var actual = RequirePublicationExpected(connection, transaction, queued); RequireCaptureExpected(connection, transaction, draft);
             if (HasIncompleteDirectoryCaseCopy(connection, transaction, PathRules.Key(queued.Path))) throw new InvalidOperationException("Directory case members are not installed.");
             RequireDirectoryCaptureEpoch(connection, transaction, draft.InputEpoch.Value);
+            if (queued.ReconstructionOnly && row is not null)
+            {
+                var proof = FindDirectoryRebase(connection, transaction, queued.Path);
+                if (proof is null || !proof.Complete || proof.InputEpoch != draft.InputEpoch || !proof.InputHash.AsSpan().SequenceEqual(draft.InputHash))
+                    throw new InvalidDataException("Reconstruction cannot replace its received signed row without causal proof.");
+                RequireRebaseInputs(connection, transaction, queued, draft, proof.GraphId);
+            }
             if (actual.Paused || actual.KeysEpoch != draft.InputEpoch) throw new InvalidOperationException("Directory publication is paused or its key proof changed.");
             string key = PathRules.Key(queued.Path);
             using (var children = connection.CreateCommand())

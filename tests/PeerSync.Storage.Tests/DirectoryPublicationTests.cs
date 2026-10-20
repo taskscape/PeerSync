@@ -170,6 +170,74 @@ public sealed class DirectoryPublicationTests : IDisposable
         await index.DiscardDirectoryPublicationAsync(replacement, Token); index.ReadDirectoryCapture("topic").ShouldBeNull(); index.ReadDirectoryPublication("topic").ShouldBeNull();
         index.ReadDirectoryPublication("zebra").ShouldNotBeNull(); index.ReadIndexHighWater().ShouldBe(0); index.LocalFiles.Count().ShouldBe(0);
     }
+    [Fact]
+    public async Task RebaseProgressIsAnExactBoundedPrefixThatSurvivesRestartAndClearsOnRestaging()
+    {
+        DirectoryPublication queued; DirectoryCaptureState draft; byte[] graph;
+        await using (var index = await Open())
+        {
+            (queued, draft, graph) = await RebaseInputs(index, 1001);
+            var proof = await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token); var page = index.ReadDirectoryGraphMemberPage(graph, limit: 1000);
+            await Should.ThrowAsync<InvalidOperationException>(() => index.AdvanceDirectoryRebaseAsync(queued, draft, proof, [page[1]], Token));
+            await Should.ThrowAsync<ArgumentOutOfRangeException>(() => index.AdvanceDirectoryRebaseAsync(queued, draft, proof, [.. page, page[0]], Token));
+            var advanced = await index.AdvanceDirectoryRebaseAsync(queued, draft, proof, page, Token); advanced.Cursor.ShouldBe(page[^1].PathKey); advanced.Complete.ShouldBeFalse();
+            await Should.ThrowAsync<InvalidOperationException>(() => index.AdvanceDirectoryRebaseAsync(queued, draft, proof, page, Token));
+        }
+        await using var reopened = await Open(); var resumed = await reopened.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        resumed.Cursor.ShouldBe("TOPIC/0999"); var last = reopened.ReadDirectoryGraphMemberPage(graph, resumed.Cursor); last.Count.ShouldBe(1);
+        using (var connection = Connect()) using (var command = connection.CreateCommand())
+        { command.CommandText = "CREATE TRIGGER fail_rebase_progress BEFORE UPDATE ON directory_rebases BEGIN SELECT RAISE(ABORT,'rebase prefix'); END;"; command.ExecuteNonQuery(); }
+        await Should.ThrowAsync<SqliteException>(() => reopened.AdvanceDirectoryRebaseAsync(queued, draft, resumed, last, Token));
+        (await reopened.BeginDirectoryRebaseAsync(queued, draft, graph, Token)).Cursor.ShouldBe(resumed.Cursor);
+        using (var connection = Connect()) using (var command = connection.CreateCommand()) { command.CommandText = "DROP TRIGGER fail_rebase_progress;"; command.ExecuteNonQuery(); }
+        (await reopened.AdvanceDirectoryRebaseAsync(queued, draft, resumed, last, Token)).Complete.ShouldBeTrue();
+        queued = await reopened.StageDirectoryPublicationAsync(queued with { Version = Guid.NewGuid() }, Token);
+        queued = await reopened.BindDirectoryPublicationKeysAsync(queued, draft.InputEpoch!.Value, Now, Token);
+        (await reopened.BeginDirectoryRebaseAsync(queued, draft, graph, Token)).Cursor.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task RebaseRejectsStaleEpochWrongGraphRootAndIncompleteOrRetiringGraph()
+    {
+        await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 1);
+        var proof = await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        byte[] wrong = graph.ToArray(); wrong[0] ^= 1;
+        await Should.ThrowAsync<InvalidDataException>(() => index.BeginDirectoryRebaseAsync(queued, draft, wrong, Token));
+        await Should.ThrowAsync<InvalidOperationException>(() => index.BeginDirectoryRebaseAsync(queued with { RootId = [1, .. new byte[23]] }, draft, graph, Token));
+        using (var connection = Connect()) using (var command = connection.CreateCommand()) { command.CommandText = "UPDATE directory_graphs SET retiring=1;"; command.ExecuteNonQuery(); }
+        await Should.ThrowAsync<InvalidOperationException>(() => index.BeginDirectoryRebaseAsync(queued, draft, graph, Token));
+        using (var connection = Connect()) using (var command = connection.CreateCommand()) { command.CommandText = "UPDATE directory_graphs SET retiring=0,complete=0;"; command.ExecuteNonQuery(); }
+        await Should.ThrowAsync<InvalidOperationException>(() => index.BeginDirectoryRebaseAsync(queued, draft, graph, Token));
+        using (var connection = Connect()) using (var command = connection.CreateCommand()) { command.CommandText = "UPDATE directory_graphs SET complete=1;"; command.ExecuteNonQuery(); }
+        await index.LocalFiles.UpsertAsync([new("other", 1, 0, Now, 16, false, Now, null, new Dictionary<ulong, ulong>(), null, new byte[16])], Token);
+        await Should.ThrowAsync<InvalidOperationException>(() => index.AdvanceDirectoryRebaseAsync(queued, draft, proof, [], Token));
+        draft = await index.BindDirectoryCaptureEpochAsync(draft, index.ReadDirectoryCaptureEpoch(), Token);
+        queued = await index.BindDirectoryPublicationKeysAsync(queued, draft.InputEpoch!.Value, Now, Token);
+        var reset = await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token); reset.Cursor.ShouldBeNull(); reset.InputEpoch.ShouldBe(1);
+        await index.DiscardDirectoryPublicationAsync(queued, Token);
+        using var read = Connect(); using var count = read.CreateCommand(); count.CommandText = "SELECT COUNT(*) FROM directory_rebases;"; ((long)count.ExecuteScalar()!).ShouldBe(0);
+    }
+
+    private async Task<(DirectoryPublication Queued, DirectoryCaptureState Draft, byte[] Graph)> RebaseInputs(FolderIndex index, int members)
+    {
+        var queued = await index.StageDirectoryPublicationAsync(Spec("topic") with { ReconstructionOnly = true, ExpectedChildren = 0 }, Token);
+        queued = await index.BindDirectoryPublicationKeysAsync(queued, 0, Now, Token);
+        var draft = await index.BeginDirectoryCaptureAsync("topic", Root, new byte[16], new byte[32], 0, new byte[16], Token);
+        draft = await index.AdvanceDirectoryCaptureAsync(draft, 0, null, null, new byte[32], 12, Token); draft = await index.BindDirectoryCaptureEpochAsync(draft, 0, Token);
+        using var digest = Blake3.Hasher.New(); digest.Update("PeerSync case source v1"u8); digest.Update(queued.Template.Body); digest.Update(queued.Template.Signature); byte[] graph = digest.Finalize().AsSpan().ToArray();
+        await index.BeginDirectoryGraphAsync(graph, Root, "topic", new byte[32], 12, Token);
+        await index.CompleteDirectoryGraphWorkAsync(graph, index.ReadDirectoryGraphWork(graph)!.Id, [], cancellationToken: Token);
+        using var connection = Connect(); using var transaction = connection.BeginTransaction(); using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT INTO directory_graph_members(graph_id,path_key,record_hash,record_length) VALUES($graph,$path,$hash,48);";
+        command.Parameters.AddWithValue("$graph", graph); command.Parameters.AddWithValue("$hash", new byte[32]); command.Parameters.Add("$path", SqliteType.Text);
+        for (int value = 0; value < members; value++)
+        {
+            command.Parameters["$path"].Value = "TOPIC/" + value.ToString("D4", System.Globalization.CultureInfo.InvariantCulture); command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+        return (queued, draft, graph);
+    }
+
     private async Task<FolderIndex> Open()
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

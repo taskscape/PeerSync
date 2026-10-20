@@ -305,6 +305,75 @@ public sealed class CaseCoordinationTests : IDisposable
         }
         finally { foreach (var link in links) await link.Connection.DisposeAsync(); }
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DirectoryCaseCopiesReconstructThroughAForwarderAfterOriginalOwnerDisconnects(bool readOnly)
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2);
+        await using var forwarder = await NodeAsync(3); await using var receiver = await NodeAsync(4, readOnly);
+        await PublishDirectory(a, "topic", "nested/shared.txt", First, early);
+        await PublishDirectory(b, "TOPIC", "nested/shared.txt", Second, early.AddMinutes(1));
+        var network = new InMemoryNetwork(); network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        var forwardingEndpoint = network.Register(forwarder.Id, forwarder.Engine.CreateHandler);
+        await using (var source = await forwarder.Engine.ConnectAsync(forwardingEndpoint.Connect(a.Id), Token))
+        {
+            await source.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+            for (int pass = 0; pass < 8; pass++) { var result = await forwarder.Engine.RunPassAsync(Token); forwarder.Clock.AdvanceTo(result.NextAttemptTicks); }
+            File.ReadAllText(Path.Combine(forwarder.Root, "topic", "nested", "shared.txt")).ShouldBe(First);
+            (await new BlockReferences(forwarder.Root, forwarder.Index, keys, forwarder.Id).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+        }
+        // No connection to the original owner remains. Only the forwarding PC
+        // and the independent winning author are reachable from this receiver.
+        var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        await using var forwarded = await receiver.Engine.ConnectAsync(endpoint.Connect(forwarder.Id), Token);
+        await using var winning = await receiver.Engine.ConnectAsync(endpoint.Connect(b.Id), Token);
+        await forwarded.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+        await winning.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+        for (int pass = 0; pass < 12; pass++) { var result = await receiver.Engine.RunPassAsync(Token); receiver.Clock.AdvanceTo(result.NextAttemptTicks); }
+        string copy = Directory.GetDirectories(receiver.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
+        File.ReadAllText(Path.Combine(copy, "nested", "shared.txt")).ShouldBe(First);
+        File.ReadAllText(Path.Combine(receiver.Root, "TOPIC", "nested", "shared.txt")).ShouldBe(Second);
+        receiver.Index.ReadPendingCasePreservations().ShouldBeEmpty(CaseState(receiver)); receiver.Index.Needed.Count().ShouldBe(0, CaseState(receiver));
+        receiver.Index.HasPendingDirectoryPublications().ShouldBeFalse(CaseState(receiver));
+        (await new BlockReferences(receiver.Root, receiver.Index, receiver.Access ?? keys, receiver.Id).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EditedPreservedSubtreeForwardsToAFreshReceiverWithBothOriginalAuthorsOffline(bool readOnly)
+    {
+        await using var a = await NodeAsync(1); await using var b = await NodeAsync(2);
+        await using var forwarder = await NodeAsync(3); await using var receiver = await NodeAsync(4, readOnly);
+        await PublishDirectory(a, "topic", "nested/shared.txt", First, early);
+        await PublishDirectory(b, "TOPIC", "nested/shared.txt", Second, early.AddMinutes(1));
+        var network = new InMemoryNetwork(); network.Register(a.Id, a.Engine.CreateHandler); network.Register(b.Id, b.Engine.CreateHandler);
+        var endpoint = network.Register(forwarder.Id, forwarder.Engine.CreateHandler);
+        await using (var first = await forwarder.Engine.ConnectAsync(endpoint.Connect(a.Id), Token))
+        await using (var second = await forwarder.Engine.ConnectAsync(endpoint.Connect(b.Id), Token))
+        {
+            await first.SynchronizeAsync(maxPages: 1, cancellationToken: Token); await second.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+            for (int pass = 0; pass < 12; pass++) { var result = await forwarder.Engine.RunPassAsync(Token); forwarder.Clock.AdvanceTo(result.NextAttemptTicks); }
+        }
+        string copy = Directory.GetDirectories(forwarder.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
+        string edited = Path.Combine(copy, "nested", "shared.txt"); File.WriteAllText(edited, "edited preserved subtree");
+        File.SetLastWriteTimeUtc(edited, early.AddMinutes(2)); forwarder.Engine.RequestScan();
+        for (int pass = 0; pass < 8; pass++) { var result = await forwarder.Engine.RunPassAsync(Token); forwarder.Clock.AdvanceTo(result.NextAttemptTicks); }
+        forwarder.Index.HasPendingDirectoryPublications().ShouldBeFalse(CaseState(forwarder));
+        var receiving = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        await using var forwarded = await receiver.Engine.ConnectAsync(receiving.Connect(forwarder.Id), Token);
+        await forwarded.SynchronizeAsync(maxPages: 1, cancellationToken: Token);
+        for (int pass = 0; pass < 12; pass++) { var result = await receiver.Engine.RunPassAsync(Token); receiver.Clock.AdvanceTo(result.NextAttemptTicks); }
+        var copies = Directory.GetDirectories(receiver.Root).Where(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal)).ToArray();
+        copies.Length.ShouldBe(1); Path.GetFileName(copies[0]).ShouldBe(Path.GetFileName(copy));
+        File.ReadAllText(Path.Combine(copies[0], "nested", "shared.txt")).ShouldBe("edited preserved subtree");
+        File.ReadAllText(Path.Combine(receiver.Root, "TOPIC", "nested", "shared.txt")).ShouldBe(Second);
+        receiver.Index.ReadPendingCasePreservations().ShouldBeEmpty(CaseState(receiver)); receiver.Index.Needed.Count().ShouldBe(0, CaseState(receiver));
+        receiver.Index.HasPendingDirectoryPublications().ShouldBeFalse(CaseState(receiver));
+        (await new BlockReferences(receiver.Root, receiver.Index, receiver.Access ?? keys, receiver.Id).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+    }
+
     private static async Task Publish(Node node,string path,string text,DateTime at)
     { string disk=Path.Combine(node.Root,path); File.WriteAllText(disk,text); File.SetLastWriteTimeUtc(disk,at); node.Engine.RequestScan(); await node.Engine.RunPassAsync(Token); }
     private async Task<Node> NodeAsync(ulong identity,bool readOnly=false)

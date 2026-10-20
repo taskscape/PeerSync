@@ -24,6 +24,10 @@ existing 1000-unit publication budget; descendants consume units even when no
 direct-child check is required. Advance only the exact next graph prefix in a
 FULL transaction. A local mutation invalidates the prefix, including across
 restart. Queue restaging clears it. Missing metadata/children remain pending.
+Resuming a completed capture spends its scheduling unit on rebase work so a
+one-unit pass can still advance. An exceptional attempt conservatively consumes
+its offered remaining budget. Pending/complete diagnostics report queue session
+and counts without child paths, hashes, envelopes or exception messages.
 
 After proof completion, increment this RW device's directory vector once,
 preserve the signed parent mtime, sign the captured root and retain history.

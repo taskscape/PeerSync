@@ -29,7 +29,8 @@ internal sealed partial class DirectorySnapshotCapture
                 throw new InvalidDataException("Directory template does not match its captured root.");
             if (publication is not null)
             {
-                if (templateBody.DirectorySnapshotHash.Length != 0) throw new InvalidDataException("New directory template already contains another root.");
+                if (queued.ReconstructionOnly) templateBody = DirectoryRebaseProof.CreateTemplate(template, sourceHint, version.ChangedTicks);
+                else if (templateBody.DirectorySnapshotHash.Length != 0) throw new InvalidDataException("New directory template already contains another root.");
                 if (!keys.CanWrite || !version.ModifiedBy.SequenceEqual(sourceHint) || VersionVector.Compare(version.Vector, current.Vector) != VvOrder.Equal)
                     throw new InvalidDataException("New directory publication has no local signing authority.");
                 body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0;
