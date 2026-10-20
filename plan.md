@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: core, hashing, storage/scanning, needed selection, recoverable application, archive/history/retention, ordered pulls, UTC clock foundations, in-memory transport, hierarchy/staging lifecycle, regular-file case preservation, runtime clock pipe/WPF status and shared debug-run retention are merged with green CI. Directory snapshot/subtree copying, metadata fetching and causal rebase pass local connected/recovery checks; production activation, directory CI/main acceptance, installed-client evidence, authenticated production transport and full phase-gate simulations remain open. | - |
+| P1 Local sync engine | 4-8 | In progress: core, hashing, storage/scanning, needed selection, recoverable application, archive/history/retention, ordered pulls, UTC clock foundations, in-memory transport, hierarchy/staging lifecycle, regular-file case preservation, runtime clock pipe/WPF status and shared debug-run retention are merged with green CI. Directory snapshot/subtree copying, metadata fetching and causal rebase are merged in PR #38 with green PR CI and pending main CI. Connected maintenance, scale and inactive campaign tools pass local checks; final-source corpus, CI campaign/history, installed-client evidence, authenticated production transport and full phase-gate acceptance remain open. | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -1782,6 +1782,7 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
 
   - [ ] **P1.6.2c Connected archive/history/block maintenance** [WIP @codex 2026-10-20]
     - Done when: the [maintenance scenario](docs/proposals/P1-connected-maintenance-simulation.md) performs real expiry/eviction while preserving current/needed/unknown data, then completes delayed transfer and unchanged global native version/convergence oracles; failure replay and focused/canonical/CI/main evidence pass. No retention parent closes from generated sync-only smoke.
+    - The [local maintenance report](docs/verification/P1-connected-maintenance-simulation-2026-10-20.md) proves two expired native archives, two evicted blocks, preserved pending/current/unknown data and successful delayed transfer with unchanged global version survival. All 1545 unit and eleven Simulation cases, native/probe/publishing and 600-second fuzz pass in 611.362 seconds. Follow-up CI/main remains pending.
 
 - [ ] **P1.6.3 Five-node scale corpus runner and evidence** [WIP @codex 2026-10-20]
   - Done when: an explicit small/intermediate/full-corpus procedure reports actual file counts, source/runtime/progress, final native/queue/reference convergence and overwritten-version survival; a completed five-node 100000-file report supports the Gate P1 line. Follow the [scale validation design](docs/proposals/P1-scale-corpus-validation.md). No gate acceptance comes from a preflight or property smoke.

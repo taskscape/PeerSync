@@ -44,8 +44,44 @@ c10739c passed shard zero before a local workflow commit changed HEAD; the sourc
 guard rejected the next shard. Neither is a day or a coordinated passing preflight.
 No failed source metadata is rewritten into passing evidence.
 
-A clean-worktree full shard check is being prepared to exercise actual build,
-clean source provenance, 200 flat cases and all four retained results. It is still
-local evidence and cannot satisfy the CI/five-day gate. Final CI/main, hosted
+The clean-worktree full-shard check and expanded seven-method preflight are
+completed in the addendum below. They remain local evidence and cannot satisfy
+the CI/five-day gate. Final CI/main, hosted
 preflight, live run/attempt history audit and separate 100000-file corpus remain
 mandatory before any relevant P1 checkbox is closed.
+
+## Expanded maintenance scope and actual clean full-shard proof
+
+The final scope adds connected production maintenance as a seventh baseline
+method. Each actual shard must prove native archive retirement/block eviction,
+with its maintenance JSON bound to the executable hash and (campaign mode)
+compiled source pin. All seventeen planner/evidence controls pass. Normal CI's
+existing required boundary job owns these controls; no sixth job is added.
+
+On clean-built source `627d5420f0772c836d002d17808fb585c06d3490`, full local
+shard zero passes 200 distinct flat seeds, one hierarchy sample, all four retained
+regressions and connected maintenance: eleven methods, no failed/skipped results.
+It runs from 05:22:47.8804210 to 05:32:08.3863894 UTC. Copied evidence:
+`artifacts/campaign-maintenance-full-627d542/shard-0/`, actual TRX, log and
+`local-shard-check.json`. This is local full-shard evidence, not a CI day.
+
+All five fresh local preflight shards then pass on that same immutable source:
+ten distinct flat seeds, five hierarchy samples, five maintenance cases, ten
+retired native archives and ten evicted blocks. The actual seven-method scope
+is verified for every shard. The current shared-registry coordinator revalidates
+all copied artifacts at `artifacts/p1-maintenance-preflight-627d542/`, producing
+`shared-registry-day.json` with `qualifiedCampaignDay=false` and
+`gateP1Passed=false`. Earlier six-method reports remain historical scopes.
+
+The scope registry is shared by Python campaign validation and PowerShell CI
+summary validation. Replaying the actual eleven-method TRX returns four retained
+and one maintenance case; the older ten-method TRX is correctly rejected for
+the expanded scope. Native fuzz duration and supervisor elapsed time now have
+separate fields. The changed supervisor's authoritative execution is still
+required in follow-up CI; its pure scope reader was tested against real TRX.
+
+Full combined canonical verification passes in 611.3623527 seconds: 1545 unit
+cases, eleven Simulation methods, all four retained regressions, native/probe/
+publishing, and actual 600.003059-second fuzz (182768 seeds, zero crashes).
+Scheduling remains inactive; hosted preflight, final-source full corpus,
+merged green CI and five actual qualified CI dates remain open.

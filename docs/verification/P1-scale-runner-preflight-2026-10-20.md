@@ -60,3 +60,29 @@ Evidence in the managed worktree:
 The 100000-file run, canonical/CI/main integration and the separate 1000-seed/
 five-day gate remain pending. Every smaller report keeps
 `corpusRequirementSatisfied=false` and `gateP1Passed=false`.
+
+## Repaired Engine integration and final local validation
+
+The scale runner was combined with the bounded campaign and connected production
+maintenance scenario in one follow-up candidate. On integration source
+`b0188f62b83939163ee6db62b8091bbb3c26ebef`, native oracle controls pass; the
+32-file/five-node run preserves 48 versions in 14.147615 seconds and the
+512-file run preserves 536 in 128.9708875 seconds. All final queues drain,
+independent native checks pass and the owned fixtures are removed. These are
+preflights, not a 100000-file pass. Evidence is in primary
+`artifacts/p1-scale-integrated-{oracle,32,512}.log` and `artifacts/scale/`.
+
+Combined-source canonical verification on
+`627d5420f0772c836d002d17808fb585c06d3490` passes all 1545 unit cases, eleven
+Simulation methods, eight flat/four hierarchy samples, all four retained seeds,
+connected maintenance, native probes and publishing in 611.3623527 seconds,
+exit 0. Actual fuzz runs 600.003059 seconds, 182768 seeds and zero crashes;
+no canonical scope is skipped. Evidence: `artifacts/p1-gate-maintenance-canonical.log`,
+`artifacts/verification-win-x64.json` and `artifacts/fuzz/summary.log`.
+
+Rebasing onto the exact PR #38 squash preserves C# trees byte for byte:
+`src` tree `31d024e2c5bd2b6606382a4e4643b6c7fab87c5b`, Simulation tree
+`23b547e5dc586cca56ade94b35cb7f872882d749`. Subsequent scope-report corrections
+are PowerShell/Python/JSON evidence tooling. The original full corpus continues
+in its immutable db641dd worktree; a final-source full run remains required.
+Final follow-up CI/main acceptance is pending.
