@@ -16,7 +16,7 @@ using Xunit;
 
 namespace PeerSync.Simulation;
 
-public sealed class RealEngineProperties(ITestOutputHelper output)
+public sealed partial class RealEngineProperties(ITestOutputHelper output)
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
@@ -84,12 +84,12 @@ public sealed class RealEngineProperties(ITestOutputHelper output)
         var surviving = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (root, index) in sources)
         {
-            foreach (string path in Directory.EnumerateFiles(root))
-                if (PathRules.IsValid(Path.GetFileName(path))) surviving.Add(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
+            foreach (var entry in VisibleTree(root))
+                if (entry.Value != DirectoryMarker) surviving.Add(entry.Value);
             foreach (var archive in index.Archive.ReadAll())
             {
-                string path = Path.Combine(root, archive.ArchivePath.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(path)) surviving.Add(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
+                string? hash = ReadGuardedHash(root, archive.ArchivePath, privatePath: true);
+                if (hash is not null) surviving.Add(hash);
             }
         }
         string[] lost = expected.Where(hash => !surviving.Contains(hash)).ToArray();
@@ -219,12 +219,7 @@ public sealed class RealEngineProperties(ITestOutputHelper output)
         private void AdvanceAll(TimeSpan duration) { foreach (var node in nodes) node.Clock.Advance(duration); }
         private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
         private static SortedDictionary<string, string> Visible(string root)
-        {
-            var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            foreach (string file in Directory.EnumerateFiles(root))
-                if (PathRules.IsValid(Path.GetFileName(file))) result.Add(Path.GetFileName(file), Hash(File.ReadAllBytes(file)));
-            return result;
-        }
+            => VisibleTree(root);
         private void SaveFailure(Exception error)
         {
             string failure = Path.Combine(evidence, "failures", seed.ToString(CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(failure);

@@ -1802,10 +1802,11 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
     - An additional local 1,000-case batch on the first PR #34 head passes: 9,807 versions, 500 actual renames and 1,001 actual deletions, all converged/preserved. This is initial flat-path evidence before the review repairs, not CI/five-day/100k-file gate evidence.
     - A [fresh local 1,000-case batch](docs/verification/P1-simulation-current-head-1000-2026-10-19.md) on submitted PR #35 head passes after the review/hierarchy/staging changes: 1,000 distinct seeds, 9,696 ledger versions, 508 actual renames and 940 actual deletions; exit 0 in 12m42s. Flat-path coverage remains separate from expanded scenarios, 1,000 CI cases, five consecutive days and the 100k-file gate.
 
-### Gate P1
+  - [ ] **P1.6.2b Hierarchical generated scenarios and recursive loss oracle** [WIP @codex 2026-10-20]
+    - Done when: three-to-seven-node generated nested/case/kind/rename/delete operations heal through public coordinators with identical visible native trees, preserved published versions, complete references and drained queues. Recursive oracle negative controls, seed/mode replay and failure retention pass local/canonical/CI/main checks. Follow the [scenario design](docs/proposals/P1-hierarchical-property-scenarios.md); smoke does not close 1000-seed/five-day/100k gates.
+    - The [recursive oracle prerequisite](docs/verification/P1.6.2b-recursive-oracle-2026-10-20.md) adds guarded recursive native trees and indexed-archive hashing, with two passing negative/positive native controls and all five Simulation methods/eight flat scenarios passing locally. Hierarchical generation, canonical/CI/main and full phase gates remain open.
 
-- [ ] **P1.6.2b Hierarchical generated scenarios and recursive loss oracle** [WIP @codex 2026-10-20]
-  - Done when: three-to-seven-node generated nested/case/kind/rename/delete operations heal through public coordinators with identical visible native trees, preserved published versions, complete references and drained queues. Recursive oracle negative controls, seed/mode replay and failure retention pass local/canonical/CI/main checks. Follow the [scenario design](docs/proposals/P1-hierarchical-property-scenarios.md); smoke does not close 1000-seed/five-day/100k gates.
+### Gate P1
 
 - [ ] All P1 tasks ticked.
 - [ ] Five simulated nodes converge on a 100,000-file corpus with zero lost versions (attach the report).
