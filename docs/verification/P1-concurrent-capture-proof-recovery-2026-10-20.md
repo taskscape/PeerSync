@@ -92,3 +92,11 @@ supervisor takes 2532.8416656 seconds, separate from actual fuzz duration.
 The exact artifacts and strict scope are under `artifacts/ci41-budget-*`.
 That green bounded run does not cover the new two-owner state, so PR #41 is
 held unmerged until this additional repair meets local and PR/main acceptance.
+
+Subsequently, [final PR/main acceptance](P1-convergence-allocation-ci-merge-2026-10-20.md)
+passes all five jobs on the repaired source. The older immutable 4c574b9 full
+corpus independently [confirms the same stale-proof state](P1-scale-revival-capture-deferral-2026-10-20.md)
+with a verified 246-byte canonical block. Its identified process is stopped
+after read-only native/catalog validation and evidence preservation; its
+original fixture remains unmodified. It is not a passing full corpus. The
+fresh repaired-source full run remains active and mandatory.
