@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Storage.FolderDb;
@@ -21,7 +22,7 @@ public sealed partial class FileApplier
             Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, CancellationToken token)
         {
             this.owner = owner; this.pending = pending; this.source = source; this.fetch = fetch;
-            deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(300));
         }
 
         internal async ValueTask<ReadOnlyMemory<byte>> FetchAsync(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
@@ -39,7 +40,8 @@ public sealed partial class FileApplier
             {
                 cancellation.ThrowIfCancellationRequested(); if (deadline.IsCancellationRequested) break;
                 using var routeDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation, deadline.Token);
-                routeDeadline.CancelAfter(TimeSpan.FromSeconds(1));
+                routeDeadline.CancelAfter(TimeSpan.FromSeconds(1 + length / (256.0 * 1024)));
+                var watch = Stopwatch.StartNew();
                 try
                 {
                     var response = await fetch(candidate, hash, length, routeDeadline.Token).ConfigureAwait(false);
@@ -52,23 +54,23 @@ public sealed partial class FileApplier
                     {
                         using var references = await FolderReferenceGate.AcquireAsync(owner.index, cancellation).ConfigureAwait(false);
                         await owner.index.RememberCaseBlockRouteAsync(pending, candidate, cancellation).ConfigureAwait(false);
-                        if (!candidate.AsSpan().SequenceEqual(preferred)) Log("failover");
+                        if (!candidate.AsSpan().SequenceEqual(preferred)) Log("failover", length, watch.ElapsedMilliseconds);
                         preferred = candidate.ToArray(); remembered = preferred;
                     }
                     return owned;
                 }
                 catch (Exception error) when (CaseSourceUnavailable(error, cancellation) && error is not OperationCanceledException || error is CryptographicException)
-                { Log("unavailable", error); }
+                { Log("unavailable", length, watch.ElapsedMilliseconds, error); }
                 catch (OperationCanceledException error) when (!cancellation.IsCancellationRequested)
-                { Log("timeout", error); }
+                { Log("timeout", length, watch.ElapsedMilliseconds, error); }
             }
             cancellation.ThrowIfCancellationRequested();
             throw new IOException("No authenticated case payload route is available.");
         }
 
-        private void Log(string stage, Exception? error = null) => owner.journal?.TryWrite(new("apply.case-route-" + stage, "case-route")
+        private void Log(string stage, int length, long elapsed, Exception? error = null) => owner.journal?.TryWrite(new("apply.case-route-" + stage, "case-route")
         {
-            SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
+            SessionId = session, Bytes = length, ElapsedMilliseconds = elapsed, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
             ErrorCode = error is OperationCanceledException ? "timeout" : error?.GetType().Name, HResult = error?.HResult
         });
         public void Dispose() => deadline.Dispose();

@@ -9,6 +9,20 @@ namespace PeerSync.Engine.Tests;
 public sealed partial class DirectorySnapshotCaptureTests
 {
     [Fact]
+    public async Task CasePayloadRoutesAllowTransferTimeForLargerBlocksOnSlowerLinks()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); await AdmitDirectoryCase(index);
+        await index.Devices.UpsertAsync([new([2, .. new byte[31]])], Token);
+        var pending = index.ReadPendingCasePreservations().Single(); var source = VersionView.Open(pending.Source.Record, keys, pending.Source.SourceDevice);
+        byte[] bytes = new byte[256 * 1024]; Random.Shared.NextBytes(bytes); byte[] hash = Blake3.Hasher.Hash(bytes).AsSpan().ToArray();
+        using var routes = new FileApplier.CaseBlockFetch(new(Root, index, keys, device), pending, source, async (_, _, _, token) =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(1250), token); return bytes;
+        }, Token);
+        (await routes.FetchAsync(hash, bytes.Length, Token)).ToArray().ShouldBe(bytes);
+    }
+
+    [Fact]
     public async Task CasePayloadRoutesSkipCorruptAndStalledPeersWithoutHoldingTheReferenceGate()
     {
         await using var index = await FolderIndex.OpenAsync(Database, Token); await AdmitDirectoryCase(index);
