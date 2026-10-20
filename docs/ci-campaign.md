@@ -66,3 +66,26 @@ the live GitHub check. A status badge, preflight, local 1000-case run or five
 attempts on one calendar date cannot prove five campaign days. Keep the
 100000-file local corpus, required main CI and approved external validation
 gates separate. No checkbox is ticked before actual evidence and merged CI.
+
+## Manual allocation diagnostic
+
+The separate `P1 manual rerun allocation probe` workflow verifies hosted cached
+planner behavior before the campaign budget is activated. It executes no
+product tests and uses only three one-minute Linux jobs. Its exact allocation
+conditions are drift-checked against the campaign by normal CI.
+
+After its source is merged and normal PR/main CI is green, dispatch it once
+with `mode=campaign` and once with `mode=preflight`. Each first attempt must
+have a successful plan, an intentionally failed shard and a successful report.
+For each recorded run ID execute only `gh run rerun RUN_ID --failed` once.
+Do not re-run all jobs: this specifically tests reuse of the successful plan.
+
+Save actual per-attempt run/job/step metadata through GitHub's workflow-run
+attempt API and inspect the logs. Require the same original planner job ID,
+attempt 1 and cached outputs. The campaign-mode second attempt must execute
+no new shard/report steps. The preflight-mode second attempt must execute both
+jobs successfully with cached planner attempt 1. Preserve intentional negative
+first attempts; do not label them product CI failures or campaign dates.
+These diagnostics use their own workflow counter and never modify activation
+variables or generate qualified-day artifacts. Dispatch exactly those two modes
+and one failed-job rerun each; retain the evidence before closing P1.6.4a1.

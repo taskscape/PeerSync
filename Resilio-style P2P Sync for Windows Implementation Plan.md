@@ -897,6 +897,22 @@ must use this facade; raw engine/storage entry points are trusted local
 primitives, not authenticated network admission. Disconnect resets the session
 sample, including admission of queued work.
 
+Clock integration validation is phased by the user's explicit 2026-10-20
+approval. P1 retains the peer-bound engine admission facade, immutable Hello
+and transactional/handoff checks, public identity-bound in-memory integration,
+typed runtime lifecycle, actual authorized local pipe with owner/kernel PID
+verification, and inspected real WPF numeric skew/recovery/failure renders.
+Actual installed PeerSync service supervision and certificate-bound production
+QUIC/TCP/folder-handshake integration are unverified and remain mandatory at
+P2.5.7 and Gate P2. This resolves the forward dependency without changing clock
+policy, pipe security or explicit unavailable production status. The default
+client must be exercised against the fixed installed service/account, including
+running/stopped/missing and wrong-owner/PID/cancellation/caller authorization.
+Real authenticated peer clock skew must block all index exchange, display the
+numeric reason and recover through the actual control UI after reconnect.
+Retain native evidence using generated peers and injected peer clock samples;
+do not alter the host clock or overwrite an existing service installation.
+
 The source design's mtime rule takes precedence over the draft checklist's
 blanket `changed_ticks` comparison: a newly noticed old offline file must not
 beat a genuinely newer edit. Tombstones use their signed deletion timestamp
@@ -1891,3 +1907,13 @@ shard and report jobs require github.run_attempt=1 before runner allocation.
 Daily and standalone history validation independently require integer attempt 1.
 Explicit manual preflight reruns remain supported and non-gating. See
  docs/proposals/P1-campaign-rerun-budget-repair.md for regression controls.
+
+Hosted rerun validation uses a separate manual Linux-only allocation probe.
+Its plan/shard/report allocation expressions must exactly match the campaign
+workflow, with drift checked in normal CI. A successful synthetic planner emits
+campaign or preflight outputs; one deliberate first-attempt shard failure permits
+GitHub's failed-job rerun while reusing that planner. Attempt two must allocate
+no campaign shard/report runners, whereas preflight must execute and succeed.
+Retain authoritative per-attempt job/step metadata and cached planner identity.
+These diagnostic runs never execute product tests, allocate Windows runners,
+modify activation variables, consume campaign run numbers or count as days.

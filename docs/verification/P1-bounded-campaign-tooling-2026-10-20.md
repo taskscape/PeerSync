@@ -85,3 +85,21 @@ cases, eleven Simulation methods, all four retained regressions, native/probe/
 publishing, and actual 600.003059-second fuzz (182768 seeds, zero crashes).
 Scheduling remains inactive; hosted preflight, final-source full corpus,
 merged green CI and five actual qualified CI dates remain open.
+
+At 06:55 UTC, a read-only integration check against actual GitHub source/check
+metadata confirms that the production planner rejects campaign activation for
+merged source `bf68d97743167730722913672b2562e1e86cf183`: four required checks
+are green, but `fuzz-smoke` is unfinished. Evidence is retained in
+`artifacts/campaign-live-source-readiness-before-green.json`. Diagnostic
+run-number/bound inputs are synthetic; no repository variables, workflow runs
+or schedules were changed. This validates the live source-readiness guard and
+does not count as hosted preflight, a campaign attempt or a qualified day.
+
+After main run 39381507911 passes all five jobs, the same read-only source
+guard accepts that merged source with all five required check names. The
+positive snapshot is `artifacts/campaign-live-source-readiness-after-green.json`;
+its run-number/bound inputs remain diagnostic, not repository activation.
+Actual hosted preflight run 39385642102 is now executing five shards on
+`bf68d97743167730722913672b2562e1e86cf183`. Scheduling variables remain unset.
+The separate manual allocation probe has 28 passing local controls and awaits
+new merged CI plus actual cached-planner rerun proof. No qualified day is claimed.
