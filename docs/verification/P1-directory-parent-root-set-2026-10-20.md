@@ -66,8 +66,11 @@ locally; the previous green remote head does not validate this repair.
 Evidence: `artifacts/p1-parent-root-set-canonical.log`,
 `artifacts/verification-win-x64.json` and `artifacts/tests/`.
 
-Expanded hierarchy batch, CI submission and merge are still pending at this
-checkpoint. The 1000-seed
+The [expanded hierarchy repair report](P1-hierarchical-root-set-repair-2026-10-20.md)
+records a subsequent 20/20 fresh generated batch and all three checked-in
+regression cases passing. The harness is now integrated with the repair for
+one CI submission. Integrated canonical verification, CI and merge remain
+pending. The 1000-seed
 CI/five-day and five-node 100000-file gates, installed service, LAN and native
 NAT validation remain separate and unverified. No new remote CI run was
 started for these local repairs.

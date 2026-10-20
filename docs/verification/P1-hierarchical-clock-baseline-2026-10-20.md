@@ -1,5 +1,10 @@
 # Expanded hierarchy clock baseline
 
+Historical failures below are repaired by schema 35. See
+[the expanded repair report](P1-hierarchical-root-set-repair-2026-10-20.md)
+for passing retained regressions and a fresh 20-case batch. These historical
+source-specific results remain unchanged.
+
 The local requested 20-case hierarchy batch on production route repair 1154511
 fails, with 15 completed passing cases, two retained failure fixtures and
 CsCheck reporting one shrink and three skipped samples. The method exits with
