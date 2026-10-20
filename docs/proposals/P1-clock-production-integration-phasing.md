@@ -1,6 +1,8 @@
 # Resolve the P1 clock integration dependency cycle
 
-This is a proposal; existing acceptance remains unchanged until approved.
+Status: explicitly approved by the user on 2026-10-20: "Approve narrow phasing
+(Recommended)". Apply only the validation split below; the deferred installed
+service/production transport requirements remain mandatory at Gate P2.
 
 `plan.md` section 0.1 requires phases to run strictly in order, and Gate P1
 requires all P1 tasks ticked. P1.5.5b/P1.5.5c2 nevertheless require production
