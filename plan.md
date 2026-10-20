@@ -1805,6 +1805,7 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
   - [ ] **P1.6.2b Hierarchical generated scenarios and recursive loss oracle** [WIP @codex 2026-10-20]
     - Done when: three-to-seven-node generated nested/case/kind/rename/delete operations heal through public coordinators with identical visible native trees, preserved published versions, complete references and drained queues. Recursive oracle negative controls, seed/mode replay and failure retention pass local/canonical/CI/main checks. Follow the [scenario design](docs/proposals/P1-hierarchical-property-scenarios.md); smoke does not close 1000-seed/five-day/100k gates.
     - The [recursive oracle prerequisite](docs/verification/P1.6.2b-recursive-oracle-2026-10-20.md) adds guarded recursive native trees and indexed-archive hashing, with two passing negative/positive native controls and all five Simulation methods/eight flat scenarios passing locally. Hierarchical generation, canonical/CI/main and full phase gates remain open.
+    - [Hierarchical route checkpoint](docs/verification/P1-hierarchical-routing-repair-2026-10-20.md): retained seven-node seed 1878823561 now passes with all final oracles; fresh eight-flat/four-hierarchy smoke and six methods pass in 137.186 seconds. This is local smoke, separate from merged/CI/1000-case/five-day/100k-file acceptance.
 
 ### Gate P1
 
