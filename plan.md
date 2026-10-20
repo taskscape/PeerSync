@@ -1810,6 +1810,7 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
     - The [review repair checkpoint](docs/verification/P1-campaign-rerun-budget-2026-10-20.md) reproduces eight failing assertions/subcases, then passes all 26 planner/evidence/allocation controls, pre-build campaign rejection and a real seven-method attempt-2 preflight. Updated CI/main remains pending; schedules stay inactive.
     - [ ] **P1.6.4a1 Hosted cached-planner allocation proof** [WIP @codex 2026-10-20]
       - Done when: the [manual Linux probe](docs/proposals/P1-hosted-rerun-allocation-proof.md) shares exact production allocation expressions with drift controls, actual failed-job reruns preserve the successful planner, campaign attempt two executes no fresh shard/report steps and preflight attempt two succeeds. Retain actual source/run/attempt/job/step metadata and green PR/main proof; diagnostics never count as campaign dates or consume Windows campaign attempts.
+      - [Local probe implementation](docs/verification/P1-hosted-allocation-probe-2026-10-20.md) reproduces four missing-workflow errors/subcases, then passes all 28 controls plus YAML/embedded-Python syntax validation. Manual-only/one-minute Linux bounds and exact production-expression drift checks are enforced. Actual hosted reruns and new PR/main acceptance remain pending; parent and child stay open.
 
 ### Gate P1
 

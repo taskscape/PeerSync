@@ -1,0 +1,91 @@
+name: P1 manual rerun allocation probe
+run-name: P1 allocation probe (${{ inputs.mode }})
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [campaign, preflight]
+        default: campaign
+        required: true
+permissions: {}
+concurrency:
+  group: p1-allocation-probe-${{ inputs.mode }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    # Kept byte-identical to campaign allocation guards by normal CI controls.
+    if: ${{ (github.event_name == 'workflow_dispatch' || (vars.PEERSYNC_P1_SOAK_SOURCE != '' && vars.PEERSYNC_P1_SOAK_LAST_RUN != '' && github.run_number <= fromJSON(vars.PEERSYNC_P1_SOAK_LAST_RUN))) && (github.run_attempt == '1' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      active: ${{ steps.fixture.outputs.active }}
+      mode: ${{ steps.fixture.outputs.mode }}
+      planner_attempt: ${{ steps.fixture.outputs.attempt }}
+      planner_run: ${{ steps.fixture.outputs.run }}
+    steps:
+      - name: Successful diagnostic planner (not campaign evidence)
+        id: fixture
+        env:
+          PROBE_MODE: ${{ inputs.mode }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          mode = os.environ['PROBE_MODE']
+          assert mode in ('campaign', 'preflight')
+          assert os.environ['GITHUB_RUN_ATTEMPT'] == '1'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('active=true\nmode=' + mode + '\nattempt=1\nrun=' + os.environ['GITHUB_RUN_ID'] + '\n')
+          print(json.dumps(dict(diagnostic=True, mode=mode, source=os.environ['GITHUB_SHA'],
+              runId=os.environ['GITHUB_RUN_ID'], plannerAttempt=1, qualifiedCampaignDay=False, gateP1Passed=False)))
+          PY
+  shards:
+    needs: plan
+    if: ${{ needs.plan.outputs.active == 'true' && (needs.plan.outputs.mode != 'campaign' || github.run_attempt == '1') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Record actual allocation and cached planner context
+        env:
+          PROBE_MODE: ${{ needs.plan.outputs.mode }}
+          PLANNER_ATTEMPT: ${{ needs.plan.outputs.planner_attempt }}
+          PLANNER_RUN: ${{ needs.plan.outputs.planner_run }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
+          assert os.environ['PLANNER_ATTEMPT'] == '1'
+          assert os.environ['PLANNER_RUN'] == os.environ['GITHUB_RUN_ID']
+          assert attempt in (1, 2)
+          assert os.environ['PROBE_MODE'] != 'campaign' or attempt == 1
+          print(json.dumps(dict(diagnostic=True, mode=os.environ['PROBE_MODE'], attempt=attempt,
+              cachedPlannerAttempt=1, source=os.environ['GITHUB_SHA'], runId=os.environ['GITHUB_RUN_ID'],
+              qualifiedCampaignDay=False, gateP1Passed=False)))
+          PY
+      - name: Intentional first-attempt failure for failed-job rerun
+        if: ${{ github.run_attempt == '1' }}
+        run: exit 1
+  report:
+    needs: [plan, shards]
+    if: ${{ always() && needs.plan.outputs.active == 'true' && (needs.plan.outputs.mode != 'campaign' || github.run_attempt == '1') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Record diagnostic result (never a qualified campaign day)
+        env:
+          PROBE_MODE: ${{ needs.plan.outputs.mode }}
+          PLANNER_ATTEMPT: ${{ needs.plan.outputs.planner_attempt }}
+          PLANNER_RUN: ${{ needs.plan.outputs.planner_run }}
+          SHARD_RESULT: ${{ needs.shards.result }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
+          mode, result = os.environ['PROBE_MODE'], os.environ['SHARD_RESULT']
+          assert os.environ['PLANNER_ATTEMPT'] == '1'
+          assert os.environ['PLANNER_RUN'] == os.environ['GITHUB_RUN_ID']
+          assert (attempt == 1 and result == 'failure') or (attempt == 2 and mode == 'preflight' and result == 'success')
+          print(json.dumps(dict(diagnostic=True, mode=mode, attempt=attempt, cachedPlannerAttempt=1,
+              shardResult=result, source=os.environ['GITHUB_SHA'], runId=os.environ['GITHUB_RUN_ID'],
+              qualifiedCampaignDay=False, gateP1Passed=False)))
+          PY

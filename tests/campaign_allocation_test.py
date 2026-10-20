@@ -6,14 +6,19 @@ import unittest
 from pathlib import Path
 
 
-def allocation(job, *, attempt="1", mode="campaign", event="workflow_dispatch", active="true", source="a" * 40, last="10", run=10):
-    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/p1-campaign.yml"
+def job_expression(workflow, job):
     current = None; expression = None
     for line in workflow.read_text(encoding="utf-8").splitlines():
         match = re.fullmatch(r"  ([a-z_]+):", line)
         if match: current = match[1]
         if current == job and line.startswith("    if: "): expression = line[8:].strip()
     if expression is None: raise ValueError("Missing job allocation guard")
+    return expression
+
+
+def allocation(job, *, attempt="1", mode="campaign", event="workflow_dispatch", active="true", source="a" * 40, last="10", run=10):
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/p1-campaign.yml"
+    expression = job_expression(workflow, job)
     expression = expression.removeprefix("${{").removesuffix("}}").strip().replace("&&", " and ").replace("||", " or ")
     context = dict(github=dict(event_name=event, run_attempt=attempt, run_number=run), inputs=dict(mode=mode if event == "workflow_dispatch" else ""),
                    vars=dict(PEERSYNC_P1_SOAK_SOURCE=source, PEERSYNC_P1_SOAK_LAST_RUN=last), needs=dict(plan=dict(outputs=dict(active=active, mode=mode))))
@@ -59,6 +64,24 @@ class CampaignAllocationTests(unittest.TestCase):
 
     def test_expired_schedule_cannot_allocate_plan(self):
         self.assertFalse(allocation("plan", event="schedule", run=11))
+
+    def test_hosted_probe_uses_exact_production_allocation_conditions(self):
+        directory = Path(__file__).resolve().parents[1] / ".github/workflows"
+        for job in ("plan", "shards", "report"):
+            with self.subTest(job=job):
+                self.assertEqual(job_expression(directory / "p1-campaign.yml", job),
+                                 job_expression(directory / "p1-allocation-probe.yml", job))
+
+    def test_hosted_probe_is_manual_linux_only_with_one_minute_jobs(self):
+        path = Path(__file__).resolve().parents[1] / ".github/workflows/p1-allocation-probe.yml"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("  workflow_dispatch:", text)
+        self.assertNotRegex(text, re.compile(r"^  (?:schedule|push|pull_request):", re.M))
+        self.assertEqual(re.findall(r"^    runs-on: (.+)$", text, re.M), ["ubuntu-latest"] * 3)
+        self.assertEqual(re.findall(r"^    timeout-minutes: (.+)$", text, re.M), ["1"] * 3)
+        self.assertNotIn("uses:", text)
+        self.assertNotIn("Run-CampaignShard", text)
+        self.assertNotIn("gh variable", text)
 
 
 if __name__ == "__main__": unittest.main()
