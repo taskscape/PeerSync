@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/spikes/">
+    <Project Path="../spikes/ControlPipe/ControlPipe.csproj" />
+    <Project Path="../spikes/DeviceCert/DeviceCert.csproj" />
+    <Project Path="../spikes/QuicBasics/QuicBasics.csproj" />
+    <Project Path="../spikes/QuicPunch/QuicPunch.csproj" />
+    <Project Path="../spikes/Rendezvous99/Rendezvous99.csproj" />
+    <Project Path="../spikes/WatcherStress/WatcherStress.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="../tests/PeerSync.Engine.Tests/PeerSync.Engine.Tests.csproj" />
+  </Folder>
+</Solution>
