@@ -1679,6 +1679,31 @@ those bundles exercise protocol/diagnostic behavior, and can use the included
 all probe outputs, signatures and native runtime checks. Production service,
 app and CLI installer packaging retains its ReadyToRun requirement below.
 
+### Native Server verification critical path
+
+Run 39411518907 reaches the Server 2025 Engine child's eleven-minute deadline
+after 934 successful results, leaving 68 of its required 1002 cases unfinished.
+Its P0/cross-account probes pass; the unchanged complete 1003-case scope passes
+on Server 2022. Preserve this as incomplete CI, without retrying an unchanged
+head, dropping more tests or increasing the fifteen-minute job ceiling.
+
+Use an explicit native-verification solution containing Engine.Tests and every
+P0 spike required by the Server runner, instead of building unrelated WPF,
+packaging and other test projects before starting Engine. All required test
+and spike outputs are built before the immutable no-build Engine child starts;
+independent account-service publication may continue as before. Normal x64 /
+ARM64 packaging and canonical verification retain their full build scopes.
+Bound the complete Server verification script from before its build, reserving
+setup/upload/cleanup headroom inside the unchanged job ceiling; derive the
+Engine wait from that remaining shared budget rather than adding a fixed
+child deadline after an unmeasured solution build. Preserve process cleanup,
+stdout/stderr/TRX, all native probes and the existing single duplicate capacity
+exclusion on Server 2025. Record build and remaining-wait timings in success
+and failure evidence. Reproduce the hosted incomplete scope, measure the
+unchanged local runner, validate the narrowed build closure and execute the
+complete native runner locally before one batched CI update. Hosted acceptance
+still requires all five jobs and actual Server 2022/2025 results.
+
 ## Packaging and deployment
 
 One signed Inno Setup 7 installer per architecture (`PeerSync-Setup-<version>-x64.exe` and `-arm64.exe`) installs the service and the app for all users. It needs administrator rights once, and none for daily use after that. Inno Setup has no built-in service support, so the script drives `sc.exe`, `netsh` and `icacls` itself, and stops the service before replacing files.

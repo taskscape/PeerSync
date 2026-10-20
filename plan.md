@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | PR #41 Server 2025 reaches its Engine deadline after 934 passing cases, leaving 68 unfinished while native probes pass. Preserve scope and the 15-minute job limit; measure a focused Engine/P0 build and a shared script wall budget before a locally verified batched CI repair. | Native Server verification critical path |
 | 2026-10-20 | A physically retained directory republished after a logical signed tombstone is a new local revival. Give only that RW directory revival a published mtime after the verified deletion time/current clock, retain stable staged templates and ordinary live/file mtimes, and preserve data on unrepresentable timestamps. | Subtree deletion and preserved-copy convergence |
 | 2026-10-20 | PR #41 CI retains hierarchy seed 794669444: after subtree deletions and preserved-copy edits, visible trees differ and three peers repeatedly fail two apply items. Preserve/replay the exact fixture, diagnose the causal apply/recovery errors and retain a permanent regression without relaxing any native/ownership/loss or healing bound. | Subtree deletion and preserved-copy convergence |
 | 2026-10-20 | Retained signed records identify root classes split by ChangedTicks provenance. Group that timestamp only within complete authenticated parent root/child proof, preserve path/mtime/attributes/ModifiedBy and strict same-body fallback, and invalidate old proof-class witnesses with a v2 digest. Local canonical validation rejects broader author normalization; the exact base/current four-node comparison retains author boundaries. | Unchanged directory publication convergence |
@@ -1824,6 +1825,9 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
     - [ ] **P1.6.4a1 Hosted cached-planner allocation proof** [WIP @codex 2026-10-20]
       - Done when: the [manual Linux probe](docs/proposals/P1-hosted-rerun-allocation-proof.md) shares exact production allocation expressions with drift controls, actual failed-job reruns preserve the successful planner, campaign attempt two executes no fresh shard/report steps and preflight attempt two succeeds. Retain actual source/run/attempt/job/step metadata and green PR/main proof; diagnostics never count as campaign dates or consume Windows campaign attempts.
       - [Local probe implementation](docs/verification/P1-hosted-allocation-probe-2026-10-20.md) reproduces four missing-workflow errors/subcases, then passes all 28 controls plus YAML/embedded-Python syntax validation. Manual-only/one-minute Linux bounds and exact production-expression drift checks are enforced. Actual hosted reruns and new PR/main acceptance remain pending; parent and child stay open.
+
+- [ ] **P1.6.5 Native Server verification critical path** [WIP @codex 2026-10-20]
+  - Done when: the [runner design](docs/proposals/P1-native-server-critical-path.md) retains every native/service check, full Server 2022 Engine scope and the existing Server 2025 duplicate exclusion within unchanged five-job/15-minute limits. Preserve the hosted 934/1002 incomplete scope, measure the original local runner, validate the focused build closure/shared budget and complete revised local plus actual PR/main acceptance. No phase gate closes from a timeout or local timing alone.
 
 ### Gate P1
 
