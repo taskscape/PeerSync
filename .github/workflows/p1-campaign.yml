@@ -1,0 +1,104 @@
+name: P1 bounded seed campaign
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [preflight, campaign]
+        default: preflight
+      source:
+        type: string
+        required: false
+        description: Immutable source SHA; campaign must match its activation pin
+  schedule:
+    - cron: '12 5 * * *'
+permissions:
+  contents: read
+  actions: read
+  checks: read
+concurrency:
+  group: p1-bounded-campaign
+  cancel-in-progress: false
+jobs:
+  plan:
+    # No runner is allocated for scheduled runs without explicit bounded activation.
+    if: ${{ github.event_name == 'workflow_dispatch' || (vars.PEERSYNC_P1_SOAK_SOURCE != '' && vars.PEERSYNC_P1_SOAK_LAST_RUN != '' && github.run_number <= fromJSON(vars.PEERSYNC_P1_SOAK_LAST_RUN)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      active: ${{ steps.plan.outputs.active }}
+      mode: ${{ steps.plan.outputs.mode }}
+      source: ${{ steps.plan.outputs.source }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify immutable source and activation bounds
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOAK_MODE: ${{ inputs.mode }}
+          SOAK_REQUESTED_SOURCE: ${{ inputs.source }}
+          SOAK_PINNED_SOURCE: ${{ vars.PEERSYNC_P1_SOAK_SOURCE }}
+          SOAK_LAST_RUN: ${{ vars.PEERSYNC_P1_SOAK_LAST_RUN }}
+          SOAK_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 build/campaign_plan.py
+  shards:
+    needs: plan
+    if: ${{ needs.plan.outputs.active == 'true' }}
+    runs-on: windows-latest
+    # 200 flat cases plus one hierarchy sample; shard zero also owns all
+    # three retained regressions. Ceilings bound attempts, not target runtime.
+    timeout-minutes: ${{ matrix.shard == 0 && 75 || 50 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.source }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Run source-bound shard with unchanged production oracles
+        shell: pwsh
+        env:
+          SOAK_MODE: ${{ needs.plan.outputs.mode }}
+          SOAK_SOURCE: ${{ needs.plan.outputs.source }}
+          SOAK_SHARD: ${{ matrix.shard }}
+        run: ./build/Run-CampaignShard.ps1 -Mode $env:SOAK_MODE -Shard $env:SOAK_SHARD -SourceRevision $env:SOAK_SOURCE -RunId $env:GITHUB_RUN_ID -RunAttempt ([int]$env:GITHUB_RUN_ATTEMPT)
+      - name: Preserve shard evidence and failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: p1-soak-shard-${{ matrix.shard }}
+          retention-days: 14
+          path: artifacts/simulation/
+  report:
+    needs: [plan, shards]
+    if: ${{ always() && needs.plan.outputs.active == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.source }}
+      - name: Collect and validate actual completed evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOAK_SOURCE: ${{ needs.plan.outputs.source }}
+          SOAK_MODE: ${{ needs.plan.outputs.mode }}
+          SHARDS_RESULT: ${{ needs.shards.result }}
+        run: |
+          mkdir -p artifacts/soak
+          gh run download "$GITHUB_RUN_ID" --pattern 'p1-soak-shard-*' --dir artifacts/soak-input
+          python3 build/campaign_evidence.py --source "$SOAK_SOURCE" --mode "$SOAK_MODE" --run-id "$GITHUB_RUN_ID" --day artifacts/soak-input --output artifacts/soak/campaign-day.json
+          test "$SHARDS_RESULT" = success
+      - name: Preserve day report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: p1-campaign-day
+          retention-days: 30
+          path: artifacts/soak/

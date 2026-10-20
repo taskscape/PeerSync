@@ -19,7 +19,8 @@ class CampaignEvidenceTests(unittest.TestCase):
         for shard in range(5):
             directory = self.root / str(shard); directory.mkdir()
             self.save(directory / "campaign-shard.json", dict(schema="peersync-p1-campaign-shard-v1", status="passed",
-                testExitCode=0, sourceRevision=SOURCE, runId="123", runAttempt=1, shard=shard, mode="campaign",
+                testExitCode=0, sourceRevision=SOURCE, workingTreeDirty=False, binarySha256="b" * 64,
+                runId="123", runAttempt=1, shard=shard, mode="campaign",
                 completedUtc=f"2026-10-20T06:00:0{shard}Z", flatCases=200, hierarchicalCases=1,
                 retainedRegressions=shard == 0, trx="results.trx"))
             for filename, count, scenario in (("summary.json", 200, "real-engine-flat-path-v1"),
@@ -67,11 +68,11 @@ class CampaignEvidenceTests(unittest.TestCase):
         with self.assertRaises(evidence.EvidenceError): self.check()
 
     def test_source_and_attempt_mixing(self):
-        for change in (dict(sourceRevision="b" * 40), dict(runAttempt=2), dict(runId="124")):
+        for change in (dict(sourceRevision="b" * 40), dict(runAttempt=2), dict(runId="124"), dict(workingTreeDirty=True), dict(binarySha256="")):
             with self.subTest(change=change):
                 self.change_meta(4, **change)
                 with self.assertRaises(evidence.EvidenceError): self.check()
-                self.change_meta(4, sourceRevision=SOURCE, runAttempt=1, runId="123")
+                self.change_meta(4, sourceRevision=SOURCE, runAttempt=1, runId="123", workingTreeDirty=False, binarySha256="b" * 64)
 
     def test_partial_cancelled_preflight_or_bool_counts(self):
         for change in (dict(status="cancelled"), dict(mode="preflight"), dict(testExitCode=False)):

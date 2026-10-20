@@ -86,6 +86,9 @@ def validate_day(root, source, run_id, mode):
         require(meta.get("status") == "passed" and integer(meta.get("testExitCode"), "testExitCode") == 0, "Shard is incomplete or failed")
         require(meta.get("sourceRevision") == source and str(meta.get("runId")) == str(run_id), "Mixed source/run evidence")
         require(meta.get("mode") == mode, "Mixed preflight/campaign evidence")
+        if mode == "campaign":
+            require(meta.get("workingTreeDirty") is False, "Campaign source checkout is dirty or unproven")
+        require(re.fullmatch(r"[0-9a-fA-F]{64}", meta.get("binarySha256", "")) is not None, "Missing executable hash provenance")
         shard = integer(meta.get("shard"), "shard")
         require(shard in range(5) and shard not in shards, "Duplicate/invalid shard")
         shards.add(shard); attempts.add(integer(meta.get("runAttempt"), "runAttempt", 1))
