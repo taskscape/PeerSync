@@ -10,7 +10,7 @@ A fresh whole-project smoke also exits 0: six test methods, eight flat cases
 and four hierarchical cases, no failures or skips, MTP 137.186 seconds.
 Flat sampling takes 12.280 seconds and hierarchy sampling 120.234 seconds.
 The four hierarchy seeds (1208293936, 345689765, 594543397, 1660949200)
-span four to seven nodes, 64 generated operations, 60 published versions,
+span four to seven nodes, 62 generated operations, 60 published versions,
 four directory renames, 11 subtree deletions and five kind changes.
 Temporary per-pass failures may retry; final convergence, stable high waters,
 queue drain and loss/reference assertions remain mandatory.
