@@ -47,6 +47,7 @@ def github_source(env):
 
     def inspect(source, campaign):
         commit = api(f"commits/{source}")
+        api(f"contents/build/Run-CampaignShard.ps1?ref={source}")
         facts = dict(sha=commit["sha"])
         if campaign:
             branch = quote(env.get("SOAK_DEFAULT_BRANCH", "main"), safe="")
