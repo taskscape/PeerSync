@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | Activate snapshot staging/publication through public Puller/TransportFolder coordinators after connected/recovery acceptance; leave standalone Scanner legacy because it owns no publication worker. Require direct public-entry regressions, full local verification and CI/main acceptance. | Directory snapshot coordinator activation |
 | 2026-10-20 | Offline-owner RW forwarding preserves bytes but retains received-root queues after child resolution. Add bounded schema-33 causal rebase proof against authenticated original graph members and the local mutation epoch; require exact/dominating local children before guarded FULL RW publication. RO stays unsigned. | Directory snapshot reconstruction |
 | 2026-10-20 | Bound each metadata route to one second inside the source's ten-second deadline so stalled preferred hints cannot starve fallback; caller/source cancellation still stops work. | Directory metadata fetching |
 | 2026-10-20 | Bound metadata fallback to two hints plus six known-device candidates per attempt, persisting a per-source route cursor with retry/progress and wrapping the device catalog. Later authenticated forwarders must not starve behind the first page. | Sync engine design: directory case snapshots |

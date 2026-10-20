@@ -808,6 +808,12 @@ concurrent members remain pending. Final guarded FULL publication consumes the
 complete proof, increments the own directory vector once and preserves parent
 mtime/history. RO exact reconstruction remains unchanged. Follow
 `docs/proposals/P1-directory-reconstruction-rebase.md` before activation.
+After the connected/recovery acceptance set passes, public Puller and
+TransportFolder coordinators enable bottom-up directory snapshot publication.
+Standalone Scanner retains legacy mode because it does not own a publication
+worker. Validate public nested publication, case preservation and no-op behavior
+with full local checks before CI/main acceptance; see
+`docs/proposals/P1-directory-production-activation.md`.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
