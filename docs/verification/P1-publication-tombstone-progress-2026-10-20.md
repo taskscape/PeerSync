@@ -1,6 +1,6 @@
 # P1 staged-publication tombstone progress - 2026-10-20
 
-Status: local repair under canonical verification; PR #38 remains unmerged.
+Status: complete local canonical verification passes; PR #38 remains unmerged.
 No P1 gate or task checkbox is closed by this report.
 
 ## Reproduction and cause
@@ -46,8 +46,21 @@ native/loss/reference/queue oracles intact. Evidence:
 retained hierarchy regression. This replay is not a completed campaign day.
 
 Roslyn Engine compiler/analyzer diagnostics report no warnings/errors and no
-workspace-load warnings. Full canonical verification, including ten-minute
-boundary fuzz, is running; final results and CI/main acceptance remain pending.
+workspace-load warnings. Full canonical `build/Verify.ps1` passes with exit 0 in 607.7572371 seconds,
+including all 1545 unit cases (994 Engine, 299 Storage), ten Simulation cases,
+eight flat/four hierarchy samples and all four retained regressions. Native
+QUIC/TCP/control/rendezvous/watcher/diagnostic probes and publishing pass.
+Fuzz covers FastCDC/PathRules/VersionVector/IgnoreMatcher for 600.0016798
+seconds, 191287 seeds and zero crashes. No local scope was skipped.
+
+Production/test sources match repair commit `52ef1f9`; only evidence and plan
+text are updated afterward. Primary evidence: `artifacts/p1-tombstone-canonical.log`,
+`artifacts/verification-win-x64.json`, `artifacts/fuzz/summary.log`, nine unit TRX
+files under `artifacts/tests/`, Simulation TRX under `artifacts/tests/simulation/`,
+and `artifacts/simulation/20261020T043819-7349ea9c6e334667b35a62117574eb31/`.
+The fresh hierarchy samples preserve 51 published versions, with five directory
+renames, four subtree deletions and five kind changes. Final-head CI/main
+acceptance remains pending.
 
 ## Other validation
 
