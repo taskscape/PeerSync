@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -42,6 +43,15 @@ internal sealed partial class ScaleScenario
     {
         if ((!oracleOnly && files is < 32 or > 100000) || seconds is < 1 or > 86400) throw new ArgumentOutOfRangeException(nameof(files));
         if (revision.Length != 40 || revision.Any(character => !char.IsAsciiHexDigit(character))) throw new ArgumentException("A full Git source revision is required.", nameof(revision));
+        var binaries = new[] { typeof(ScaleScenario).Assembly, typeof(TransportFolder).Assembly, typeof(FolderIndex).Assembly, typeof(FolderKeys).Assembly }
+            .Select(assembly => new
+            {
+                name = assembly.GetName().Name,
+                version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
+                sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(assembly.Location)))
+            }).ToArray();
+        if (!binaries[0].version.EndsWith("+" + revision, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Scale executable does not match the requested Git revision. Rebuild before using -NoBuild.");
         var run = new ScaleScenario(files, output, revision);
         if (Directory.Exists(run.output) || File.Exists(run.output)) throw new IOException("Scale evidence directory must be new.");
         Directory.CreateDirectory(run.output); Directory.CreateDirectory(run.fixture);
@@ -76,7 +86,7 @@ internal sealed partial class ScaleScenario
         var report = new
         {
             status = failure is null ? "passed" : "failed", mode = oracleOnly ? "native-oracle-controls" : "five-node-corpus-v1",
-            sourceRevision = revision, runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription,
+            sourceRevision = revision, binaries, runtime = RuntimeInformation.FrameworkDescription, os = RuntimeInformation.OSDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(), processors = Environment.ProcessorCount,
             gcAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, startedUtc = run.initialUtc,
             requestedFiles = files, generatedFiles = run.generated, nodes = run.nodes.Count, run.initialNativeFiles, run.finalNativeFiles,
