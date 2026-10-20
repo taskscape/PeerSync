@@ -6,18 +6,13 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-RETAINED = {1878823561, 1648781653, 1044729930, 1583987140}
+SCOPE = json.loads(Path(__file__).with_name("simulation-scope.json").read_text(encoding="utf-8"))
+if SCOPE.get("schema") != "peersync-simulation-scope-v1":
+    raise ValueError("Unknown simulation scope registry")
+RETAINED = set(SCOPE["retainedSeeds"])
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
-PREFIX = "PeerSync.Simulation.RealEngineProperties."
-METHODS = {
-    "ConnectedMaintenanceExpiresArchivesAndBlocksWithoutLosingDelayedPeerVersions",
-    "GeneratedFlatPathCasesConvergeAndPreserveEveryPublishedPayload",
-    "GeneratedHierarchicalCasesConvergeAndPreservePublishedNestedPayloads",
-    "Regression1146310622ParkedInternalStagingDoesNotPreventUserTreeConvergence",
-    "LossOracleRejectsPrivateCacheAloneAndAcceptsReconstructedArchive",
-    "RecursiveLossOracleFindsNestedUserBytesButRejectsPrivateCachesUntilArchived",
-    "RecursiveOracleNeverCountsAnUnindexedPrivateCopyOrAReparseFile",
-}
+PREFIX = SCOPE["prefix"]
+METHODS = set(SCOPE["baselineMethods"])
 
 
 class EvidenceError(ValueError):

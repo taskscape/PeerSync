@@ -34,7 +34,11 @@ try {
     $fuzzClock = [Diagnostics.Stopwatch]::StartNew()
     $fuzzOutput = $fuzz.StandardOutput.ReadToEndAsync()
     $fuzzError = $fuzz.StandardError.ReadToEndAsync()
+    $simulationStarted=[DateTime]::UtcNow
     & "$PSScriptRoot/Run-Simulation.ps1" -Cases $Cases -HierarchicalCases $HierarchicalCases -NoBuild
+    $trx=@(Get-ChildItem -LiteralPath artifacts/tests/simulation -Filter '*.trx' -File | Where-Object LastWriteTimeUtc -GE $simulationStarted)
+    if ($trx.Count -ne 1) { throw 'Cannot identify the fresh Simulation TRX' }
+    $scope=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $trx[0].FullName
     $remaining = [Math]::Max(1000, ($FuzzSeconds + 60) * 1000 - [int]$fuzzClock.ElapsedMilliseconds)
     if (-not $fuzz.WaitForExit($remaining)) { throw 'Boundary fuzz exceeded its duration/cleanup deadline' }
     $stdout = $fuzzOutput.GetAwaiter().GetResult()
@@ -44,9 +48,9 @@ try {
     if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher' -or $result.seconds -lt $FuzzSeconds -or $result.crashes -ne 0 -or $result.seeds -le 0) {
         throw 'Boundary fuzz result does not prove the requested duration and targets'
     }
-    @{status='passed';requestedSeconds=$FuzzSeconds;seconds=$fuzzClock.Elapsed.TotalSeconds;target=$result.target;seeds=$result.seeds;gateP0Passed=$false} |
+    @{status='passed';requestedSeconds=$FuzzSeconds;seconds=$result.seconds;supervisedElapsedSeconds=$fuzzClock.Elapsed.TotalSeconds;target=$result.target;seeds=$result.seeds;gateP0Passed=$false} |
         ConvertTo-Json | Set-Content artifacts/fuzz/verification.json
-    @{status='passed';fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;retainedRegressionCases=3;parallel=$true;seconds=$clock.Elapsed.TotalSeconds;gateP1Passed=$false} |
+    @{status='passed';fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;retainedRegressionCases=$scope.retainedRegressionCases;maintenanceCases=$scope.maintenanceCases;executedMethods=$scope.executedMethods;actualFuzzSeconds=$result.seconds;parallel=$true;seconds=$clock.Elapsed.TotalSeconds;gateP1Passed=$false} |
         ConvertTo-Json | Set-Content artifacts/fuzz/boundary-simulation.json
 }
 catch {
