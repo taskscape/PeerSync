@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
+    if ($Mode -eq 'campaign' -and $RunAttempt -ne 1) { throw 'Campaign shards require the first workflow attempt' }
     $source = (& git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $source -ne $SourceRevision.ToLowerInvariant()) { throw 'Shard checkout differs from the pinned source' }
     $dirty = @(& git status --porcelain).Count -ne 0

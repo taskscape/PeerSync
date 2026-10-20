@@ -33,7 +33,10 @@ the remaining attempts. No activation variable is set by this implementation.
 The scheduled job condition allocates no runner without both activation
 variables or after the permitted workflow run number. Planning rejects
 non-merged/non-green sources, more than five remaining attempts, source
-overrides and rerun attempts. Manual preflights consume workflow run numbers,
+overrides and rerun attempts. Every campaign job independently checks attempt 1
+before allocating a runner, including when a failed-job rerun reuses a successful
+planner. Daily and history validation independently reject campaign attempt 2+.
+Explicit manual preflight reruns remain non-gating. Manual preflights consume workflow run numbers,
 so do not insert them into an active campaign. Failed/missed days remain
 failed/missed; the workflow never extends its own budget. Clear both variables
 to stop future scheduled work, and retire the schedule after acceptance.

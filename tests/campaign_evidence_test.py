@@ -84,6 +84,32 @@ class CampaignEvidenceTests(unittest.TestCase):
         path.unlink()
         with self.assertRaises(evidence.EvidenceError): self.check()
 
+    def test_uniform_campaign_rerun_is_rejected(self):
+        for shard in range(5): self.change_meta(shard, runAttempt=2)
+        with self.assertRaises(evidence.EvidenceError): self.check()
+
+    def test_uniform_preflight_rerun_remains_non_gating(self):
+        for shard in range(5):
+            directory = self.root / str(shard)
+            self.change_meta(shard, runAttempt=2, mode="preflight", flatCases=2, retainedRegressions=False)
+            path = directory / "cases.jsonl"; path.write_text("\n".join(path.read_text().splitlines()[:2]), encoding="utf-8")
+            summary = evidence.read_json(directory / "summary.json"); summary["completed"] = 2; self.save(directory / "summary.json", summary)
+            path = directory / "results.trx"; doc = ET.parse(path); results = doc.find("Results")
+            for row in list(results):
+                if "RetainedHierarchicalRegressions" in row.get("testName", ""): results.remove(row)
+            counters = doc.find(".//Counters")
+            for field in ("total", "executed", "passed"): counters.set(field, str(len(evidence.METHODS)))
+            doc.write(path)
+        report = evidence.validate_day(self.root, SOURCE, "123", "preflight")
+        self.assertFalse(report["qualifiedCampaignDay"]); self.assertEqual(2, report["runAttempt"])
+
+    def test_uniformly_rerun_history_is_rejected(self):
+        report = self.check(); paths = []
+        for number in range(5):
+            row = dict(report, runAttempt=2, runId=str(123 + number), completedUtc=f"2026-10-{20+number}T06:00:04Z", date=f"2026-10-{20+number}")
+            path = self.root / f"rerun-{number}.json"; self.save(path, row); paths.append(path)
+        with self.assertRaises(evidence.EvidenceError): evidence.validate_history(paths, SOURCE)
+
     def test_duplicate_shard(self):
         self.change_meta(4, shard=0)
         with self.assertRaises(evidence.EvidenceError): self.check()

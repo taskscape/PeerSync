@@ -87,7 +87,9 @@ def validate_day(root, source, run_id, mode):
         require(re.fullmatch(r"[0-9a-fA-F]{64}", meta.get("binarySha256", "")) is not None, "Missing executable hash provenance")
         shard = integer(meta.get("shard"), "shard")
         require(shard in range(5) and shard not in shards, "Duplicate/invalid shard")
-        shards.add(shard); attempts.add(integer(meta.get("runAttempt"), "runAttempt", 1))
+        shards.add(shard); attempt = integer(meta.get("runAttempt"), "runAttempt", 1)
+        if mode == "campaign": require(attempt == 1, "Campaign evidence requires first workflow attempt")
+        attempts.add(attempt)
         completions.append(timestamp(meta.get("completedUtc")))
         require(integer(meta.get("flatCases"), "flatCases") == per_shard and integer(meta.get("hierarchicalCases"), "hierarchicalCases") == 1, "Wrong requested shard scope")
         with_retained = mode == "campaign" and shard == 0
@@ -154,6 +156,7 @@ def validate_history(paths, source):
     require(len(paths) == 5 and SHA.fullmatch(source) is not None, "History requires five reports and one pinned source")
     reports = [read_json(Path(path)) for path in paths]
     for report in reports:
+        require(integer(report.get("runAttempt"), "history runAttempt", 1) == 1, "Campaign history requires first workflow attempt")
         require(report.get("schema") == "peersync-p1-campaign-day-v1" and report.get("status") == "passed"
                 and report.get("mode") == "campaign" and report.get("qualifiedCampaignDay") is True, "Non-campaign/failed day")
         require(report.get("sourceRevision") == source and report.get("flatSeeds") == 1000

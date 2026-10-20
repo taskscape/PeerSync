@@ -26,7 +26,13 @@ a shared method registry, verifies actual TRX scope and separates native fuzz
 duration from supervisor elapsed time. Historical artifacts remain unchanged.
 
 Main-push [run 39374744845](https://github.com/taskscape/PeerSync/actions/runs/39374744845)
-on the exact squash is running. No pending task is ticked from PR-only results.
+passes all five jobs on the exact squash: x64 9m02s, ARM64 5m39s,
+Server 2022 10m06s, Server 2025 13m22s and boundary/simulation 24m33s.
+Downloaded main TRX again proves ten passed methods and all four retained
+regressions; native fuzz proves 114074 seeds, 600.0007773 seconds and zero
+crashes. Evidence is in `artifacts/ci38-main-evidence/`. Directory review,
+payload route, parent-clock/root-set, tombstone-cycle and hierarchical harness
+children meet their scoped acceptance. Their separate phase gates remain open.
 Connected maintenance, final-source corpus, five actual CI campaign days and
 production clock/service integration remain separate open acceptance. Existing
 physical LAN/native NAT deferrals to P2/P4 are unchanged.

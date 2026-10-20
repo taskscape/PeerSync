@@ -22,7 +22,7 @@ concurrency:
 jobs:
   plan:
     # No runner is allocated for scheduled runs without explicit bounded activation.
-    if: ${{ github.event_name == 'workflow_dispatch' || (vars.PEERSYNC_P1_SOAK_SOURCE != '' && vars.PEERSYNC_P1_SOAK_LAST_RUN != '' && github.run_number <= fromJSON(vars.PEERSYNC_P1_SOAK_LAST_RUN)) }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || (vars.PEERSYNC_P1_SOAK_SOURCE != '' && vars.PEERSYNC_P1_SOAK_LAST_RUN != '' && github.run_number <= fromJSON(vars.PEERSYNC_P1_SOAK_LAST_RUN))) && (github.run_attempt == '1' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'preflight')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -45,7 +45,7 @@ jobs:
         run: python3 build/campaign_plan.py
   shards:
     needs: plan
-    if: ${{ needs.plan.outputs.active == 'true' }}
+    if: ${{ needs.plan.outputs.active == 'true' && (needs.plan.outputs.mode != 'campaign' || github.run_attempt == '1') }}
     runs-on: windows-latest
     # 200 flat cases plus one hierarchy sample; shard zero also owns all
     # four retained regressions. Ceilings bound attempts, not target runtime.
@@ -79,7 +79,7 @@ jobs:
           path: artifacts/simulation/
   report:
     needs: [plan, shards]
-    if: ${{ always() && needs.plan.outputs.active == 'true' }}
+    if: ${{ always() && needs.plan.outputs.active == 'true' && (needs.plan.outputs.mode != 'campaign' || github.run_attempt == '1') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
