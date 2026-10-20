@@ -11,6 +11,19 @@ namespace PeerSync.Simulation;
 
 public sealed partial class RealEngineProperties
 {
+    [Theory]
+    [InlineData(1878823561)] // Available old payload without its original parent advertiser.
+    [InlineData(1648781653)] // Same-body parent clock growth after native convergence.
+    [InlineData(1044729930)] // Multiple causally superseded parent roots.
+    public async Task RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(int seed)
+    {
+        string evidence = Path.GetFullPath(Environment.GetEnvironmentVariable("PEERSYNC_SIMULATION_ARTIFACTS") ?? "artifacts/simulation");
+        evidence = Path.Combine(evidence, "regressions", seed.ToString(CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(evidence);
+        var result = await Scenario.RunAsync(seed, evidence, true, Token);
+        File.WriteAllText(Path.Combine(evidence, "result.json"), JsonSerializer.Serialize(result, Json));
+    }
+
     [Fact]
     public async Task GeneratedHierarchicalCasesConvergeAndPreservePublishedNestedPayloads()
     {

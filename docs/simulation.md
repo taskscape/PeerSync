@@ -51,6 +51,11 @@ Remove-Item Env:PEERSYNC_SIMULATION_ARTIFACTS
 ```
 
 The flat replay uses `PEERSYNC_SIMULATION_CASE` and `'*GeneratedFlat*'`.
+Seeds 1878823561, 1648781653 and 1044729930 are also checked-in theory cases
+under `RetainedHierarchicalRegressions*`; the regular runner executes them
+separately from the requested random case counts. Their evidence is written
+beneath `regressions/<seed>/`. They exercise the complete native convergence
+and version-preservation oracle, and therefore take longer than focused tests.
 Hierarchy test folder keys derive only from the public synthetic seed; they
 are never suitable for deployed folders. Normal production keys remain random.
 The batch runner clears direct replay overrides while running and restores
