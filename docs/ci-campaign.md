@@ -1,7 +1,8 @@
 # Bounded P1 CI campaign
 
 This workflow is inactive until deliberately configured. Normal PR/main CI
-keeps its five jobs and all default tests. Campaigns are separate evidence
+keeps its five jobs and all default tests; its existing boundary job also runs
+the campaign planner/evidence control tests before starting the long checks. Campaigns are separate evidence
 for Gate P1; they never close the phase by themselves.
 
 Each campaign day has five Windows shards, each running 200 flat seeds and
