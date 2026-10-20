@@ -822,10 +822,16 @@ canonical ancestry, recovery/root guards and session admission generations stay
 binding. Follow `docs/proposals/P1-directory-review-hardening.md` and reproduce
 the four PR #38 findings before a batched repair.
 
-The immutable source's first forwarding device is only a routing hint. If it
-becomes unavailable, consult current authenticated remote advertisements of the
-same exact signed envelope, try another forwarding device and retain the
-successful route during that assembly. Do not change the portable source ID.
+The immutable source's first forwarding device is only a routing hint. Current
+advertisements cannot discover every retained old member payload after parent
+versions advance. Use source/root-bound durable route hints and known-device
+cursor paging, one six-device page plus two hints per source attempt; validate
+owned response bytes against signed length/BLAKE3 regardless of advertisement.
+Bound each candidate to one second and the source attempt to ten seconds,
+propagate caller cancellation and keep network awaits outside reference gates.
+Do not change the portable source ID or weaken recovery/graph/native guards.
+Follow `docs/proposals/P1-case-payload-routes.md`, including restart, corruption,
+timeout, route-page and retained hierarchy failure regressions.
 Prepared recovery treats unclassifiable/reparse destination probes as occupied:
 preserve the occupant, park the verified temporary using its held handle and
 release the intent for another no-overwrite slot instead of blocking the folder.
