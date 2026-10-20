@@ -30,6 +30,9 @@ class CampaignEvidenceTests(unittest.TestCase):
             cases = [self.case(shard * 200 + number) for number in range(200)]
             (directory / "cases.jsonl").write_text("\n".join(json.dumps(row) for row in cases), encoding="utf-8")
             (directory / "hierarchical-cases.jsonl").write_text(json.dumps(self.case(10000 + shard)), encoding="utf-8")
+            self.save(directory / "connected-maintenance.json", dict(status="passed", stage="passed", scenario="connected-maintenance-v1",
+                nodes=3, daysAdvanced=64, publishedVersions=2, retiredArchives=2, deletedBlocks=2,
+                sourceInformationalVersion="1.0.0+" + SOURCE, testBinarySha256="b" * 64))
             methods = {evidence.PREFIX + method for method in evidence.METHODS}
             if shard == 0:
                 for seed in evidence.RETAINED:
@@ -68,6 +71,18 @@ class CampaignEvidenceTests(unittest.TestCase):
         source = (Path(__file__).resolve().parent / "PeerSync.Simulation/HierarchicalScenarios.cs").read_text(encoding="utf-8")
         declaration = source.split("public async Task RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads", 1)[0]
         self.assertEqual(evidence.RETAINED, {int(seed) for seed in re.findall(r"InlineData\((\d+)\)", declaration)})
+
+    def test_maintenance_requires_real_scope_and_matching_binary_source(self):
+        path = self.root / "4/connected-maintenance.json"; original = evidence.read_json(path)
+        for change in (dict(status="failed"), dict(deletedBlocks=0), dict(retiredArchives=True),
+                       dict(daysAdvanced=32), dict(testBinarySha256="c" * 64), dict(sourceInformationalVersion="1.0.0+" + "c" * 40),
+                       dict(sourceInformationalVersion=None), dict(testBinarySha256=None)):
+            with self.subTest(change=change):
+                self.save(path, dict(original, **change))
+                with self.assertRaises(evidence.EvidenceError): self.check()
+                self.save(path, original)
+        path.unlink()
+        with self.assertRaises(evidence.EvidenceError): self.check()
 
     def test_duplicate_shard(self):
         self.change_meta(4, shard=0)

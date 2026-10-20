@@ -8,8 +8,9 @@ for Gate P1; they never close the phase by themselves.
 Each campaign day has five Windows shards, each running 200 flat seeds and
 one generated hierarchy sample. Shard zero also runs the four retained
 hierarchy regressions; the other shards omit those duplicate cases only.
-Every shard keeps the existing native/preservation/reference/queue oracles
-and six baseline Simulation methods. Total: 1000 distinct flat seeds, five
+Every shard runs the connected archive/block maintenance scenario and keeps
+the existing native/preservation/reference/queue oracles
+and seven baseline Simulation methods. Total: 1000 distinct flat seeds, five
 hierarchy samples and four fixed regressions. These counts do not mean
 1000 hierarchical cases. Shard zero has a 75-minute failure ceiling; others
 have 50 minutes. Five attempts are the activation maximum. Timings and counts
@@ -41,6 +42,8 @@ Each `p1-soak-shard-<number>` artifact includes case lists/summaries, actual
 TRX, source/run/attempt/mode metadata, executable hash and retained failures.
 `p1-campaign-day` includes the coordinator's report. Missing, cancelled,
 mixed-source, duplicate-seed/shard and incomplete-method evidence fails.
+Every shard must also report actual archive retirement/block eviction, with
+maintenance evidence matching its executable hash and campaign source pin.
 Generated manifests used in validator unit tests are controls, not CI days.
 
 For final history, download five actual `p1-campaign-day` artifacts from

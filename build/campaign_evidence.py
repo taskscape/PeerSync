@@ -10,6 +10,7 @@ RETAINED = {1878823561, 1648781653, 1044729930, 1583987140}
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
 PREFIX = "PeerSync.Simulation.RealEngineProperties."
 METHODS = {
+    "ConnectedMaintenanceExpiresArchivesAndBlocksWithoutLosingDelayedPeerVersions",
     "GeneratedFlatPathCasesConvergeAndPreserveEveryPublishedPayload",
     "GeneratedHierarchicalCasesConvergeAndPreservePublishedNestedPayloads",
     "Regression1146310622ParkedInternalStagingDoesNotPreventUserTreeConvergence",
@@ -78,7 +79,7 @@ def validate_day(root, source, run_id, mode):
     require(len(manifests) == 5, "Exactly five shard manifests are required")
     flat, hierarchy, retained, shards, completions = [], [], set(), set(), []
     per_shard = 200 if mode == "campaign" else 2
-    attempts = set()
+    attempts = set(); maintenance_retired = 0; maintenance_deleted = 0
     for manifest in manifests:
         directory = manifest.parent
         meta = read_json(manifest)
@@ -103,6 +104,20 @@ def validate_day(root, source, run_id, mode):
                     and summary.get("scenario") == scenario, "Missing successful generated summary")
         flat.extend(read_cases(directory, "cases.jsonl", per_shard))
         hierarchy.extend(read_cases(directory, "hierarchical-cases.jsonl", 1))
+        maintenance = read_json(bounded_file(directory, "connected-maintenance.json"))
+        require(maintenance.get("status") == "passed" and maintenance.get("stage") == "passed"
+                and maintenance.get("scenario") == "connected-maintenance-v1", "Missing successful connected maintenance")
+        require(integer(maintenance.get("nodes"), "maintenance nodes") == 3
+                and integer(maintenance.get("daysAdvanced"), "maintenance days") == 64
+                and integer(maintenance.get("publishedVersions"), "maintenance versions") == 2, "Incomplete maintenance scope")
+        retired = integer(maintenance.get("retiredArchives"), "retired archives", 2)
+        deleted = integer(maintenance.get("deletedBlocks"), "deleted blocks", 2)
+        binary = maintenance.get("testBinarySha256")
+        require(isinstance(binary, str) and binary.lower() == meta["binarySha256"].lower(), "Maintenance binary differs from its shard")
+        if mode == "campaign":
+            version = maintenance.get("sourceInformationalVersion")
+            require(isinstance(version, str) and version.lower().endswith("+" + source.lower()), "Maintenance executable source differs from campaign pin")
+        maintenance_retired += retired; maintenance_deleted += deleted
         trx = ET.parse(bounded_file(directory, meta.get("trx", "results.trx")))
         counters = trx.find(".//{*}Counters")
         expected_tests = len(METHODS) + (len(RETAINED) if with_retained else 0)
@@ -136,6 +151,7 @@ def validate_day(root, source, run_id, mode):
                 completedUtc=completed.isoformat(), date=completed.date().isoformat(),
                 flatSeeds=len(flat), uniqueFlatSeeds=len({row["Seed"] for row in flat}),
                 hierarchyCases=len(hierarchy), retainedSeeds=sorted(retained), shards=5,
+                maintenanceCases=5, maintenanceRetiredArchives=maintenance_retired, maintenanceDeletedBlocks=maintenance_deleted,
                 nodeCounts=node_counts, totals=totals, qualifiedCampaignDay=mode == "campaign", gateP1Passed=False)
 
 
@@ -149,6 +165,8 @@ def validate_history(paths, source):
                 and report.get("uniqueFlatSeeds") == 1000 and report.get("hierarchyCases") == 5
                 and report.get("shards") == 5 and set(report.get("retainedSeeds", [])) == RETAINED, "Incomplete/mixed-source campaign day")
         require(report.get("nodeCounts") == [3, 4, 5, 6, 7], "Incomplete node coverage")
+        require(report.get("maintenanceCases") == 5 and integer(report.get("maintenanceRetiredArchives"), "history retired archives", 10) >= 10
+                and integer(report.get("maintenanceDeletedBlocks"), "history deleted blocks", 10) >= 10, "Incomplete maintenance history")
         require(timestamp(report.get("completedUtc")).date().isoformat() == report.get("date"), "Completion date mismatch")
     require(len({report.get("runId") for report in reports}) == 5, "A rerun is not a new campaign day")
     dates = sorted(dt.date.fromisoformat(report["date"]) for report in reports)
