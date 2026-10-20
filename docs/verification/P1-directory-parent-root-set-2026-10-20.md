@@ -69,7 +69,10 @@ Evidence: `artifacts/p1-parent-root-set-canonical.log`,
 The [expanded hierarchy repair report](P1-hierarchical-root-set-repair-2026-10-20.md)
 records a subsequent 20/20 fresh generated batch and all three checked-in
 regression cases passing. The harness is now integrated with the repair for
-one CI submission. Integrated canonical verification, CI and merge remain
+one CI submission. The integrated canonical runner subsequently passes all
+1534 unit and nine Simulation cases, eight flat/four hierarchy samples and
+all three fixed regressions, probes and publishing in 454.194 seconds; see
+the expanded report for exact source and artifacts. CI and merge remain
 pending. The 1000-seed
 CI/five-day and five-node 100000-file gates, installed service, LAN and native
 NAT validation remain separate and unverified. No new remote CI run was

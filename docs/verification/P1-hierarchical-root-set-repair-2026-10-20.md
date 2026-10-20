@@ -44,7 +44,21 @@ is not a bit-identical replay of that generator stream. The three permanent
 cases retain its discovered defects. Native timestamps and scheduling can
 change the number of healing rounds and derived alias names.
 
-The integrated canonical run and final-head CI/main remain pending here.
+The integrated canonical runner passes on source d5e7a0e, exit 0 in
+454.1938069 seconds: all 1534 unit cases (983 Engine, 299 Storage) and all
+nine Simulation cases pass with no skips. The runner verifies the requested
+eight flat and four hierarchy samples in addition to the three fixed
+regressions. Diagnostic/control/native/transport probes, the 100000-operation
+watcher check and win-x64 publishing pass. Boundary fuzz is explicitly skipped
+locally and remains required in CI. Evidence in the primary checkout:
+
+- `artifacts/p1-hierarchy-integrated-canonical.log`
+- `artifacts/verification-win-x64.json`
+- `artifacts/tests/` and `artifacts/tests/simulation/`
+- `artifacts/simulation/20261020T024826-2f5d13f63b2f48b2bcadfd7ada452504/`
+- `artifacts/p0/summary.json`
+
+Final-head CI/main remain pending here.
 The existing packaging job now has a 20-minute failure ceiling for the added
 bounded simulation scope. Job count and schedules are unchanged. All P1
 1000-seed/five-day/100000-file, installed service, authenticated production
