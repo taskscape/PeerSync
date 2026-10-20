@@ -6,19 +6,19 @@ the campaign planner/evidence control tests before starting the long checks. Cam
 for Gate P1; they never close the phase by themselves.
 
 Each campaign day has five Windows shards, each running 200 flat seeds and
-one generated hierarchy sample. Shard zero also runs the five retained
+one generated hierarchy sample. Shard zero also runs the six retained
 hierarchy regressions; the other shards omit those duplicate cases only.
 Every shard runs the connected archive/block maintenance scenario and keeps
 the existing native/preservation/reference/queue oracles
 and seven baseline Simulation methods. Total: 1000 distinct flat seeds, five
-hierarchy samples and five fixed regressions. These counts do not mean
+hierarchy samples and six fixed regressions. These counts do not mean
 1000 hierarchical cases. Shard zero has a 75-minute failure ceiling; others
 have 50 minutes. Five attempts are the activation maximum. Timings and counts
 remain observable in uploaded artifacts.
 
 Before activation, merge the campaign implementation, require green PR/main
 CI, then manually dispatch **P1 bounded seed campaign** in `preflight` mode.
-It runs ten flat/five hierarchy samples, omits the five long regressions,
+It runs ten flat/five hierarchy samples, omits the six long regressions,
 and produces `qualifiedCampaignDay=false`. It cannot satisfy the daily gate.
 Review every shard, its executed TRX methods and the coordinator artifact.
 

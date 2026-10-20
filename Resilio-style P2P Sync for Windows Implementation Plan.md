@@ -1951,3 +1951,12 @@ the seed permanently. Diagnose the precise apply/recovery failure before
 choosing a repair. Keep healing bounds, case-source ownership, native identity,
 authenticated metadata, reference/queue and global version-survival guards.
 Do not merge a failed CI run or replace a failing generated case with a smoke.
+
+A retained nonempty directory that is logically tombstoned is a new local
+revival when RW scanning republishes its surviving children. Its published
+directory mtime must reflect that revival and exceed the recorded deletion's
+change time; reusing an older incidental native mtime lets concurrent replicas
+reassert the old tombstone indefinitely. Preserve ordinary live-directory mtime
+stability and file mtimes. Keep staged revival templates stable across repeated
+walks, and retain all native/graph/ownership guards. An unrepresentable revival
+time must preserve data and report an error rather than publish invalid ticks.

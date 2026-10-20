@@ -377,8 +377,23 @@ public sealed partial class Scanner : IDisposable
 
     private LocalFileRow Metadata(WalkEntry entry, LocalFileRow? old, LocalFileState flags) =>
         new(entry.Path, entry.Unsyncable ? 2u : entry.Native.IsDirectory ? 1u : 0u, entry.Native.Length,
-            entry.Native.MtimeTicks, (uint)entry.Native.Attributes, false, clock.GetUtcNow().UtcTicks,
+            ObservedMtimeTicks(entry, old), (uint)entry.Native.Attributes, false, clock.GetUtcNow().UtcTicks,
             null, old?.Vector ?? EmptyVector, null, entry.Native.FileId, Flags: flags) { ChangeFileTime = entry.Native.ChangeFileTime };
+
+    private long ObservedMtimeTicks(WalkEntry entry, LocalFileRow? old)
+    {
+        if (!keys.CanWrite || entry.Unsyncable || !entry.Native.IsDirectory
+            || old is not { Deleted: true, Record: not null }) return entry.Native.MtimeTicks;
+        var deletion = VersionView.Open(old.Record, keys, device);
+        if (!deletion.Deleted || PathRules.Key(deletion.Path) != PathRules.Key(entry.Path))
+            throw new InvalidDataException("Directory revival differs from its signed deletion.");
+        if (deletion.ChangedTicks >= DateTime.MaxValue.Ticks)
+            throw new InvalidDataException("Directory revival time cannot follow its signed deletion.");
+        // Retaining a nonempty directory is a new local revival. An older
+        // incidental native mtime would keep losing concurrent clock merges
+        // to the same old tombstone, even after every child is preserved.
+        return Math.Max(entry.Native.MtimeTicks, Math.Max(clock.GetUtcNow().UtcTicks, deletion.ChangedTicks + 1));
+    }
 
     private Core.Sync.SignedRecord Sign(LocalFileRow row, uint chunkClass, IReadOnlyList<ChunkInfo> chunks)
     {

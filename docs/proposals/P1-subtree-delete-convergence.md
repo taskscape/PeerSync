@@ -19,3 +19,12 @@ Raw hosted log and fixture evidence are retained in
 `artifacts/ci41-failed.log` and `artifacts/ci41-failed-evidence/`.
 Keep both active scale worktrees immutable. Batch the verified repair into
 one PR update after local acceptance; no unchanged CI rerun is justified.
+
+The retained native/index comparison identifies nonempty directory revivals
+that retain a live-directory mtime older than the signed parent deletion.
+Concurrent peers merge those revived clocks back into the winning tombstone,
+while peers that removed the empty parent cannot create the remaining live
+children. Test a revival timestamp after the deletion in both legacy and
+snapshot scanning, retain stable templates, and keep ordinary live mtimes and
+all data/identity guards unchanged. Copies used for analysis must include the
+SQLite WAL; copying the database alone gives stale state and is not evidence.

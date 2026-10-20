@@ -57,7 +57,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | Phase | Weeks (1 developer) | Status | Gate passed |
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
-| P1 Local sync engine | 4-8 | In progress: PR #40 main CI found hierarchy seed 1608819303 with repeated directory publication. P1.6.2d's local timestamp repair now passes 1550 unit results, twelve Simulation methods, 600-second fuzz and twenty additional hierarchy cases. Clean repaired-source 32/4096-file checks pass and the full 100000-file run is active. PR/main acceptance, hosted allocation proof and five actual CI dates remain open; the earlier preflight is non-gating. Actual installed-service/production clock integration remains mandatory at P2.5.7/Gate P2 under the approved phasing. | - |
+| P1 Local sync engine | 4-8 | In progress: the timestamp repair passes full local validation, but PR #41 CI finds a further subtree-delete revival seed 794669444. Its local repair passes exact replay and 312 directory controls; full release/expanded property and updated PR/main acceptance remain pending. Both existing 100000-file runs remain active on their immutable earlier sources. Hosted allocation proof/five CI dates remain open. Actual installed-service/production clock integration remains mandatory at P2.5.7/Gate P2 under the approved phasing. | - |
 | P2 LAN sync as a service | 9-13 | Not started | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | A physically retained directory republished after a logical signed tombstone is a new local revival. Give only that RW directory revival a published mtime after the verified deletion time/current clock, retain stable staged templates and ordinary live/file mtimes, and preserve data on unrepresentable timestamps. | Subtree deletion and preserved-copy convergence |
 | 2026-10-20 | PR #41 CI retains hierarchy seed 794669444: after subtree deletions and preserved-copy edits, visible trees differ and three peers repeatedly fail two apply items. Preserve/replay the exact fixture, diagnose the causal apply/recovery errors and retain a permanent regression without relaxing any native/ownership/loss or healing bound. | Subtree deletion and preserved-copy convergence |
 | 2026-10-20 | Retained signed records identify root classes split by ChangedTicks provenance. Group that timestamp only within complete authenticated parent root/child proof, preserve path/mtime/attributes/ModifiedBy and strict same-body fallback, and invalidate old proof-class witnesses with a v2 digest. Local canonical validation rejects broader author normalization; the exact base/current four-node comparison retains author boundaries. | Unchanged directory publication convergence |
 | 2026-10-20 | Main #40 CI generates hierarchy seed 1608819303: native trees match and needed queues empty, but directory sequence growth prevents quiescence. Retain the exact seed, diagnose signed metadata/publication feedback and repair production convergence with unchanged healing bounds and all native/reference/queue oracles. | Unchanged directory publication convergence |
@@ -1805,6 +1806,7 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
 
   - [ ] **P1.6.2e Subtree deletion and preserved-copy convergence** [WIP @codex 2026-10-20]
     - Done when: [seed 794669444](docs/proposals/P1-subtree-delete-convergence.md) reproduces on submitted source, is retained permanently, and causal apply/recovery failures are repaired with unchanged 24-round bounds, native/case ownership, authenticated references and version-preservation checks. Focused controls, full canonical and final PR/main CI pass.
+    - [Local revival repair](docs/verification/P1-subtree-revival-2026-10-20.md) reproduces both scanner-mode timestamp failures and the exact six-node seed, then preserves all thirteen versions in eight rounds. All 312 directory and 28 campaign controls pass. Full local/generated and final PR/main acceptance remain open.
 
 - [ ] **P1.6.3 Five-node scale corpus runner and evidence** [WIP @codex 2026-10-20]
   - Done when: an explicit small/intermediate/full-corpus procedure reports actual file counts, source/runtime/progress, final native/queue/reference convergence and overwritten-version survival; a completed five-node 100000-file report supports the Gate P1 line. Follow the [scale validation design](docs/proposals/P1-scale-corpus-validation.md). No gate acceptance comes from a preflight or property smoke.

@@ -6,6 +6,7 @@ using PeerSync.Crypto;
 using PeerSync.Engine.Scanning;
 using PeerSync.Engine.Sync;
 using PeerSync.Engine.Native;
+using PeerSync.Engine.Hashing;
 using PeerSync.Protocol.Records;
 using PeerSync.Protocol.Signing;
 using PeerSync.Storage.FolderDb;
@@ -129,9 +130,60 @@ public sealed class DirectoryApplierTests : IDisposable
         Directory.CreateDirectory(Disk("dir")); await using var index = await PrepareAsync(); await ReceiveAsync(index, "dir", deleted: true);
         File.WriteAllText(Disk("dir/unknown"), "local child"); using var readOnly = FolderKeys.FromText(keys.ExportReadOnlyText());
         (await Directories(index, readOnly).ApplyAsync("dir", Token)).RequiresScan.ShouldBeTrue();
+        long nativeMtime = Directory.GetLastWriteTimeUtc(Disk("dir")).Ticks;
         using var scanner = Scanner(index, readOnly); await scanner.ScanAsync(Token);
         index.LocalFiles.Find("dir")!.Record.ShouldBeNull(); index.LocalFiles.Find("dir/unknown")!.Record.ShouldBeNull();
+        index.LocalFiles.Find("dir")!.MtimeTicks.ShouldBe(nativeMtime);
         index.ReadIndexBatch(0).Records.ShouldBeEmpty(); File.ReadAllText(Disk("dir/unknown")).ShouldBe("local child");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SurvivingDirectoryRevivalPublishesATimeAfterItsTombstone(bool staged)
+    {
+        Directory.CreateDirectory(Disk("dir")); await using var index = await PrepareAsync();
+        var tombstone = await ReceiveAsync(index, "dir", deleted: true);
+        long deletionTicks = VersionView.Open(tombstone, keys, remote).ChangedTicks;
+        File.WriteAllText(Disk("dir/unknown"), "surviving bytes");
+        (await Directories(index).ApplyAsync("dir", Token)).RequiresScan.ShouldBeTrue();
+        index.LocalFiles.Find("dir")!.Deleted.ShouldBeTrue();
+        Directory.SetLastWriteTimeUtc(Disk("dir"), DateTime.UtcNow.AddDays(-2));
+        using var scanner = new Scanner(Root, index, keys, own) { StageDirectorySnapshots = staged };
+        await scanner.ScanAsync(Token);
+        if (staged)
+        {
+            var queued = index.ReadDirectoryPublication("dir")!;
+            await scanner.ScanAsync(Token);
+            index.ReadDirectoryPublication("dir")!.Version.ShouldBe(queued.Version);
+            for (int pass = 0; pass < 4 && index.HasPendingDirectoryPublications(); pass++)
+                await new DirectoryPublicationWorker(Root, index, keys, own, new(), TimeProvider.System).RunAsync(token: Token);
+        }
+        var revived = index.LocalFiles.Find("dir")!;
+        revived.Deleted.ShouldBeFalse(); revived.MtimeTicks.ShouldBeGreaterThan(deletionTicks);
+        File.ReadAllText(Disk("dir/unknown")).ShouldBe("surviving bytes");
+        index.ReadApplyIntents().ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnrepresentableDirectoryRevivalPreservesItsSignedTombstoneAndNativeChildren(bool staged)
+    {
+        Directory.CreateDirectory(Disk("dir")); await using var index = await PrepareAsync();
+        var body = VersionView.Open(DirectoryRecord(index, "dir", true, 1), keys, remote).ExportBody();
+        body.ChangedTicks = DateTime.MaxValue.Ticks;
+        var tombstone = SignedRecordFactory.Create(body, keys, 1);
+        await new NeededSet(index, keys, own).ApplyIndexUpdateAsync(remote, 0, 1, [tombstone], Token);
+        File.WriteAllText(Disk("dir/unknown"), "surviving bytes");
+        (await Directories(index).ApplyAsync("dir", Token)).RequiresScan.ShouldBeTrue();
+        var before = index.LocalFiles.Find("dir")!;
+        using var scanner = new Scanner(Root, index, keys, own) { StageDirectorySnapshots = staged };
+        await Should.ThrowAsync<InvalidDataException>(() => scanner.ScanAsync(Token));
+        var after = index.LocalFiles.Find("dir")!;
+        after.Deleted.ShouldBeTrue(); after.Record!.Body.ToArray().ShouldBe(before.Record!.Body.ToArray());
+        File.ReadAllText(Disk("dir/unknown")).ShouldBe("surviving bytes");
+        index.ReadApplyIntents().ShouldBeEmpty();
     }
 
     [Fact]
