@@ -77,6 +77,9 @@ public sealed partial class FileApplier
         var known = selection.Known; var decision = selection.Decision;
         if (decision.BlockedReason is not null)
         {
+            if (scheduled && decision.BlockedReason == "directory-publication-pending"
+                && await TryApplyAbsentTombstoneAsync(tree, selection, key, session, cancellationToken).ConfigureAwait(false))
+                return FileApplyOutcome.Applied;
             if (decision.BlockedReason == "directory-publication-pending") Signal("publication-pending", session);
             return FileApplyOutcome.Blocked;
         }

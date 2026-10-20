@@ -15,6 +15,7 @@ public sealed partial class RealEngineProperties
     [InlineData(1878823561)] // Available old payload without its original parent advertiser.
     [InlineData(1648781653)] // Same-body parent clock growth after native convergence.
     [InlineData(1044729930)] // Multiple causally superseded parent roots.
+    [InlineData(1583987140)] // Tombstone metadata needed beneath a staged ancestor.
     public async Task RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(int seed)
     {
         string evidence = Path.GetFullPath(Environment.GetEnvironmentVariable("PEERSYNC_SIMULATION_ARTIFACTS") ?? "artifacts/simulation");

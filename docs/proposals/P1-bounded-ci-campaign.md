@@ -3,12 +3,12 @@
 Gate P1 needs actual CI evidence for 1000 seeds on five consecutive days.
 Local 1000-case runs, bounded PR smoke and one successful day do not satisfy
 that gate. Keep the current documented modes explicit: 1000 distinct flat
-seeds per campaign day, five generated hierarchy samples and all three
+seeds per campaign day, five generated hierarchy samples and all four
 retained hierarchy regressions. This does not claim 1000 hierarchical cases.
 Preserve the existing recursive native/version/reference/queue oracles.
 
 Use an opt-in dedicated workflow with five Windows shards of 200 flat cases
-and one hierarchy sample each. Only shard zero repeats the three retained
+and one hierarchy sample each. Only shard zero repeats the four retained
 hierarchy regressions; other shards omit only those duplicate cases. Default
 local verification and the existing five-job PR/main workflow retain every
 case. Do not put the 100000-file corpus into hosted/default validation.
@@ -17,7 +17,7 @@ Each shard checks out the same immutable source commit, uses locked restore,
 builds Simulation once and emits source/run/shard/date/count metadata alongside
 its existing case summaries, TRX and failure fixtures. The coordinator requires
 all five successful shards, exactly 1000 distinct completed flat seeds with
-3–7 nodes, each hierarchy sample and all three retained results. Missing,
+3–7 nodes, each hierarchy sample and all four retained results. Missing,
 cancelled, malformed, duplicate or mixed-source evidence is a failed day.
 Preflight mode runs only ten flat/five hierarchy samples without the retained
 long cases, labels itself non-gating and never counts as a campaign day.

@@ -1614,6 +1614,7 @@ Our own writes need no special suppression: the puller records the new state in 
           - The [durable root-set repair](docs/verification/P1-directory-parent-root-set-2026-10-20.md) supersedes the two failing focused baselines: owned/received, bounded continuation, late receipts, concurrent children and damaged graph controls pass. All 1534 canonical cases, eight flat scenarios and probes/publishing pass locally in 187.651 seconds, exit 0, with separate fuzz explicitly skipped. Retained six-node seed 1044729930 now passes. Remaining replays, expanded hierarchy, CI/main and phase acceptance remain open.
       - [ ] **P1.5.3h4g Tombstone progress beneath staged publications** [WIP @codex 2026-10-20]
         - Done when: retained seed 1583987140 and focused native absence, live/case/range, interruption and rollback controls pass without weakening directory proofs; canonical and CI/main acceptance hold. Follow the [repair design](docs/proposals/P1-publication-tombstone-progress.md). Baseline fails twice locally; PR #38 remains held.
+        - The [local repair checkpoint](docs/verification/P1-publication-tombstone-progress-2026-10-20.md) records the queue cycle, a failing focused baseline, 29 passing tombstone tests and the now-passing retained seed (13.038 seconds, ten healing rounds). Canonical verification with ten-minute boundary fuzz is running; CI/main and scale/campaign gates remain open.
     - [ ] **P1.5.3h1 Connected regression baseline and admission design** [WIP @codex 2026-10-19]
       - Done when: baseline reproduces empty/existing-receiver failures under both arrival orders and proves causal rename controls; a concrete durable source/root/reference and first-name/gossip/recovery design is recorded before mutation implementation.
       - Local [baseline](docs/verification/P1.5.3h1-case-clash-baseline-2026-10-19.md): four connected preservation cases fail because only one visible version is present; two causal case-rename controls pass. Probes use isolated build outputs. At that baseline checkpoint, admission and recovery/reference design were incomplete and case mutations were disabled; the approved policy and later implementation checkpoints follow.
@@ -1735,60 +1736,21 @@ never write or delete an unowned file merely because its name ends in `.!psp`.
 
 **Tricky:**
 
-- Assemble next to the target, so a new file inherits that directory's ACL. A file moved from elsewhere on the volume keeps its old ACL.
-- Use `File.Replace` for existing targets: it keeps the target's ACL and attributes and moves the old version to the archive in the same step.
-- `File.Replace` fails on read-only targets: clear the flag first, then re-apply attributes.
-- Re-check the target right before swapping, or a user's edit made during the download is silently lost.
+- Create owned temporary content beside the target so it inherits the destination directory's ACL. Capture replacement metadata from the verified old handle before moving it.
+- Persist root/native identities, the expected local sequence and the selected signed version before destructive work. Every retained move uses a fresh no-overwrite destination.
+- Restore read-only/hidden attributes after a move, verify installed content and commit the local row, archive accounting and intent removal together.
+- Recovery runs before scanning. Preserve unrecognized or concurrently changed occupants and request a scan after releasing mutation gates.
+- Under staged directory work, only the narrowly guarded already-deleted regular-file tombstone metadata path may advance without a namespace change; it retains all directory/case/range proofs.
 
-```csharp
-// src/PeerSync.Engine/Sync/FileApplier.cs
-public async Task<ApplyResult> ApplyAsync(FileRecordBody rec, string target, CancellationToken ct)
-{
-    string tmp = target + ".!psp";
-    await assembler.AssembleAsync(rec, tmp, ct);                 // writes and verifies every chunk, then the whole-file hash
-    File.SetAttributes(tmp, FileAttributes.Hidden);
-    File.SetLastWriteTimeUtc(tmp, new DateTime(rec.MtimeTicks, DateTimeKind.Utc));
+The implementation is [FileApplier.cs](src/PeerSync.Engine/Sync/FileApplier.cs),
+with [owned staging and verification](src/PeerSync.Engine/Sync/FileApplier.Staging.cs)
+and [metadata-only tombstone progress](src/PeerSync.Engine/Sync/FileApplier.TombstoneClock.cs).
+These sources supersede the original File.Replace pseudocode, which did not meet
+the approved handle-bound recovery protocol.
 
-    var known = await db.GetLocalAsync(PathRules.Key(rec.Path), ct);
-    var current = new FileInfo(target);
-    if (current.Exists && !Matches(current, known))
-    {
-        File.Delete(tmp);
-        await scanner.RescanPathAsync(target, ct);                // the user changed it: resolve again first
-        return ApplyResult.Deferred;
-    }
-
-    try
-    {
-        if (current.Exists)
-        {
-            if (current.IsReadOnly) current.IsReadOnly = false;
-            string archivePath = archive.ReserveSlot(rec.Path, DateTime.UtcNow);   // inside .psp\archive, same volume
-            Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
-            File.Replace(tmp, target, archivePath, ignoreMetadataErrors: true);
-            await archive.RecordAsync(rec.Path, archivePath, ct);
-        }
-        else
-        {
-            File.Move(tmp, target);
-        }
-    }
-    catch (IOException ex) when (IsLockViolation(ex))
-    {
-        return ApplyResult.RetryLater;                            // the user has the file open: backoff 10 s to 10 min
-    }
-
-    File.SetLastWriteTimeUtc(target, new DateTime(rec.MtimeTicks, DateTimeKind.Utc));   // times first, read-only flag last
-    var attrs = (FileAttributes)rec.Attributes & (FileAttributes.ReadOnly | FileAttributes.Hidden);
-    File.SetAttributes(target, attrs == 0 ? FileAttributes.Normal : attrs);              // also clears the temp file's Hidden
-    await db.RecordAppliedAsync(rec, new FileInfo(target), ct);
-    return ApplyResult.Applied;
-}
-
-static bool IsLockViolation(IOException ex) => (ex.HResult & 0xFFFF) is 32 or 33;   // sharing or lock violation
-```
-
-On start-up, stale `*.!psp` files whose record is still needed are kept: their verified chunks are reused. Other stale temp files older than 24 hours are deleted.
+On startup, verify persisted root/file ownership before reusing any temporary
+chunks. Guarded staging retirement applies the 24-hour policy only to proved owned,
+unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
 
 ### P1.6 Simulation harness
 

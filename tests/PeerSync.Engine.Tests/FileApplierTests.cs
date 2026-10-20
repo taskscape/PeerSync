@@ -622,6 +622,120 @@ public sealed class FileApplierTests : IDisposable
         index.Needed.Find("parent/child").ShouldBeNull(); File.ReadAllText(Disk("parent")).ShouldBe("keep ancestor");
     }
 
+    [Fact]
+    public async Task ScheduledAbsentTombstoneAdvancesUnderParentPublicationWithoutDiscardingIt()
+    {
+        await using var index = await DeletedChildPublication();
+        var queued = index.ReadDirectoryPublication("parent")!;
+        var result = await new FileApplier(Root, index, keys, own).ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token);
+        result.Outcome.ShouldBe(FileApplyOutcome.Applied);
+        index.Needed.Find("parent/child").ShouldBeNull(); index.ReadApplyIntents().ShouldBeEmpty();
+        index.ReadDirectoryPublication("parent")!.Version.ShouldBe(queued.Version);
+        File.Exists(Disk("parent/child")).ShouldBeFalse(); index.Archive.Count().ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("directory")]
+    [InlineData("incomplete-range")]
+    [InlineData("live-row")]
+    [InlineData("flagged-row")]
+    [InlineData("case-work")]
+    public async Task ParentPublicationKeepsNativeAndRangeBarriersForTombstones(string obstacle)
+    {
+        await using var index = await DeletedChildPublication(obstacle == "live-row");
+        var before = index.LocalFiles.Find("parent/child")!;
+        if (obstacle == "file") File.WriteAllBytes(Disk("parent/child"), New);
+        if (obstacle == "directory") Directory.CreateDirectory(Disk("parent/child"));
+        if (obstacle == "flagged-row") await index.LocalFiles.UpsertAsync([before with { Flags = LocalFileState.NeedsRescan }], Token);
+        if (obstacle == "case-work")
+        {
+            var body = VersionView.Open(index.LocalFiles.Find("parent")!.Record!, keys, own).ExportBody();
+            body.Path = "PARENT"; body.ModifiedBy = ByteString.CopyFrom(Device(3)); body.Vv.Clear(); body.Vv.Add(new VvEntry { Device = 3, Counter = 1 });
+            await new NeededSet(index, keys, own).ApplyIndexUpdateAsync(Device(3), 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+            index.HasPendingCasePreservation("parent/child").ShouldBeTrue();
+        }
+        if (obstacle == "incomplete-range") await new NeededSet(index, keys, own).AnnounceIndexRangeAsync(remote, 2, Token);
+        var result = await new FileApplier(Root, index, keys, own).ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token);
+        result.Outcome.ShouldBe(FileApplyOutcome.Blocked); index.ReadApplyIntents().ShouldBeEmpty();
+        index.ReadDirectoryPublication("parent").ShouldNotBeNull();
+        if (obstacle == "file") File.ReadAllBytes(Disk("parent/child")).ShouldBe(New);
+        if (obstacle == "directory") Directory.Exists(Disk("parent/child")).ShouldBeTrue();
+        if (obstacle is not ("live-row" or "flagged-row")) index.LocalFiles.Find("parent/child")!.LocalSequence.ShouldBe(before.LocalSequence);
+    }
+
+    [Fact]
+    public async Task TombstoneClockRechecksAbsenceAfterPreparationAndPreservesConcurrentBytes()
+    {
+        await using var index = await DeletedChildPublication();
+        long prior = index.LocalFiles.Find("parent/child")!.LocalSequence;
+        var applier = new FileApplier(Root, index, keys, own) { Checkpoint = stage => { if (stage == "prepared") File.WriteAllBytes(Disk("parent/child"), New); } };
+        (await applier.ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token)).Outcome.ShouldBe(FileApplyOutcome.Blocked);
+        File.ReadAllBytes(Disk("parent/child")).ShouldBe(New); index.ReadApplyIntents().ShouldBeEmpty();
+        index.LocalFiles.Find("parent/child")!.LocalSequence.ShouldBe(prior); index.ReadDirectoryPublication("parent").ShouldNotBeNull();
+    }
+
+    [Theory]
+    [InlineData("prepared")]
+    [InlineData("before-commit")]
+    public async Task InterruptedTombstoneClockRecoversWithoutReleasingTheParentPublication(string boundary)
+    {
+        Guid version;
+        await using (var index = await DeletedChildPublication())
+        {
+            version = index.ReadDirectoryPublication("parent")!.Version;
+            var applier = new FileApplier(Root, index, keys, own) { Checkpoint = stage => { if (stage == boundary) throw new IOException("injected"); } };
+            await Should.ThrowAsync<IOException>(() => applier.ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token));
+            index.ReadApplyIntents().Count().ShouldBe(1);
+        }
+        await using var reopened = await FolderIndex.OpenAsync(Database, Token);
+        var recovered = new FileApplier(Root, reopened, keys, own);
+        (await recovered.RecoverAsync(Token)).ShouldBe(1); reopened.ReadApplyIntents().ShouldBeEmpty();
+        reopened.ReadDirectoryPublication("parent")!.Version.ShouldBe(version);
+        (await recovered.ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        reopened.Needed.Find("parent/child").ShouldBeNull(); reopened.ReadDirectoryPublication("parent")!.Version.ShouldBe(version);
+    }
+
+    [Fact]
+    public async Task TombstoneClockCommitFailureRollsBackLocalSequenceAndRetainsRetryProof()
+    {
+        await using var index = await DeletedChildPublication(); long prior = index.LocalFiles.Find("parent/child")!.LocalSequence;
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString());
+        connection.Open(); using var command = connection.CreateCommand();
+        command.CommandText = "CREATE TRIGGER reject_tombstone BEFORE UPDATE ON local_files WHEN NEW.path_key='PARENT/CHILD' BEGIN SELECT RAISE(ABORT,'injected'); END;"; command.ExecuteNonQuery();
+        var applier = new FileApplier(Root, index, keys, own);
+        await Should.ThrowAsync<Microsoft.Data.Sqlite.SqliteException>(() => applier.ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token));
+        index.LocalFiles.Find("parent/child")!.LocalSequence.ShouldBe(prior); index.Needed.Find("parent/child").ShouldNotBeNull();
+        index.ReadApplyIntents().Count().ShouldBe(1); index.ReadDirectoryPublication("parent").ShouldNotBeNull();
+        command.CommandText = "DROP TRIGGER reject_tombstone;"; command.ExecuteNonQuery();
+        (await applier.RecoverAsync(Token)).ShouldBe(1);
+        (await applier.ApplyScheduledAsync("parent/child", (_, _, _, _) => throw new InvalidOperationException(), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        index.Needed.Find("parent/child").ShouldBeNull(); index.ReadDirectoryPublication("parent").ShouldNotBeNull();
+    }
+
+    private async Task<FolderIndex> DeletedChildPublication(bool live = false)
+    {
+        Directory.CreateDirectory(Disk("parent")); File.WriteAllBytes(Disk("parent/child"), Old);
+        var index = await PrepareAsync("parent/child");
+        try
+        {
+            if (!live)
+            {
+                File.Delete(Disk("parent/child"));
+                using var scanner = new Scanner(Root, index, keys, own); await scanner.ScanAsync(Token);
+            }
+            await ReceiveAsync(index, "parent/child", [], deleted: true);
+            await new NeededSet(index, keys, own).AnnounceIndexRangeAsync(remote, 1, Token);
+            var parent = index.LocalFiles.Find("parent")!;
+            var inventory = index.ReadDirectoryChildInventory("parent", Token);
+            long now = DateTime.UtcNow.Ticks;
+            await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), "parent", index.Meta.Find("_root-identity")!.Value!, parent.FileId!, parent.LocalSequence,
+                parent.Attributes, parent.Record!, inventory.Hash, inventory.Count, now, now), Token);
+            return index;
+        }
+        catch { await index.DisposeAsync(); throw; }
+    }
+
     private async Task<FolderIndex> PrepareAsync(string path)
     {
         var index = await FolderIndex.OpenAsync(Database, Token);
