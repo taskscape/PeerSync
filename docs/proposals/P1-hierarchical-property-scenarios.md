@@ -33,3 +33,13 @@ Bounded smoke remains separate from a measured 1000-seed CI configuration,
 five consecutive days and the five-node/100000-file phase gate. Measure runtime
 before selecting bounded CI shards; this proposal starts no scheduled or
 additional remote runs. Plan checkpoints never claim those gates from smoke.
+
+Submit the three retained regression seeds with the bounded generated smoke
+in the same directory-repair PR, so CI exercises the defects that motivated
+the repair. Locally the three fixed cases take 181 seconds and a fresh
+20-case batch takes 363 seconds. The previous x64 packaging job took about
+ten minutes before this added scope. Allow that existing build job a
+20-minute ceiling to accommodate the additional real-engine work; add no
+jobs, schedules or duplicate runs. Timeout is a failure ceiling, not an
+instruction to consume the entire interval. Required boundary fuzz and both
+native Server jobs retain their existing scope and limits.
