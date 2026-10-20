@@ -9,9 +9,15 @@ using BenchmarkDotNet.Running;
 using PeerSync.Crypto.Chunking;
 
 if (args is ["--scale", var scaleFiles, var scaleSeconds, var scaleOutput, var scaleRevision])
-    return await PeerSync.Benchmarks.ScaleScenario.RunAsync(int.Parse(scaleFiles, CultureInfo.InvariantCulture), int.Parse(scaleSeconds, CultureInfo.InvariantCulture), scaleOutput, scaleRevision);
+    return await RunScale(() => PeerSync.Benchmarks.ScaleScenario.RunAsync(int.Parse(scaleFiles, CultureInfo.InvariantCulture), int.Parse(scaleSeconds, CultureInfo.InvariantCulture), scaleOutput, scaleRevision));
 if (args is ["--scale-oracle", var oracleOutput, var oracleRevision])
-    return await PeerSync.Benchmarks.ScaleScenario.RunAsync(0, 60, oracleOutput, oracleRevision, oracleOnly: true);
+    return await RunScale(() => PeerSync.Benchmarks.ScaleScenario.RunAsync(0, 60, oracleOutput, oracleRevision, oracleOnly: true));
+
+static async Task<int> RunScale(Func<Task<int>> run)
+{
+    try { return await run(); }
+    catch (Exception error) { Console.Error.WriteLine($"Scale runner: {error.GetType().Name}: {error.Message}"); return 2; }
+}
 if (args is ["--micro"])
 {
     BenchmarkRunner.Run<PeerSync.Benchmarks.ChunkingBenchmark>();
