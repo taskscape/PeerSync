@@ -39,3 +39,13 @@ in 62.307 seconds, with all final native, queue, stable-index, loss and referenc
 assertions. The second replay and final canonical verification are pending.
 The full primary Engine suite passes all 972 cases locally before final
 logging additions. No merged/CI/1000/five-day/100000-file acceptance is claimed.
+
+The second replay subsequently fails on source f23f9de in 116.759 seconds.
+Its generated fixture `PeerSync-Simulation-ac098f597d184c8b836cc2cfe2bbd989`
+retains two differing parent snapshot roots, with all other non-vector body
+fields equal. The looping preserved directory's current signed direct child
+is identical on all six nodes and dominates the member in both old roots.
+Partial same-body clock closure is insufficient. A durable multi-root causal
+proof is now designed on the primary branch; two focused owned/received
+acceptance regressions fail there before implementation. Keep this integration
+gate open and retain all fixture/trace evidence. No new CI run was started.
