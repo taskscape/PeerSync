@@ -814,6 +814,13 @@ Standalone Scanner retains legacy mode because it does not own a publication
 worker. Validate public nested publication, case preservation and no-op behavior
 with full local checks before CI/main acceptance; see
 `docs/proposals/P1-directory-production-activation.md`.
+Integration must retain observed directory attributes separately from received
+templates, durably defer unavailable legacy/corrupt subtree sources, reconsider
+suspended descendants when file ancestors cease blocking them, and bind/pin the
+physical root before public index metadata admission. Original signatures,
+canonical ancestry, recovery/root guards and session admission generations stay
+binding. Follow `docs/proposals/P1-directory-review-hardening.md` and reproduce
+the four PR #38 findings before a batched repair.
 
 The immutable source's first forwarding device is only a routing hint. If it
 becomes unavailable, consult current authenticated remote advertisements of the
