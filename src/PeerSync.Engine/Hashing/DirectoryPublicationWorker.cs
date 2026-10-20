@@ -93,7 +93,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                         Checkpoint?.Invoke("rebase-proven");
                     }
                     else if (template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
-                    var body = queued.ReconstructionOnly ? DirectoryRebaseProof.CreateTemplate(template, source, clock.GetUtcNow().UtcTicks, queued.Path, queued.Attributes) : template.ExportBody();
+                    var body = DirectoryPublicationClock.Template(index, keys, source, queued, clock.GetUtcNow().UtcTicks);
                     body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
                     var record = SignedRecordFactory.Create(body, keys);
                     publication = new(queued.Path, 1, 0, body.MtimeTicks, queued.Attributes, false, body.ChangedTicks, null,

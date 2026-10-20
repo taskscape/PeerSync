@@ -30,12 +30,10 @@ internal sealed partial class DirectorySnapshotCapture
                 throw new InvalidDataException("Directory template does not match its captured root.");
             if (publication is not null)
             {
-                if (queued.ReconstructionOnly) templateBody = DirectoryRebaseProof.CreateTemplate(template, sourceHint, version.ChangedTicks, queued.Path, queued.Attributes);
-                else if (templateBody.DirectorySnapshotHash.Length != 0) throw new InvalidDataException("New directory template already contains another root.");
+                if (!queued.ReconstructionOnly && templateBody.DirectorySnapshotHash.Length != 0) throw new InvalidDataException("New directory template already contains another root.");
                 if (!keys.CanWrite || !version.ModifiedBy.SequenceEqual(sourceHint) || VersionVector.Compare(version.Vector, current.Vector) != VvOrder.Equal)
                     throw new InvalidDataException("New directory publication has no local signing authority.");
                 body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0;
-                if (!body.Equals(templateBody)) throw new InvalidDataException("Directory publication changed its staged metadata.");
             }
             else
             {
@@ -60,6 +58,8 @@ internal sealed partial class DirectorySnapshotCapture
                 || ((uint)FileSnapshot.Read(native).Attributes & attributes) != (queued.Attributes & attributes)) throw new IOException("Directory queue native identity or attributes changed.");
             stage = "commit-row-cache"; Checkpoint?.Invoke("before-queue-publication");
             using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+            if (publication is not null && !body.Equals(DirectoryPublicationClock.Template(index, keys, sourceHint, queued, version.ChangedTicks)))
+                throw new InvalidDataException("Directory publication metadata or parent clock changed.");
             var result = await index.CommitDirectoryPublicationAsync(queued, draft, publication, nowTicks, token).ConfigureAwait(false);
             stage = "publication-committed"; Checkpoint?.Invoke("queue-published");
             journal?.TryWrite(new(result.Changed ? "directory.queue_published" : "directory.queue_unchanged", "directory-publication")
