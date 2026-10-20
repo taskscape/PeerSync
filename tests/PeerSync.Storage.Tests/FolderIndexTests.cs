@@ -103,11 +103,12 @@ public sealed class FolderIndexTests : IDisposable
         Directory.GetFiles(root, "*.pre-v31-to-v32-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v32-to-v33-*.bak").Length.ShouldBe(1);
         Directory.GetFiles(root, "*.pre-v33-to-v34-*.bak").Length.ShouldBe(1);
+        Directory.GetFiles(root, "*.pre-v34-to-v35-*.bak").Length.ShouldBe(1);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
-        ((long)command.ExecuteScalar()!).ShouldBe(34);
+        ((long)command.ExecuteScalar()!).ShouldBe(35);
         command.CommandText = "EXPLAIN QUERY PLAN DELETE FROM chunks WHERE path_key=$path;";
         command.Parameters.AddWithValue("$path", "FILE");
         var details = new List<string>();

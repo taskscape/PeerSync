@@ -57,7 +57,7 @@ public sealed partial class FolderIndex
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
                 command.CommandText = "SELECT id FROM directory_graphs WHERE root_id=$root AND retiring=$retiring "
-                    + (retiringOnly ? "" : "AND last_used_ticks<=$cutoff ") + "ORDER BY last_used_ticks,id LIMIT 1;";
+                    + (retiringOnly ? "" : "AND last_used_ticks<=$cutoff AND NOT EXISTS(SELECT 1 FROM directory_parent_roots p WHERE p.source_id=directory_graphs.id) ") + "ORDER BY last_used_ticks,id LIMIT 1;";
                 command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$retiring", retiringOnly ? 1 : 0);
                 if (!retiringOnly) command.Parameters.AddWithValue("$cutoff", cutoff);
                 return command.ExecuteScalar() as byte[];
