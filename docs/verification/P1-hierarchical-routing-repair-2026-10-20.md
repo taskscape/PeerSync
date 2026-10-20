@@ -25,7 +25,8 @@ The scoped Simulation compiler/configured analyzer gate is clean at
 warning/error, with no workspace-load warnings or truncation. The production
 repair has two focused connected regressions plus page/corruption/deadline/
 source/root/SQL tests on the primary branch; this separate property branch
-is still WIP and unmerged. A larger local batch is pending. No 1000-case CI,
+is still WIP and unmerged. The larger local 20-case batch subsequently fails on a separate directory
+clock loop; see `P1-hierarchical-clock-baseline-2026-10-20.md`. No 1000-case CI,
 five-day, 100000-file, deployed service, LAN or native NAT acceptance is claimed.
 The root-level staging counter is diagnostic only; it is not a recursive
 retirement assertion. See `docs/simulation.md` for running and replaying.
