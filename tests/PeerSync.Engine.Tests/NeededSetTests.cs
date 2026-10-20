@@ -23,6 +23,26 @@ public sealed class NeededSetTests : IDisposable
     public NeededSetTests() => Directory.CreateDirectory(fixture);
 
     [Fact]
+    public async Task FileAncestorContextIsAuthenticatedAndOnlySuspendsLiveDescendants()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); var needed = new NeededSet(index, keys, Device(9));
+        var parentBody = ConflictResolverTests.Body(9, 1, 10, 10, "parent bytes", false); parentBody.Path = "parent";
+        var parent = Local(SignedRecordFactory.Create(parentBody, keys));
+        var childBody = ConflictResolverTests.Body(2, 1, 20, 20, "child bytes", false); childBody.Path = "parent/child";
+        var child = SignedRecordFactory.Create(childBody, keys); var view = VersionView.Open(child, keys, Device(2));
+        var snapshot = new FolderPathSnapshot("PARENT/CHILD", null, [new(Device(2), "PARENT/CHILD", view.Vector, child)]) { BlockingFileAncestor = parent };
+        needed.Decide(snapshot).BlockedReason.ShouldBe("ancestor-is-file"); needed.ToNeededRow(snapshot).ShouldBeNull();
+        byte[] badSignature = parent.Record!.Signature.ToArray(); badSignature[0] ^= 1;
+        Should.Throw<CryptographicException>(() => needed.Decide(snapshot with { BlockingFileAncestor = parent with { Record = new(parent.Record.Body, badSignature) } }));
+        parentBody.Path = "unrelated"; var unrelated = Local(SignedRecordFactory.Create(parentBody, keys));
+        Should.Throw<InvalidDataException>(() => needed.Decide(snapshot with { BlockingFileAncestor = unrelated }));
+        var deletionBody = ConflictResolverTests.Body(2, 2, 30, 30, "", true); deletionBody.Path = "parent/child";
+        var deletion = SignedRecordFactory.Create(deletionBody, keys); var deleted = VersionView.Open(deletion, keys, Device(2));
+        var tombstone = snapshot with { Remote = [new(Device(2), "PARENT/CHILD", deleted.Vector, deletion)] };
+        needed.Decide(tombstone).RequiresApply.ShouldBeTrue(); needed.ToNeededRow(tombstone)!.Work!.Stage.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task IncrementalUpdatesAndLocalChangesKeepExactlyTheWinningNeededPaths()
     {
         await using var index = await FolderIndex.OpenAsync(Database, Token);

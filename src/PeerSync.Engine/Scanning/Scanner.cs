@@ -27,11 +27,12 @@ public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int R
 {
     public bool RequiresFollowupScan { get; init; }
     internal IReadOnlyList<string> ChangedPaths { get; init; } = [];
+    internal bool RequiresNeededRebuild { get; init; }
 }
 
 /// <summary>Tracks a local tree. The caller owns the index, keys and optional journal.
 /// Filesystem apply/recovery shares the per-index operation gate with scans.</summary>
-public sealed class Scanner : IDisposable
+public sealed partial class Scanner : IDisposable
 {
     private const string RootIdentityKey = "_root-identity";
     private static readonly IReadOnlyDictionary<ulong, ulong> EmptyVector = new Dictionary<ulong, ulong>();
@@ -46,6 +47,9 @@ public sealed class Scanner : IDisposable
     private readonly int hashConcurrency;
     private readonly FolderSettings settings;
     internal Action<string>? Checkpoint { get; set; }
+    // Development integration gate. Remove before directory feature PR after
+    // incoming-root/subtree convergence is proven; production remains inactive.
+    internal bool StageDirectorySnapshots { get; init; }
     private readonly SemaphoreSlim scanGate = new(1);
     internal string RootPath => rootPath;
 
@@ -107,6 +111,7 @@ public sealed class Scanner : IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
+                    Checkpoint?.Invoke("before-enumerate");
                     foreach (var native in root.Enumerate(directory, cancellationToken))
                     {
                         string path = directory.Length == 0 ? native.Name : directory + '/' + native.Name;
@@ -174,6 +179,7 @@ public sealed class Scanner : IDisposable
                     catch (EncoderFallbackException) { /* Cannot represent this local name in SQLite UTF-8. */ }
                     return;
                 }
+                if (keys.CanWrite && entry.Native.IsDirectory && (StageDirectorySnapshots || index.HasIncompleteDirectoryCaseCopy(entry.Path))) return;
                 if (old is { Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry)
                     && (entry.Native.IsDirectory || old.ChangeFileTime == entry.Native.ChangeFileTime)
                     && (!keys.CanWrite && old.Record is null || old.Record is not null && (old.Type != 0 || old.ContentReady)))
@@ -325,13 +331,17 @@ public sealed class Scanner : IDisposable
             foreach (var cacheBatch in cacheUpdates.Chunk(1000))
                 await index.UpdateNativeChangeTimesAsync(cacheBatch, cancellationToken).ConfigureAwait(false);
             int written = await index.LocalFiles.UpsertAsync(ordered, cancellationToken).ConfigureAwait(false);
+            if (StageDirectorySnapshots)
+                await StageDirectoriesAsync(root.Identity, entries, protectedPrefixes, ignoredPrefixes, problems, session, cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()) };
+                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
+                    RequiresNeededRebuild = ordered.Any(row => row.Deleted && previous.TryGetValue(row.Path.ToUpperInvariant(), out var old)
+                        && old is { Type: 0, Deleted: false, Record: not null }) };
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {

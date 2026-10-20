@@ -122,6 +122,13 @@ internal sealed class DirectoryLease : IDisposable
     internal DirectoryLease(SafeFileHandle parent, List<SafeFileHandle> owned) { this.parent = parent; this.owned = owned; }
 
     internal IEnumerable<NativeEntry> Entries(CancellationToken token) => NativeRoot.EnumerateHandle(parent, token);
+    internal byte[] Identity => BlockCaptureProof.Identity(parent);
+    internal DirectoryLease OpenDirectory(string name)
+    {
+        Check(name, temporary: false);
+        var handle = SafeFileTree.Open(parent, name, true, 0x00100081, 3, 1);
+        return new(handle, [handle]);
+    }
 
     public SafeFileHandle CreateFile(string name, bool temporary = false)
     {

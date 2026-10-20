@@ -75,7 +75,14 @@ public sealed partial class FileApplier
         using var tree = new SafeFileTree(rootPath); ValidateRoot(tree);
         using var selection = await ScheduledApplySelection.AcquireAsync(index, needed, ownDevice, key, scheduled, cancellationToken).ConfigureAwait(false);
         var known = selection.Known; var decision = selection.Decision;
-        if (decision.BlockedReason is not null) return FileApplyOutcome.Blocked;
+        if (decision.BlockedReason is not null)
+        {
+            if (scheduled && decision.BlockedReason == "directory-publication-pending"
+                && await TryApplyAbsentTombstoneAsync(tree, selection, key, session, cancellationToken).ConfigureAwait(false))
+                return FileApplyOutcome.Applied;
+            if (decision.BlockedReason == "directory-publication-pending") Signal("publication-pending", session);
+            return FileApplyOutcome.Blocked;
+        }
         if (!decision.RequiresApply) return FileApplyOutcome.Unchanged;
         if (!selection.RangeComplete) { Signal("index-range-pending", session); return FileApplyOutcome.Deferred; }
         var winner = decision.Winner!;
@@ -122,7 +129,7 @@ public sealed partial class FileApplier
             stream.Flush(flushToDisk: true);
         }
         using var mutationReferences = selection.HoldsReferences ? null : await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-        if (index.HasPendingCasePreservation(key))
+        if (index.HasPendingCasePreservation(key) || index.HasBlockingDirectoryPublication(key, includeDescendants: true))
         {
             await ParkAsync(tree, state, intent, cancellationToken, tempHandle).ConfigureAwait(false);
             await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
@@ -174,6 +181,10 @@ public sealed partial class FileApplier
         foreach (var intent in index.ReadApplyIntents().ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (DirectoryCaseMemberState.IsMember(intent))
+            { await RecoverDirectoryMemberAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue; }
+            if (DirectoryCaseRootState.IsRoot(intent))
+            { await RecoverDirectoryCaseRootAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue; }
             if (CaseCopyState.IsCase(intent))
             { await RecoverCaseIntentAsync(tree, intent, cancellationToken).ConfigureAwait(false); recovered++; continue; }
             if (HistoryState.IsHistory(intent))
@@ -212,7 +223,7 @@ public sealed partial class FileApplier
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);
-            if (!state.IsRestore && index.HasPendingCasePreservation(state.Path))
+            if (!state.IsRestore && (index.HasPendingCasePreservation(state.Path) || index.HasBlockingDirectoryPublication(state.Path, includeDescendants: true)))
             {
                 if (state.OriginalId.Length == 0 && target is null || target is not null && HasIdentity(target, state.OriginalId))
                 {

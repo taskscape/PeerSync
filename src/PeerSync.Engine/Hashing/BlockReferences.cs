@@ -14,10 +14,11 @@ namespace PeerSync.Engine.Hashing;
 public sealed record BlockReferenceRefreshResult(Guid? SnapshotId, long References, int Batches,
     long ArchivesWithoutManifest, int CaptureDeferrals, bool WaitingForRecovery = false)
 {
+    public bool WaitingForDirectorySnapshots { get; init; }
     /// <summary>Coverage of sources known at refresh time only. This is not
     /// deletion authorization: cleanup must also establish archive/migration
     /// provenance and refresh while holding both gates through its sweep.</summary>
-    public bool AllKnownSourcesCovered => SnapshotId is not null && !WaitingForRecovery && ArchivesWithoutManifest == 0 && CaptureDeferrals == 0;
+    public bool AllKnownSourcesCovered => SnapshotId is not null && !WaitingForRecovery && !WaitingForDirectorySnapshots && ArchivesWithoutManifest == 0 && CaptureDeferrals == 0;
 }
 
 /// <summary>Host owns the bound index and keys. Every production reference
@@ -30,6 +31,7 @@ public sealed class BlockReferences
     private readonly byte[] device;
     private readonly DiagnosticJournal? journal;
     internal Action<string>? Checkpoint { get; init; }
+    internal int DirectoryGraphWorkLimit { get; init; } = 1000;
 
     public BlockReferences(string rootPath, FolderIndex index, FolderKeys keys, byte[] device, DiagnosticJournal? journal = null)
     {
@@ -53,9 +55,22 @@ public sealed class BlockReferences
         Guid session = Guid.NewGuid(); var watch = Stopwatch.StartNew();
         try
         {
+            if (DirectoryGraphWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory graph work limit.");
             if (index.Meta.Find("_root-identity")?.Value is not { Length: 24 } root || !root.AsSpan().SequenceEqual(tree.Identity))
                 throw new IOException("Block reference root changed or is not bound.");
             var recovery = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, cancellationToken).ConfigureAwait(false);
+            int publicationRetirements = await index.PruneDirectoryPublicationsAsync(root, DateTime.UtcNow.Ticks, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (publicationRetirements != 0) Log("directory.publications_pruned", changed: publicationRetirements);
+            int parentRetirements = publicationRetirements < 1000
+                ? await index.PruneDirectoryParentProofsAsync(root, DateTime.UtcNow.Ticks, limit: 1000 - publicationRetirements, cancellationToken: cancellationToken).ConfigureAwait(false) : 0;
+            int captureRetirements = publicationRetirements + parentRetirements < 1000
+                ? await index.PruneDirectoryCapturesAsync(root, DateTime.UtcNow.Ticks, limit: 1000 - publicationRetirements - parentRetirements, cancellationToken: cancellationToken).ConfigureAwait(false) : 0;
+            if (captureRetirements != 0) Log("directory.capture_pruned", changed: captureRetirements);
+            var graphRetirement = captureRetirements + publicationRetirements + parentRetirements < 1000
+                ? await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: false, limit: 1000 - captureRetirements - publicationRetirements - parentRetirements, cancellationToken: cancellationToken).ConfigureAwait(false)
+                : new DirectoryGraphPrune(0, false);
+            if (graphRetirement.Mutations != 0) Log("directory.graph_pruned", changed: graphRetirement.Mutations, deferred: graphRetirement.MoreWork ? 1 : 0);
+            if (index.HasDirectoryCaptures() || index.HasPendingDirectoryPublications()) throw new DirectoryGraphPending();
             if (index.ReadApplyIntents().Any())
             {
                 Log("block.references_wait", "pending-application"); return new(null, 0, 0, 0, recovery.Deferred, WaitingForRecovery: true);
@@ -64,6 +79,34 @@ public sealed class BlockReferences
             var snapshot = await index.BeginBlockReferenceSnapshotAsync(root, DateTime.UtcNow.Ticks, cancellationToken).ConfigureAwait(false);
             Checkpoint?.Invoke("begun");
             var batch = new Dictionary<string, BlockReferenceRow>(StringComparer.Ordinal); int batches = 0;
+            var graphs = new DirectorySnapshotGraph(rootPath, index, keys, device, journal); int graphBudget = DirectoryGraphWorkLimit;
+            byte[]? parentCursor = null;
+            do
+            {
+                var parents = index.ReadDirectoryParentSources(root, parentCursor);
+                foreach (var source in parents.Sources)
+                {
+                    var version = VersionView.Open(source.Record, keys, source.RouteHint); var authenticated = DirectoryMetadataSources.FromVersion(version);
+                    if (authenticated is null || authenticated.Path != source.Path || authenticated.Length != source.Length || !authenticated.Hash.AsSpan().SequenceEqual(source.Hash)
+                        || !authenticated.SourceId.AsSpan().SequenceEqual(source.SourceId)) throw new InvalidDataException("Parent reference representative changed.");
+                    await AddVersionAsync(version, BlockReferenceKind.Needed).ConfigureAwait(false);
+                }
+                if (!parents.More) break; parentCursor = parents.NextSourceId;
+            } while (true);
+            // Queued original envelopes protect their cache while fetching, even
+            // if their former local row has already been replaced.
+            foreach (var pending in index.ReadDueDirectoryMetadataSources(root, DateTime.MaxValue.Ticks, limit: 1000))
+            {
+                cancellationToken.ThrowIfCancellationRequested(); var version = VersionView.Open(pending.Source.Record, keys, pending.Source.RouteHint);
+                var metadata = DirectoryMetadataSources.FromVersion(version);
+                if (metadata is null || metadata.Path != pending.Source.Path || metadata.Length != pending.Source.Length
+                    || !metadata.SourceId.AsSpan().SequenceEqual(pending.Source.SourceId) || !metadata.Hash.AsSpan().SequenceEqual(pending.Source.Hash))
+                    throw new InvalidDataException("Queued directory metadata source changed.");
+                var current = index.LocalFiles.Find(pending.Source.Path);
+                bool isCurrent = current?.Record is { } record && record.Body.SequenceEqual(version.Record.Body) && record.Signature.SequenceEqual(version.Record.Signature);
+                await AddVersionAsync(version, isCurrent ? BlockReferenceKind.Current : BlockReferenceKind.Needed).ConfigureAwait(false);
+            }
+            if (index.ReadNextDirectoryMetadataTicks(root, DateTime.UtcNow.Ticks) is not null) throw new DirectoryGraphPending();
             // Hints also cover unpublished/withheld/local RO rows. A stale hint
             // can conservatively retain bytes; it can never authorize deletion.
             foreach (var chunk in index.Chunks.ReadAll())
@@ -94,7 +137,16 @@ public sealed class BlockReferences
                 if (PathRules.Key(version.Path) != source.PathKey || version.Deleted || version.Type > 1
                     || !CaseConflictPolicy.SourceId(version).AsSpan().SequenceEqual(source.SourceId))
                     throw new InvalidDataException("Case reference manifest does not match its source.");
+                if (version.Type == 1 && version.ExportBody().DirectorySnapshotHash.Length == 0)
+                    throw new DirectoryGraphPending(); // Legacy metadata never proves an empty preserved subtree.
                 await AddVersionAsync(version, BlockReferenceKind.Needed).ConfigureAwait(false);
+            }
+            foreach (var retained in index.ReadRetainedDirectoryCases(root, DateTime.UtcNow.Ticks))
+            {
+                cancellationToken.ThrowIfCancellationRequested(); var version = VersionView.Open(retained.Record, keys, retained.SourceDevice);
+                if (version.Type != 1 || version.Deleted || PathRules.Key(version.Path) != retained.PathKey || !CaseConflictPolicy.SourceId(version).AsSpan().SequenceEqual(retained.SourceId))
+                    throw new InvalidDataException("Retained directory case manifest changed.");
+                await AddVersionAsync(version, BlockReferenceKind.History).ConfigureAwait(false);
             }
             var archiveCoverage = new List<ArchiveReferenceSource>(1000);
             foreach (var marker in index.Meta.ReadAll())
@@ -145,14 +197,35 @@ public sealed class BlockReferences
             long unmanifested = index.CountUnmanifestedReferenceArchives(snapshot.Id);
             await FlushAsync().ConfigureAwait(false); Checkpoint?.Invoke("before-activate");
             await index.ActivateBlockReferenceSnapshotAsync(snapshot.Id, cancellationToken).ConfigureAwait(false);
+            if (graphRetirement.Mutations + captureRetirements + publicationRetirements + parentRetirements < 1000)
+            {
+                var retiredGraphs = await index.PruneDirectoryGraphsAsync(root, DateTime.UtcNow.Ticks, beginRetirements: true, limit: 1000 - graphRetirement.Mutations - captureRetirements - publicationRetirements - parentRetirements, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (retiredGraphs.Mutations != 0) Log("directory.graph_pruned", changed: retiredGraphs.Mutations, deferred: retiredGraphs.MoreWork ? 1 : 0);
+            }
             var active = index.ReadActiveBlockReferenceSnapshot() ?? throw new InvalidOperationException("Reference activation disappeared.");
             Checkpoint?.Invoke("activated"); Log("block.references_complete", changed: active.References, deferred: unmanifested + recovery.Deferred);
             return new(active.Id, active.References, batches, unmanifested, recovery.Deferred);
 
             async Task AddVersionAsync(VersionView version, BlockReferenceKind kind)
             {
-                if (version.Type != 0 || version.Deleted) return;
-                foreach (var chunk in version.ExportBody().Chunks)
+                if (version.Deleted) return;
+                var body = version.ExportBody();
+                if (version.Type == 1 && body.DirectorySnapshotHash.Length != 0)
+                {
+                    var metadata = DirectoryMetadataSources.FromVersion(version)!;
+                    await index.AdmitDirectoryMetadataSourcesAsync(root, [metadata], DateTime.UtcNow.Ticks, cancellationToken).ConfigureAwait(false);
+                    var graph = await graphs.AdvanceUnderGateAsync(version.Record,
+                        (_, _, _) => throw new DirectoryGraphPending(), graphBudget, cancellationToken).ConfigureAwait(false);
+                    graphBudget -= graph.Processed;
+                    if (!graph.Complete) throw new DirectoryGraphPending();
+                    foreach (var reference in index.ReadDirectoryGraphReferences(graph.Id))
+                        await AddAsync(reference.Hash, reference.Length, kind).ConfigureAwait(false);
+                    if (index.ReadDirectoryMetadataSource(graph.Id) is { } queued)
+                        await index.CompleteDirectoryMetadataSourceAsync(queued, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (version.Type != 0) return;
+                foreach (var chunk in body.Chunks)
                     await AddAsync(chunk.Hash.ToByteArray(), checked((int)chunk.Length), kind).ConfigureAwait(false);
             }
             async Task AddAsync(byte[] hash, int length, BlockReferenceKind kind)
@@ -179,6 +252,7 @@ public sealed class BlockReferences
                 archiveCoverage.Clear(); Checkpoint?.Invoke("archive-batch");
             }
         }
+        catch (DirectoryGraphPending) { Log("block.references_wait", "directory-snapshot"); return new(null, 0, 0, 0, 0) { WaitingForDirectorySnapshots = true }; }
         catch (Exception error) { Log("block.references_failed", error.GetType().Name, error); throw; }
 
         void Log(string name, string? code = null, Exception? error = null, long? changed = null, long? deferred = null) =>
@@ -187,4 +261,5 @@ public sealed class BlockReferences
                     SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null }, ItemsChanged = changed, ItemsDeferred = deferred,
                 ElapsedMilliseconds = watch.ElapsedMilliseconds, RetryInMilliseconds = error is not null || name == "block.references_wait" ? 10000 : null });
     }
+    private sealed class DirectoryGraphPending : IOException;
 }

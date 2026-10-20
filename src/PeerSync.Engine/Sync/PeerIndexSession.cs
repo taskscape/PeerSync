@@ -65,8 +65,10 @@ public sealed class PeerIndexSession
     {
         using var activity = new Activity("PeerSync.PeerIndexReceive").SetIdFormat(ActivityIdFormat.W3C).Start();
         long admission = clock.CaptureIndexAdmission(); ArgumentNullException.ThrowIfNull(page);
+        page = new(page.AfterSequence, page.LastSequence, page.Records.ToArray());
         try
         {
+            using var root = await owner.PinReceivingRootAsync(cancellationToken).ConfigureAwait(false);
             var result = await needed.ApplyAdmittedIndexUpdateAsync(peer, page.AfterSequence, page.LastSequence, page.Records,
                 () => clock.RequireIndexExchangeAllowedWithoutDiagnostics(admission), cancellationToken).ConfigureAwait(false);
             owner.NotifyWorkAvailable();

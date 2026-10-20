@@ -50,9 +50,10 @@ public sealed partial class FolderIndex
         {
             RequireBlockReferenceRoot(connection, transaction, root); using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "UPDATE case_preservations SET record_body=NULL,signature=NULL,source_device=NULL WHERE source_id IN ("
-                + "SELECT source_id FROM case_preservations WHERE root_id=$root AND completed=1 AND record_body IS NOT NULL AND completed_ticks <= $cutoff "
+                + "SELECT source_id FROM case_preservations WHERE root_id=$root AND completed=1 AND record_body IS NOT NULL AND completed_ticks <= $cutoff AND (retained_until_ticks IS NULL OR retained_until_ticks<=$now) "
                 + "ORDER BY completed_ticks,source_id LIMIT $limit);";
             command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$cutoff", nowTicks - TimeSpan.TicksPerDay);
+            command.Parameters.AddWithValue("$now", nowTicks);
             command.Parameters.AddWithValue("$limit", limit); cancellationToken.ThrowIfCancellationRequested(); return command.ExecuteNonQuery();
         }, cancellationToken);
     }

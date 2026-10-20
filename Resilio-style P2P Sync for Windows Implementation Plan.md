@@ -628,10 +628,224 @@ progress when unavailable older sources leave fewer than a batch's free slots.
 Remote receipt remains whole-batch atomic with its cursor. Other resolver
 failures or cancellation roll back the current entire recomputation batch.
 
-The immutable source's first forwarding device is only a routing hint. If it
-becomes unavailable, consult current authenticated remote advertisements of the
-same exact signed envelope, try another forwarding device and retain the
-successful route during that assembly. Do not change the portable source ID.
+Directory case preservation requires a signed description of descendants.
+Add optional directory_snapshot_hash and exact directory_snapshot_length
+fields to live directory bodies, binding a
+Merkle snapshot of exact original signed child envelopes and nested directory
+roots. Missing legacy hashes never prove emptiness. Capture bottom-up after
+children publish, retain the complete graph in reference coverage and keep
+original-path merging blocked until guarded copied members are visibly complete.
+Native child-caused directory mtime alone remains ignored; an authenticated
+child-manifest change now advances the directory's vector/hash. This extends
+the earlier metadata-only publication rule without signing incidental native
+mtime changes. Require convergence/crash tests before enabling mutations.
+The bounded canonical node/envelope encoding, migration limits and staged
+acceptance are specified in docs/proposals/P1-directory-snapshot-protocol.md.
+Snapshot builders consume strictly increasing canonical immediate-child keys,
+form groups of 128 records, and sort only the bounded links inside each page.
+Carry full pages into bounded 128-link Branch buffers at successive levels;
+finalize partial tails bottom-up. This fixes deterministic grouping without
+retaining or globally sorting an entire directory in RAM. Per-pass persistent
+capture/traversal continuation remains required before production activation.
+Graph validation uses a FULL SQLite continuation bound to the physical root
+and original signed directory source. Persist pending page/record work, seen
+context/hash pairs, unique canonical child keys and exact metadata/file-chunk
+references. Commit discovered children and completion of their parent work
+atomically only after independent metadata bytes are durably accounted. Work
+budgets return pending, resume after reopening and never activate partial
+reference coverage. Missing metadata, invalid kinds/signatures/parents,
+duplicate keys and excessive page nesting retain fail-closed protection.
+Touch graph caches when their source is encountered. After a complete fresh
+reference activation, mark only caches unused for 24 hours for retirement.
+Delete at most 1000 continuation/member/reference/job rows per refresh, using
+a persistent retiring flag. Resume existing retirements before graph work;
+a newly needed retiring graph waits for bounded cleanup and rebuilds from
+its signed root. Never expose partially retired coverage or delete native
+blocks merely because graph cache metadata expires.
+Resumable capture retains a bounded builder checkpoint containing the accepted
+member count, partial Record links and full-page carry links. Validate canonical
+base-128 count distribution, link lengths and exact state size before restore.
+Only checkpoint successful additions after owned metadata flush; a failed
+addition discards the in-memory builder. Bind the eventual durable checkpoint
+to root, parent, ordered input manifest and continuation cursor before scanner
+activation. Builder checkpoints alone are not complete subtree proofs.
+The durable capture draft binds root, original parent spelling/native identity,
+ordered envelope manifest/count and accepted prefix/cursor. Flush independent
+bytes before FULL compare-and-swap progress; recheck unstable enumeration before
+committing. Capture at most 1000 new members per advancement. Pending and
+complete-but-unpublished drafts block fresh sweeping until publication or safe
+expiry; one row per parent and bounded 24-hour retirement limit abandoned state.
+See docs/proposals/P1-directory-capture-continuation.md. Scanner publication
+must validate the native binding and atomically release the draft with its row.
+For scanner integration retain the previous signed directory row and stage
+metadata privately until exact child publications and a replacement root are
+ready. Use indexed parent keys, UTF-16BE ordinal sort keys and row/byte-bounded
+child batches. Advance trusted local-index drafts between full scans with a
+trigger-maintained local mutation epoch (including non-sequence readiness
+changes); revalidate changed inputs without discarding an
+identical manifest. Keep arbitrary enumerable capture on its two-pass path.
+FULL-bind a revalidated manifest to its exact epoch and compare that witness
+before progress/publication; reject counter overflow rather than wrapping.
+Pending-publication dependencies/barriers and bounded coordinator continuation
+are detailed in docs/proposals/P1-directory-scanner-publication.md; they must
+prevent mtime/vector feedback and pass convergence before activation.
+Retain authenticated signed child membership when local readiness is cleared;
+availability changes are not signed deletions. Metadata capture does not set
+file readiness or claim available bytes; materialization verifies each chunk.
+The next integration slice uses private versioned publication templates while
+retaining the previous signed row, direct-child inventory/dependency checks,
+bounded coordinator continuation between scans and a compact published-input
+cache. No-op roots release drafts without vector/sequence churn. Namespace and
+GC barriers, retry/fairness and readonly reconstruction remain mandatory; see
+docs/proposals/P1-directory-publication-queue.md before enabling scanner changes.
+The native and indexed child inventories share a streaming BLAKE3 fingerprint:
+domain `PeerSync directory child keys v1`, canonical parent and direct child
+keys as UInt32LE byte lengths plus UTF-16BE bytes in strict ordinal order,
+then UInt64LE child count. Read the indexed keys and mutation epoch in one
+SQLite read transaction without loading record bodies. Match both digest and
+count before binding queue keys to that epoch; this proves membership only,
+never signed content, native ownership or local byte readiness.
+Keep scanner snapshot staging internal and inactive in production until
+incoming-directory and subtree integration passes. Its local-source preview
+retains old signed rows and queues complete supported native inventories after
+file/tombstone commits. Reuse identical private templates and cached no-op
+observations, pause uncertain namespaces, and discard obsolete queue/draft
+metadata only after a complete walk proves absence, another type or exclusion.
+An incoming authenticated snapshot without a matching local publication cache
+is reconstruction-only: never infer a user deletion from not-yet-applied
+remote children. Its graph/materialization proof must be integrated before
+activation; readonly scans retain their existing unsigned-edit behavior.
+Subtree materialization starts with a bounded, reauthenticated projection from
+the complete non-retiring original graph into a stable case-copy root, without
+rewriting any signed member. Page canonical keys, preserve causal parent-case
+aliases, bound envelope memory and flush fetched metadata before continuation.
+This projection proves no native ownership/readiness. Follow
+docs/proposals/P1-directory-subtree-materialization.md for the subsequent
+root/member-bound no-overwrite journal, recovery and publication requirements.
+Begin native case-root creation with distinct local intent kind 8: authenticated
+original directory/source and physical root, stable collision slot, exclusive
+GUID temporary/native identity and prepared state. Require complete graph
+coverage, FULL reserve before preparation/rename and FULL identity accounting
+before intent release. Preserve changed/occupied temporaries and replay by
+native identity. Share a 1000-unit graph budget; root creation alone never
+completes subtree preservation or publication.
+Member installation uses schema-28 source/destination-root-native-ID keyed
+cursors and original graph-link/member-ID/destination rows. FULL kind-9 intent
+reservation and installation/cursor accounting bracket guarded no-overwrite
+mutation. Reauthenticate local original envelopes during recovery and verify
+every parent native ID without quadratic handle retention. Collisions/edits
+preserve earlier partial trees and select another root slot; installation
+coverage alone never completes publication. Details remain in the subtree
+materialization proposal, including namespace/publication activation barriers.
+Pending case preservation blocks ordinary incoming source/copy namespace
+mutation including descendants and destructive ancestor transitions; keep the
+narrow existing missing-ancestor-directory creation allowance. Share exact
+ancestor/range logic with late/recovery and FULL commit guards. Hold directory
+advertisements at/above/below unfinished copied roots until identity-bound
+member coverage is exhausted, preserving signed rows and pausing templates.
+Coverage releases only publication holding, never case-source completion.
+Complete subtree sources through a separate bounded verification cursor bound
+to root native identity, local mutation epoch, root publication sequence and
+RW/RO mode. Reauthenticate members, verify guarded native bytes and observed
+rows, require current cached signed snapshot/ready records for RW and unsigned
+preservation for RO, and FULL-release only after complete stable coverage.
+Keep completed RO original graphs/envelopes referenced for ArchiveDays rather
+than dropping them through the generic 24-hour case compactor. Expiry authorizes
+no native deletion. See the subtree proposal for witness/reset/commit details.
+Retire obsolete directory-copy member witnesses in bounded FULL transactions,
+sharing at most 1000 member/progress deletions per call. Keep every pending
+current-root witness and all witnesses while application recovery is pending.
+Completed attempts wait 24 hours after completion; superseded-root members wait
+24 hours after their last touch. Remove a superseded or aged completed progress
+row only after its members are gone. This metadata-only cleanup never releases
+original source/graph retention or mutates visible copies.
+Reconstruct received signed directory roots through explicitly tagged private
+work. Such work retains the exact received template and can only release it
+unchanged after the bounded captured root matches; it never signs an absent
+child set. Reconstruction holds GC and parent snapshot publication but permits
+ordinary incoming mutations so missing children can arrive. Scanner observations
+refresh its native child-key inventory and changed input epochs wake its retry.
+Keep ordinary publication barriers and final case completion guards intact.
+Enable production staging only after incoming/subtree convergence tests pass.
+First wire an internal connected-coordinator preview: stage on complete scans,
+run one bounded publication pass after case preparation and before completion,
+repair needed paths after publication, and include durable publication retry
+deadlines in the puller's wake calculation. Keep the public production path
+inactive until connected acceptance passes; preserve existing public constructors.
+Once member installation is exhausted, preparation yields scheduling authority
+to verification/completion instead of refreshing its retry deadline. Completion
+owns pending scan/publication backoff. Connected simulations advance injected
+UTC to a reported future deadline; they must not spin past a real backoff or
+sleep in wall time to simulate service scheduling.
+Before activation, ordinary applied directory/file version changes must also
+request preview snapshot reconciliation. Transport-backed metadata fetching must
+cover every protected directory root, independently of native copy work and
+needed-path drain. Persist exact root/source-bound envelopes and route hints
+before replacement can lose them; advance authenticated graphs in bounded work,
+with persistent retry and source fairness. Do not fetch over the network while
+holding the reference gate or weaken GC coverage to hide missing graph metadata.
+Queue admission/retirement and known-source coverage follow the metadata-fetch
+proposal; visible copies and signed records remain independent of this cache.
+Schema 32 bounds source envelopes at 4096 per folder and admits old local,
+selected original/desired and case roots with needed/index updates. Use durable
+run ordinals for fair 32-source/8-MiB/1000-graph-unit passes, persistent retry and
+24-hour unrequested metadata-work expiry. Signed source owners remain separate;
+required missing graphs continue to block GC and re-admit work. Recover retained
+RO directory originals through bounded rooted case-ledger pages; existing
+`_history-` markers remain file-only. Release completed queue entries only
+against the exact complete non-retiring graph. See the proposal for transitions.
+Metadata route fallback uses two preferred hints plus six paged known devices,
+with a source-specific durable cursor and wraparound, independent of retry UTC
+and source run ordinals. Later authenticated forwarders must remain reachable.
+Each route has a one-second linked deadline inside the ten-second source
+attempt, so a stalled preferred hint leaves time for fallback. Source/caller
+cancellation still stops work; transport fetches must honor their token.
+Received directory roots whose child envelopes were causally superseded may
+rebase only on RW peers after bounded, durable proof of every original direct
+child against exact or dominating signed local versions. Bind schema-33 proof
+to queue/root/native/capture/graph and the local mutation epoch; missing or
+concurrent members remain pending. Final guarded FULL publication consumes the
+complete proof, increments the own directory vector once and preserves parent
+mtime/history. RO exact reconstruction remains unchanged. Follow
+`docs/proposals/P1-directory-reconstruction-rebase.md` before activation.
+After the connected/recovery acceptance set passes, public Puller and
+TransportFolder coordinators enable bottom-up directory snapshot publication.
+Standalone Scanner retains legacy mode because it does not own a publication
+worker. Validate public nested publication, case preservation and no-op behavior
+with full local checks before CI/main acceptance; see
+`docs/proposals/P1-directory-production-activation.md`.
+Integration must retain observed directory attributes separately from received
+templates, durably defer unavailable legacy/corrupt subtree sources, reconsider
+suspended descendants when file ancestors cease blocking them, and bind/pin the
+physical root before public index metadata admission. Original signatures,
+canonical ancestry, recovery/root guards and session admission generations stay
+binding. Follow `docs/proposals/P1-directory-review-hardening.md` and reproduce
+the four PR #38 findings before a batched repair.
+
+Automatic directory publication closes its original parent clock over current
+authenticated records with the exact same non-vector body and signed snapshot
+root, then increments the local counter once. It never absorbs a different
+subtree/metadata/spelling as equivalent proof. Shared construction and final
+reference-gated validation must agree on the current same-body clock floor;
+late changes retry. Follow `docs/proposals/P1-directory-parent-clock-repair.md`
+for owned restaging, received reconstruction and quiescence race regressions.
+When parent envelopes differ in snapshot root, do not absorb their clocks
+without durable causal proof of every eligible original root against the
+current signed child input. Preserve bounded progress/graph holds across
+vector-only forwarding and revalidate the root set at final commit; see
+`docs/proposals/P1-directory-parent-root-set-proof.md`.
+
+The immutable source's first forwarding device is only a routing hint. Current
+advertisements cannot discover every retained old member payload after parent
+versions advance. Use source/root-bound durable route hints and known-device
+cursor paging, one six-device page plus two hints per source attempt; validate
+owned response bytes against signed length/BLAKE3 regardless of advertisement.
+Bound each candidate to one second plus requested bytes at 256 KiB/second
+(at most 33 seconds for 8 MiB), and the source attempt to 300 seconds,
+propagate caller cancellation and keep network awaits outside reference gates.
+Do not change the portable source ID or weaken recovery/graph/native guards.
+Follow `docs/proposals/P1-case-payload-routes.md`, including restart, corruption,
+timeout, route-page and retained hierarchy failure regressions.
 Prepared recovery treats unclassifiable/reparse destination probes as occupied:
 preserve the occupant, park the verified temporary using its held handle and
 release the intent for another no-overwrite slot instead of blocking the folder.
@@ -898,6 +1112,17 @@ caller's guard. Owner/group/audit sections are not part of the synchronized ACL.
    whole directory objects without recursive traversal/deletion. In the durable
    completion transaction, withhold stale live descendant metadata and remove
    descendant needed work beneath a moved directory until a normal rescan.
+   A currently installed, signed live regular-file ancestor also suspends live
+   descendant pull work, including late index pages. Retain remote envelopes and
+   case obligations; never manufacture descendant tombstones from the parent.
+   Resolve the nearest such ancestor in the same needed-rewrite transaction and
+   authenticate it in the engine. Fresh file completion withdraws live descendant
+   work atomically, retaining deletion stages. When application or local snapshot
+   publication changes a signed live regular-file parent into a live directory,
+   rebuild needed work after the required scan so retained child versions resume
+   normal conflict selection. A previously absent parent has suspended no child
+   work and does not require this extra scan/rebuild.
+   Incoming snapshot equality/rebase requirements remain independent.
 
 ### Archive, ignore rules and special files
 
@@ -1356,6 +1581,22 @@ traces for direct replay and promotion to checked-in regression fixtures. Keep
 bounded smoke sampling separate from the mandatory 1,000-case CI and five-day
 gate evidence, and keep case/hierarchy/stale-temp work visible while the initial
 flat-path scenario is expanded.
+Add a separately versioned hierarchical scenario over the public coordinator:
+nested/case/kind/rename/delete operations, recursive visible-tree and native
+loss oracles, complete graph coverage and durable queue drain after healing.
+Preserve flat seed replay; keep bounded smoke distinct from measured 1000-seed
+CI/five-day/100000-file gates. Follow
+`docs/proposals/P1-hierarchical-property-scenarios.md`.
+
+Gate P1's thousand-seed/five-day evidence uses a bounded opt-in campaign,
+separate from PR smoke and the local 100000-file corpus. Pin one green source,
+split 1000 flat seeds across five Windows shards, add one hierarchy sample per
+shard and run the three retained hierarchy regressions once per day. Verify
+actual unique counts, complete native/queue/reference/loss oracles and five
+consecutive UTC completion dates; do not claim 1000 hierarchical cases from
+these explicit counts. Scheduling starts disabled and activation permits only
+five attempts, with no automatic budget extension. Follow
+`docs/proposals/P1-bounded-ci-campaign.md`.
 
 | Layer | What it proves | How |
 | --- | --- | --- |
@@ -1577,6 +1818,16 @@ The biggest technical risk is NAT hole punching with `System.Net.Quic`; the bigg
 - [ ] Do you have a code-signing certificate?
 - [ ] Team size: the estimates assume one senior .NET developer.
 
+### Local P1 scale evidence
+
+The five-node 100000-file gate uses an explicit measured local corpus runner,
+real native files/indexes and public connected engine transport, with final
+recursive native-byte equality, durable queue drain, reference coverage and
+overwritten-version preservation. Keep small preflights and normal property
+smoke distinct from full corpus acceptance. No large default/scheduled CI job
+is implied. Follow `docs/proposals/P1-scale-corpus-validation.md` and preserve
+failed generated fixtures, progress metrics and exact source provenance.
+
 ## Sources
 
 Opened on 2026-10-18. Resilio help-centre articles describe Sync 2.x–3.x behaviour.
@@ -1607,3 +1858,15 @@ Opened on 2026-10-18. Resilio help-centre articles describe Sync 2.x–3.x behav
 - [Inno Setup licence](https://jrsoftware.org/files/is/license.txt)
 - [Inno Setup help: ArchitecturesAllowed](https://jrsoftware.org/ishelp/topic_setup_architecturesallowed.htm)
 - [Inno Setup help: SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm)
+
+### Metadata-only tombstone progress under directory publication
+
+A staged directory mutation barrier must permit a scheduled authenticated newer
+regular-file tombstone for an already published deleted local file only after
+complete sender-range, case-barrier, bound-root and guarded native-absence proof.
+Keep operation/reference gates and expected-sequence durable application; recheck
+absence after preparation. Native occupants and live/unknown local rows retain
+the barrier. This metadata-only progress can satisfy a child reconstruction's
+causal proof without discarding queues or weakening directory graph/GC proofs.
+See docs/proposals/P1-publication-tombstone-progress.md for the retained regression
+and required controls.

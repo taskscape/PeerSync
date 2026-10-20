@@ -44,3 +44,5 @@ The full design is checked in as
 [the design document](Resilio-style%20P2P%20Sync%20for%20Windows%20Implementation%20Plan.md).
 Work proceeds in phase order. Cross-machine, NAT, VM and soak evidence is kept
 separate from single-host checks, and unfinished gates stay open.
+
+Run and replay the generated local engine scenarios using [the simulation guide](docs/simulation.md).

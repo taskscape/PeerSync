@@ -12,17 +12,23 @@ namespace PeerSync.Engine.Sync;
 
 public sealed partial class FileApplier
 {
+    internal int DirectoryCaseGraphWorkLimit { get; init; } = 1000;
     internal async Task<bool> PrepareCaseCopiesAsync(
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, CancellationToken token)
     {
+        if (DirectoryCaseGraphWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory case graph work bound.");
+        if (DirectoryCaseMemberWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory case member work bound.");
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
-        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); bool readyForScan = false;
+        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); bool readyForScan = false; int graphBudget = DirectoryCaseGraphWorkLimit, memberBudget = DirectoryCaseMemberWorkLimit;
         if (index.ReadApplyIntents().Any()) return false;
         foreach (var pending in index.ReadDueCasePreservations(tree.Identity.ToArray(), CaseNow))
         {
             token.ThrowIfCancellationRequested(); var source = OpenCaseSource(tree, pending);
-            if (source.Type != 0)
-            { await RetryCaseAsync(pending, "case-subtree-pending", token).ConfigureAwait(false); continue; }
+            if (source.Type == 1)
+            {
+                var root = await PrepareDirectoryCaseRootAsync(tree, pending, source, fetch, graphBudget, memberBudget, token).ConfigureAwait(false);
+                readyForScan |= root.Created; graphBudget -= root.GraphWork; memberBudget -= root.NativeWork; continue;
+            }
             try
             {
                 try { FileMetadata.ValidateMtime(source.MtimeTicks); }
@@ -55,32 +61,12 @@ public sealed partial class FileApplier
                 Signal("case-reserved", session);
                 try
                 {
-                    byte[] preferred = pending.Source.SourceDevice;
-                    async ValueTask<ReadOnlyMemory<byte>> FetchCaseChunk(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
-                    {
-                        try { return await fetch(preferred, hash, length, cancellation).ConfigureAwait(false); }
-                        catch (Exception error) when (CaseSourceUnavailable(error, cancellation))
-                        {
-                            var alternatives = index.RemotesForPath(pending.Source.PathKey)
-                                .Where(row => !row.DeviceId.AsSpan().SequenceEqual(preferred) && row.Record.Body.SequenceEqual(pending.Source.Record.Body)
-                                    && row.Record.Signature.SequenceEqual(pending.Source.Record.Signature)).ToArray();
-                            foreach (var alternative in alternatives)
-                            {
-                                try
-                                {
-                                    var bytes = await fetch(alternative.DeviceId, hash, length, cancellation).ConfigureAwait(false);
-                                    preferred = alternative.DeviceId.ToArray(); Signal("case-source-failover", session); return bytes;
-                                }
-                                catch (Exception nextError) when (CaseSourceUnavailable(nextError, cancellation)) { }
-                            }
-                            throw new IOException("No current authenticated case source is available.", error);
-                        }
-                    }
+                    using var routes = new CaseBlockFetch(this, pending, source, fetch, token);
                     using (var borrowed = new SafeFileHandle(file.DangerousGetHandle(), ownsHandle: false))
                     using (var stream = new FileStream(borrowed, FileAccess.ReadWrite, 0, isAsync: false))
                     {
                         await new ChunkAssembler(tree, index, journal).AssembleAsync(source, stream,
-                            FetchCaseChunk, token).ConfigureAwait(false);
+                            routes.FetchAsync, token).ConfigureAwait(false);
                         stream.Flush(flushToDisk: true);
                     }
                     FileMetadata.PrepareNewFile(parent, file); FileMetadata.SetMtime(file, source.MtimeTicks); RandomAccess.FlushToDisk(file);
@@ -110,11 +96,17 @@ public sealed partial class FileApplier
 
     internal async Task<IReadOnlyList<string>> CompleteCaseCopiesAsync(CancellationToken token)
     {
+        if (DirectoryCaseVerificationWorkLimit is < 1 or > 1000) throw new InvalidOperationException("Invalid directory case verification work bound.");
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
-        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); var completed = new List<string>();
+        using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); var completed = new List<string>(); int verificationBudget = DirectoryCaseVerificationWorkLimit;
         foreach (var pending in index.ReadDueCasePreservations(tree.Identity.ToArray(), CaseNow))
         {
             token.ThrowIfCancellationRequested(); var source = OpenCaseSource(tree, pending);
+            if (source.Type == 1)
+            {
+                var result = await CompleteDirectoryCaseAsync(tree, pending, source, verificationBudget, token).ConfigureAwait(false); verificationBudget -= result.Processed;
+                if (result.Completed) completed.Add(pending.Source.PathKey); continue;
+            }
             if (source.Type != 0 || pending.DestinationPath is not { } destination || pending.InstalledFileId is null) continue;
             try
             {
