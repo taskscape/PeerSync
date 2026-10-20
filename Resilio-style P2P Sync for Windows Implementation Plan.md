@@ -1917,3 +1917,16 @@ no campaign shard/report runners, whereas preflight must execute and succeed.
 Retain authoritative per-attempt job/step metadata and cached planner identity.
 These diagnostic runs never execute product tests, allocate Windows runners,
 modify activation variables, consume campaign run numbers or count as days.
+
+### Unchanged directory publication convergence
+
+Main CI hierarchy seed 1608819303 exposes identical visible trees and empty
+needed queues while directory publications continue advancing local sequences
+on every healed round. Preserve the exact generated failure as a permanent
+regression and inspect its signed metadata, original envelopes and publication
+proofs. Repair the production cause without extending healing rounds, removing
+pending-work/reference requirements, suppressing generated cases or weakening
+native version survival. Require deterministic baseline reproduction, focused
+authority/metadata controls, canonical local verification and green PR/main CI.
+Existing live scale runs retain their immutable sources and remain independent
+evidence; any repaired-source applicability must be assessed explicitly.
