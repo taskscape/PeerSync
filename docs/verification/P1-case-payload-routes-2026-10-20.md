@@ -62,3 +62,9 @@ Earlier failed full attempts remain in `p1-case-route-canonical.log` and
 single-route expectations are superseded by the final complete run above.
 Physical LAN, native NAT, installed service, large corpus and five-day/1000-CI
 acceptance remain unverified. No checklist box is ticked by this checkpoint.
+
+Subsequent timeout and clock checkpoints are recorded in
+`P1-directory-parent-clock-checkpoint-2026-10-20.md`: payload timeouts now
+include a byte allowance and all 1512 canonical cases pass. Wider hierarchy
+validation still fails on a separate parent root-set proof requirement; PR #38
+is not merged or resubmitted for these local additions.

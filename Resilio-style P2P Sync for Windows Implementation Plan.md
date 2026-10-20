@@ -829,6 +829,11 @@ subtree/metadata/spelling as equivalent proof. Shared construction and final
 reference-gated validation must agree on the current same-body clock floor;
 late changes retry. Follow `docs/proposals/P1-directory-parent-clock-repair.md`
 for owned restaging, received reconstruction and quiescence race regressions.
+When parent envelopes differ in snapshot root, do not absorb their clocks
+without durable causal proof of every eligible original root against the
+current signed child input. Preserve bounded progress/graph holds across
+vector-only forwarding and revalidate the root set at final commit; see
+`docs/proposals/P1-directory-parent-root-set-proof.md`.
 
 The immutable source's first forwarding device is only a routing hint. Current
 advertisements cannot discover every retained old member payload after parent
