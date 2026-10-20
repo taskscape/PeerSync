@@ -19,6 +19,11 @@ public sealed partial class FileApplier
         try
         {
             FileMetadata.ValidateMtime(source.MtimeTicks);
+            if (source.ExportBody().DirectorySnapshotHash.Length == 0)
+            {
+                await RetryCaseAsync(pending, "case-root-snapshot-unavailable", token).ConfigureAwait(false);
+                return (false, 0, 0);
+            }
             // An exception can follow already committed graph progress. Charge
             // the full offered budget until the call returns its exact count,
             // so another failing source cannot exceed the shared pass bound.
@@ -93,7 +98,7 @@ public sealed partial class FileApplier
                 }
             }
         }
-        catch (Exception error) when (error is IOException or Win32Exception or UnauthorizedAccessException or CryptographicException or ArgumentOutOfRangeException)
+        catch (Exception error) when (error is IOException or InvalidDataException or Win32Exception or UnauthorizedAccessException or CryptographicException or ArgumentOutOfRangeException)
         {
             if (index.ReadApplyIntents().Any()) throw;
             StagingProbeFailed("case-root-deferred", Guid.NewGuid(), error); await RetryCaseAsync(pending, error.GetType().Name, token).ConfigureAwait(false);

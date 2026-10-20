@@ -8,6 +8,7 @@ using PeerSync.Core.Paths;
 using PeerSync.Core.Settings;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
+using PeerSync.Engine.Native;
 using PeerSync.Engine.Scanning;
 using PeerSync.Storage.FolderDb;
 using Envelope = PeerSync.Core.Sync.SignedRecord;
@@ -24,6 +25,7 @@ public sealed class Puller : IDisposable
 {
     private static readonly ConditionalWeakTable<FolderIndex, SemaphoreSlim> PassGates = new();
     private readonly FolderIndex index;
+    private readonly string rootPath;
     private readonly byte[] own;
     private readonly FolderSettings settings;
     private readonly NeededSet needed;
@@ -59,7 +61,7 @@ public sealed class Puller : IDisposable
         FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots)
     {
         ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(fetch);
-        this.index = index; this.fetch = fetch; own = ownDevice?.ToArray() ?? throw new ArgumentNullException(nameof(ownDevice));
+        this.index = index; this.rootPath = rootPath; this.fetch = fetch; own = ownDevice?.ToArray() ?? throw new ArgumentNullException(nameof(ownDevice));
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson()); clock = timeProvider ?? TimeProvider.System; this.journal = journal;
         needed = new(index, keys, own, this.settings, journal: journal);
         scanner = new(rootPath, index, keys, own, timeProvider: clock, settings: this.settings, journal: journal) { StageDirectorySnapshots = directorySnapshots };
@@ -90,9 +92,31 @@ public sealed class Puller : IDisposable
         IReadOnlyList<Envelope> records, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(records); source = source.ToArray(); records = records.ToArray();
+        using var root = await PinReceivingRootAsync(cancellationToken).ConfigureAwait(false);
         var result = await needed.ApplyIndexUpdateAsync(source, afterSequence, lastSequence, records, cancellationToken).ConfigureAwait(false);
         NotifyWorkAvailable(); return result;
     }
+    internal async Task<SafeFileTree> PinReceivingRootAsync(CancellationToken token)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        var tree = new SafeFileTree(rootPath);
+        try
+        {
+            byte[]? bound = index.Meta.Find("_root-identity")?.Value;
+            if (bound is null)
+            {
+                using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
+                using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+                await index.BindPhysicalRootAsync(tree.Identity.ToArray(), token).ConfigureAwait(false);
+                bound = index.Meta.Find("_root-identity")?.Value;
+            }
+            if (bound is not { Length: 24 } || !tree.Identity.SequenceEqual(bound)) throw new IOException("Index receipt root identity changed.");
+            Checkpoint?.Invoke("index-root-bound"); return tree;
+        }
+        catch { tree.Dispose(); throw; }
+    }
+
     public async Task<RemoteIndexRange> AnnounceIndexRangeAsync(byte[] source, long targetSequence, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
@@ -190,7 +214,7 @@ public sealed class Puller : IDisposable
             try
             {
                 FileApplyOutcome outcome; bool requiresScan;
-                bool opensDirectory = row.Work!.Stage == 0 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
+                bool opensDirectory = row.Work!.Stage is 0 or 2 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
                 if (row.Work!.Stage is 0 or 3)
                 {
                     var result = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
@@ -268,7 +292,7 @@ public sealed class Puller : IDisposable
             using (await FolderScanBudget.AcquireAsync(token).ConfigureAwait(false)) result = await scanner.ScanAsync(token).ConfigureAwait(false);
             scanned = true;
             Checkpoint?.Invoke("after-local-scan");
-            if (repairAll) await needed.RebuildAsync(token).ConfigureAwait(false);
+            if (repairAll || result.RequiresNeededRebuild) await needed.RebuildAsync(token).ConfigureAwait(false);
             else if (result.ChangedPaths.Count != 0) await needed.RecomputeAsync(result.ChangedPaths.Where(PathRules.IsValid), token).ConfigureAwait(false);
             neededRepairPending = false;
             long now = Now; nextScanTicks = AddSeconds(now, settings.RescanIntervalSeconds);

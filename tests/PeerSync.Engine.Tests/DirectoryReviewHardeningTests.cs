@@ -11,6 +11,7 @@ using PeerSync.Protocol.Signing;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
 using Xunit;
+using SignedRecord = PeerSync.Core.Sync.SignedRecord;
 
 namespace PeerSync.Engine.Tests;
 
@@ -99,6 +100,65 @@ public sealed partial class DirectorySnapshotCaptureTests
         for (int pass = 0; pass < 4; pass++) await fresh.RunPassAsync(Token);
         File.ReadAllBytes(Path.Combine(MetadataRoot, "topic", "a")).ShouldBe(File.ReadAllBytes(Path.Combine(Root, "topic", "a")));
         receiver.Needed.Count().ShouldBe(0); receiver.HasPendingDirectoryPublications().ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ReviewRootStaysPinnedWhileThePageWaitsForReferenceAdmission()
+    {
+        await using var producer = await FolderIndex.OpenAsync(Database, Token); var original = await PrepareProjection(producer);
+        await using var receiver = await OpenMetadataReceiver(keys); var pinned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var puller = new Puller(MetadataRoot, receiver, keys, MetadataDevice, (_, _, _, _) => throw new IOException("No fetch."))
+        { Checkpoint = stage => { if (stage == "index-root-bound") pinned.TrySetResult(); } };
+        var barrier = await FolderReferenceGate.AcquireAsync(receiver, Token);
+        var receive = puller.ReceiveIndexAsync(device, 0, 1, [original.WithLocalSequence(1)], Token);
+        try
+        {
+            await pinned.Task.WaitAsync(TimeSpan.FromSeconds(5), Token);
+            Should.Throw<IOException>(() => Directory.Move(MetadataRoot, Path.Combine(fixture, "moved-receiving-root")));
+        }
+        finally { barrier.Dispose(); await receive; }
+        receiver.RemotesForPath("topic").Single().Record.Body.ToArray().ShouldBe(original.Body.ToArray());
+    }
+
+    [Fact]
+    public async Task ReviewConcurrentFreshReceivesFreezeCallerInputsBeforeRootInitialization()
+    {
+        await using var producer = await FolderIndex.OpenAsync(Database, Token); var original = await PrepareProjection(producer);
+        Directory.CreateDirectory(MetadataRoot); await using var receiver = await FolderIndex.OpenAsync(MetadataDatabase, Token);
+        using var puller = new Puller(MetadataRoot, receiver, keys, MetadataDevice, (_, _, _, _) => throw new IOException("No fetch."));
+        byte[] peer = [2, .. new byte[31]], callerPeer = device.ToArray(); var body = VersionView.Open(original, keys, device).ExportBody(); body.Path = "other";
+        body.ModifiedBy = ByteString.CopyFrom(peer); body.Vv.Clear(); body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        var other = SignedRecordFactory.Create(body, keys, 1); SignedRecord[] callerRecords = [original.WithLocalSequence(1)];
+        var barrier = await FolderOperationGate.AcquireAsync(receiver, Token);
+        var first = puller.ReceiveIndexAsync(callerPeer, 0, 1, callerRecords, Token); var second = puller.ReceiveIndexAsync(peer, 0, 1, [other], Token);
+        callerPeer[0] = 77; callerRecords[0] = other; barrier.Dispose(); await Task.WhenAll(first, second);
+        receiver.RemotesForPath("topic").Single().DeviceId.ShouldBe(device); receiver.RemotesForPath("other").Single().DeviceId.ShouldBe(peer);
+        receiver.Meta.Find("_root-identity")!.Value!.Length.ShouldBe(24);
+    }
+
+    [Fact]
+    public async Task ReviewFreshRootBindingCannotReviveAPageAfterDisconnectAndFreshHello()
+    {
+        await using var producer = await FolderIndex.OpenAsync(Database, Token); var original = await PrepareProjection(producer);
+        Directory.CreateDirectory(MetadataRoot); await using var receiver = await FolderIndex.OpenAsync(MetadataDatabase, Token);
+        using var puller = new Puller(MetadataRoot, receiver, keys, MetadataDevice, (_, _, _, _) => throw new IOException("No fetch."));
+        var session = puller.OpenPeerIndexSession(device); var hello = new Hello { ProtocolVersion = 1, DeviceId = ByteString.CopyFrom(device), Nonce = ByteString.CopyFrom(new byte[32]), UtcTicks = DateTime.UtcNow.Ticks };
+        session.ObserveHello(hello); var barrier = await FolderOperationGate.AcquireAsync(receiver, Token);
+        var receive = session.ReceiveAsync(new(0, 1, [original.WithLocalSequence(1)]), Token);
+        session.Disconnect(); session.ObserveHello(hello); barrier.Dispose();
+        await Should.ThrowAsync<PeerSessionExpiredException>(() => receive); receiver.RemotesForPath("topic").ShouldBeEmpty();
+        receiver.ReadDirectoryMetadataSource(CaseConflictPolicy.SourceId(VersionView.Open(original, keys, device))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ReviewFreshReceiptRejectsUnboundRecoveryBeforeWritingRootOrRemoteRows()
+    {
+        await using var producer = await FolderIndex.OpenAsync(Database, Token); var original = await PrepareProjection(producer);
+        Directory.CreateDirectory(MetadataRoot); await using var receiver = await FolderIndex.OpenAsync(MetadataDatabase, Token);
+        await receiver.ReserveApplyAsync(new(Guid.NewGuid(), "file", null, [1]), Token);
+        using var puller = new Puller(MetadataRoot, receiver, keys, MetadataDevice, (_, _, _, _) => throw new IOException("No fetch."));
+        await Should.ThrowAsync<InvalidDataException>(() => puller.ReceiveIndexAsync(device, 0, 1, [original.WithLocalSequence(1)], Token));
+        receiver.Meta.Find("_root-identity").ShouldBeNull(); receiver.RemotesForPath("topic").ShouldBeEmpty(); receiver.ReadApplyIntents().Count().ShouldBe(1);
     }
 
     [Fact]

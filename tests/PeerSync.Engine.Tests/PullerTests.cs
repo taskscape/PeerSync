@@ -346,16 +346,32 @@ public sealed class PullerTests : IDisposable
     [InlineData("recreate")]
     [InlineData("absent")]
     [InlineData("incoming-delete")]
+    [InlineData("cache-invalidated")]
     public async Task ReviewSuspendedChildReactivatesAfterAFileAncestorStopsBlockingIt(string transition)
     {
-        File.WriteAllBytes(Disk("parent"), Old); await using var index = await FolderIndex.OpenAsync(Database, Token); using var puller = Coordinator(index);
+        File.WriteAllBytes(Disk("parent"), Old); await using var index = await FolderIndex.OpenAsync(Database, Token); var clock = new MutableClock(); using var puller = Coordinator(index, clock: clock);
         await puller.RunPassAsync(Token); await puller.ReceiveIndexAsync(Peer, 0, 1, [Record(index, "parent/child", 1, New)], Token);
         index.Needed.Find("parent/child").ShouldBeNull(); index.RemotesForPath("parent/child").Single().ShouldNotBeNull();
-        if (transition == "incoming-delete") await puller.ReceiveIndexAsync(Peer, 1, 2, [Record(index, "parent", 2, deleted: true)], Token);
+        if (transition == "cache-invalidated") await index.LocalFiles.UpsertAsync([index.LocalFiles.Find("parent")! with { Flags = LocalFileState.NeedsRescan }], Token);
+        if (transition == "incoming-delete")
+        {
+            await puller.AnnounceIndexRangeAsync(Peer, 2, Token);
+            await puller.ReceiveIndexAsync(Peer, 1, 2, [Record(index, "parent", 2, deleted: true)], Token);
+        }
         else { File.Delete(Disk("parent")); puller.RequestScan(); }
-        await puller.RunPassAsync(Token);
-        if (transition == "recreate") { Directory.CreateDirectory(Disk("parent")); puller.RequestScan(); }
-        for (int pass = 0; pass < 4; pass++) await puller.RunPassAsync(Token);
+        var result = await puller.RunPassAsync(Token); index.Needed.Find("parent/child").ShouldNotBeNull(
+            $"transition={transition}; pass={result}; parent={index.LocalFiles.Find("parent")?.Type}/{index.LocalFiles.Find("parent")?.Deleted}; range={index.ReadRemoteIndexRange(Peer)}; needs={string.Join(',', index.Needed.ReadAll().Select(row => row.PathKey))}");
+        if (transition == "absent")
+        {
+            Directory.Exists(Disk("parent")).ShouldBeFalse();
+            await puller.ReceiveIndexAsync(Peer, 1, 2, [Record(index, "parent", 2, type: 1)], Token);
+        }
+        else { Directory.CreateDirectory(Disk("parent")); puller.RequestScan(); }
+        for (int pass = 0; pass < 4; pass++)
+        {
+            if (result.NextAttemptTicks is long next && next > clock.GetUtcNow().UtcTicks) clock.Advance(TimeSpan.FromTicks(next - clock.GetUtcNow().UtcTicks));
+            result = await puller.RunPassAsync(Token);
+        }
         File.ReadAllBytes(Disk("parent/child")).ShouldBe(New); index.Needed.Count().ShouldBe(0); index.HasPendingDirectoryPublications().ShouldBeFalse();
     }
 

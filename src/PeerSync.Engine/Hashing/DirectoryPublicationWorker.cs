@@ -93,7 +93,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                         Checkpoint?.Invoke("rebase-proven");
                     }
                     else if (template.ExportBody().DirectorySnapshotHash.Length != 0) { await Retry(null).ConfigureAwait(false); continue; }
-                    var body = queued.ReconstructionOnly ? DirectoryRebaseProof.CreateTemplate(template, source, clock.GetUtcNow().UtcTicks) : template.ExportBody();
+                    var body = queued.ReconstructionOnly ? DirectoryRebaseProof.CreateTemplate(template, source, clock.GetUtcNow().UtcTicks, queued.Path, queued.Attributes) : template.ExportBody();
                     body.DirectorySnapshotHash = ByteString.CopyFrom(draft.Hash); body.DirectorySnapshotLength = checked((uint)draft.Length!.Value);
                     var record = SignedRecordFactory.Create(body, keys);
                     publication = new(queued.Path, 1, 0, body.MtimeTicks, queued.Attributes, false, body.ChangedTicks, null,
@@ -110,7 +110,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 if (committed.Changed)
                 {
                     changed.Add(committed.Row.Path);
-                    rebuild |= previous is { Type: 0, Deleted: false, Record: not null };
+                    rebuild |= previous is { Type: 0, Record: not null };
                 }
             }
             catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException or SqliteException or InvalidOperationException)

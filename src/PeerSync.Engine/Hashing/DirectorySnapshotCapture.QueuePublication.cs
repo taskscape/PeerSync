@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Google.Protobuf;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Paths;
 using PeerSync.Core.Sync;
 using PeerSync.Engine.Native;
 using PeerSync.Engine.Sync;
@@ -24,12 +25,12 @@ internal sealed partial class DirectorySnapshotCapture
             if (current.Record is null || draft.Hash is null || draft.Length is null) throw new InvalidDataException("Directory publication is incomplete.");
             var version = VersionView.Open(current.Record, keys, sourceHint); var root = DirectorySnapshotBlocks.SnapshotOf(version);
             var template = VersionView.Open(queued.Template, keys, sourceHint); var templateBody = template.ExportBody(); var body = version.ExportBody();
-            if (template.Type != 1 || template.Deleted || template.Path != queued.Path
+            if (template.Type != 1 || template.Deleted || (template.Path != queued.Path && (!queued.ReconstructionOnly || PathRules.Key(template.Path) != PathRules.Key(queued.Path)))
                 || version.Path != queued.Path || draft.ParentPath != queued.Path || !root.Hash.AsSpan().SequenceEqual(draft.Hash) || root.EncodedLength != draft.Length)
                 throw new InvalidDataException("Directory template does not match its captured root.");
             if (publication is not null)
             {
-                if (queued.ReconstructionOnly) templateBody = DirectoryRebaseProof.CreateTemplate(template, sourceHint, version.ChangedTicks);
+                if (queued.ReconstructionOnly) templateBody = DirectoryRebaseProof.CreateTemplate(template, sourceHint, version.ChangedTicks, queued.Path, queued.Attributes);
                 else if (templateBody.DirectorySnapshotHash.Length != 0) throw new InvalidDataException("New directory template already contains another root.");
                 if (!keys.CanWrite || !version.ModifiedBy.SequenceEqual(sourceHint) || VersionVector.Compare(version.Vector, current.Vector) != VvOrder.Equal)
                     throw new InvalidDataException("New directory publication has no local signing authority.");

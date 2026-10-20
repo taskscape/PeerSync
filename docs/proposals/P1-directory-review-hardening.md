@@ -20,6 +20,9 @@ regressions before repair and submit their fixes together after local checks.
    repair; publication over a former file tombstone also rebuilds descendants.
    Test separated scans and absent-parent rehydration, preserving unrelated
    tombstone, source and recovery guards. No new child envelope is required.
+   Scheduling work while its native parent is absent does not authorize implicit
+   directory creation: ordinary parent-version/native creation and retry rules
+   remain binding.
 4. Public direct/session receives bind and validate the physical root before
    metadata admission. Keep a native root lease through admission, serialize
    first binding with folder/reference gates, reject foreign roots and unbound

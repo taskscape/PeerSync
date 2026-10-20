@@ -13,9 +13,11 @@ internal sealed record DirectoryRebasePass(bool Complete, bool Waiting, int Visi
 
 internal static class DirectoryRebaseProof
 {
-    internal static FileRecordBody CreateTemplate(VersionView original, byte[] own, long changedTicks)
+    internal static FileRecordBody CreateTemplate(VersionView original, byte[] own, long changedTicks, string path, uint attributes)
     {
+        if (PathRules.Key(original.Path) != PathRules.Key(path)) throw new InvalidDataException("Rebase metadata changed its canonical directory.");
         var body = original.ExportBody(); body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0;
+        body.Path = path; body.Attributes = attributes & (uint)(FileAttributes.ReadOnly | FileAttributes.Hidden);
         body.ModifiedBy = ByteString.CopyFrom(own); body.ChangedTicks = changedTicks;
         var vector = VersionVector.Increment(original.Vector, BinaryPrimitives.ReadUInt64LittleEndian(own));
         body.Vv.Clear(); body.Vv.AddRange(vector.OrderBy(entry => entry.Key).Select(entry => new VvEntry { Device = entry.Key, Counter = entry.Value }));

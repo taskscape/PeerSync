@@ -78,7 +78,7 @@ public sealed partial class FolderIndex
         using var digest = Blake3.Hasher.New(); digest.Update("PeerSync case source v1"u8); digest.Update(queued.Template.Body); digest.Update(queued.Template.Signature);
         if (!digest.Finalize().AsSpan().SequenceEqual(graph)) throw new InvalidDataException("Directory rebase graph does not match its original template.");
         var original = FindDirectoryGraph(connection, transaction, graph);
-        if (original is null || !original.Complete || original.Retiring || original.DirectoryPath != queued.Path || !original.RootId.AsSpan().SequenceEqual(queued.RootId))
+        if (original is null || !original.Complete || original.Retiring || PathRules.Key(original.DirectoryPath) != PathRules.Key(queued.Path) || !original.RootId.AsSpan().SequenceEqual(queued.RootId))
             throw new InvalidOperationException("Directory rebase original graph is unavailable.");
     }
 }

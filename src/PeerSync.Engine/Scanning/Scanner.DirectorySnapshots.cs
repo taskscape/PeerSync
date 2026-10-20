@@ -87,7 +87,7 @@ public sealed partial class Scanner
             var row = reconstruct ? old! : Metadata(entry, old, LocalFileState.None) with { MtimeTicks = mtime, Vector = VersionVector.Increment(old?.Vector ?? EmptyVector, deviceShort) };
             if (!reconstruct) row = row with { Record = Sign(row, 0, []) };
             var staged = await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), entry.Path, root, entry.Native.FileId, old?.LocalSequence ?? 0,
-                row.Attributes, row.Record!, inventory.Hash, inventory.Count, now, now) { ReconstructionOnly = reconstruct }, token).ConfigureAwait(false);
+                (uint)entry.Native.Attributes, row.Record!, inventory.Hash, inventory.Count, now, now) { ReconstructionOnly = reconstruct }, token).ConfigureAwait(false);
             Log("queue_staged", staged.Version, "complete-inventory");
         }
         bool CacheMatchesIdentity(LocalFileRow row, byte[] identity, WalkEntry observed, DirectoryChildInventory? inventory, long? epoch)

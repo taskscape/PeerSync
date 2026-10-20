@@ -27,6 +27,7 @@ public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int R
 {
     public bool RequiresFollowupScan { get; init; }
     internal IReadOnlyList<string> ChangedPaths { get; init; } = [];
+    internal bool RequiresNeededRebuild { get; init; }
 }
 
 /// <summary>Tracks a local tree. The caller owns the index, keys and optional journal.
@@ -338,7 +339,9 @@ public sealed partial class Scanner : IDisposable
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()) };
+                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
+                    RequiresNeededRebuild = ordered.Any(row => row.Deleted && previous.TryGetValue(row.Path.ToUpperInvariant(), out var old)
+                        && old is { Type: 0, Deleted: false, Record: not null }) };
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {
