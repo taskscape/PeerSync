@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -60,8 +61,13 @@ class CampaignEvidenceTests(unittest.TestCase):
         report = self.check()
         self.assertEqual(1000, report["uniqueFlatSeeds"])
         self.assertEqual(5, report["hierarchyCases"])
-        self.assertEqual(3, len(report["retainedSeeds"]))
+        self.assertEqual(4, len(report["retainedSeeds"]))
         self.assertFalse(report["gateP1Passed"])
+
+    def test_retained_registry_matches_executable_theory(self):
+        source = (Path(__file__).resolve().parent / "PeerSync.Simulation/HierarchicalScenarios.cs").read_text(encoding="utf-8")
+        declaration = source.split("public async Task RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads", 1)[0]
+        self.assertEqual(evidence.RETAINED, {int(seed) for seed in re.findall(r"InlineData\((\d+)\)", declaration)})
 
     def test_duplicate_shard(self):
         self.change_meta(4, shard=0)
@@ -75,11 +81,11 @@ class CampaignEvidenceTests(unittest.TestCase):
                 self.change_meta(4, sourceRevision=SOURCE, runAttempt=1, runId="123", workingTreeDirty=False, binarySha256="b" * 64)
 
     def test_partial_cancelled_preflight_or_bool_counts(self):
-        for change in (dict(status="cancelled"), dict(mode="preflight"), dict(testExitCode=False)):
+        for change in (dict(status="cancelled"), dict(mode="preflight"), dict(testExitCode=False), dict(hierarchicalCases=True)):
             with self.subTest(change=change):
                 self.change_meta(4, **change)
                 with self.assertRaises(evidence.EvidenceError): self.check()
-                self.change_meta(4, status="passed", mode="campaign", testExitCode=0)
+                self.change_meta(4, status="passed", mode="campaign", testExitCode=0, hierarchicalCases=1)
 
     def test_duplicate_seeds_across_shards(self):
         path = self.root / "4/cases.jsonl"; rows = path.read_text().splitlines()

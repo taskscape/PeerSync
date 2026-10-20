@@ -6,7 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-RETAINED = {1878823561, 1648781653, 1044729930}
+RETAINED = {1878823561, 1648781653, 1044729930, 1583987140}
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
 PREFIX = "PeerSync.Simulation.RealEngineProperties."
 METHODS = {
@@ -93,7 +93,7 @@ def validate_day(root, source, run_id, mode):
         require(shard in range(5) and shard not in shards, "Duplicate/invalid shard")
         shards.add(shard); attempts.add(integer(meta.get("runAttempt"), "runAttempt", 1))
         completions.append(timestamp(meta.get("completedUtc")))
-        require(meta.get("flatCases") == per_shard and meta.get("hierarchicalCases") == 1, "Wrong requested shard scope")
+        require(integer(meta.get("flatCases"), "flatCases") == per_shard and integer(meta.get("hierarchicalCases"), "hierarchicalCases") == 1, "Wrong requested shard scope")
         with_retained = mode == "campaign" and shard == 0
         require(meta.get("retainedRegressions") is with_retained, "Wrong retained-regression ownership")
         for filename, expected, scenario in (("summary.json", per_shard, "real-engine-flat-path-v1"),
@@ -105,7 +105,7 @@ def validate_day(root, source, run_id, mode):
         hierarchy.extend(read_cases(directory, "hierarchical-cases.jsonl", 1))
         trx = ET.parse(bounded_file(directory, meta.get("trx", "results.trx")))
         counters = trx.find(".//{*}Counters")
-        expected_tests = 9 if with_retained else 6
+        expected_tests = len(METHODS) + (len(RETAINED) if with_retained else 0)
         require(counters is not None, "Missing test counters")
         require(all(counters.get(field) == str(expected_tests) for field in ("total", "executed", "passed")), "Incomplete executed test scope")
         require(all(counters.get(field, "0") == "0" for field in ("failed", "error", "timeout", "aborted", "notExecuted", "inconclusive")), "Failed/skipped test scope")

@@ -46,7 +46,7 @@ jobs:
     if: ${{ needs.plan.outputs.active == 'true' }}
     runs-on: windows-latest
     # 200 flat cases plus one hierarchy sample; shard zero also owns all
-    # three retained regressions. Ceilings bound attempts, not target runtime.
+    # four retained regressions. Ceilings bound attempts, not target runtime.
     timeout-minutes: ${{ matrix.shard == 0 && 75 || 50 }}
     strategy:
       fail-fast: false
