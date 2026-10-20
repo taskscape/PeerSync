@@ -205,6 +205,7 @@ Newest first. Every row is also reflected in the design doc.
 | 2026-10-18 | Installer: Inno Setup 7.x | Packaging and deployment |
 | 2026-10-18 | Own protocol PSP/1, not Resilio-compatible. .NET 10. QUIC first, TCP plus TLS 1.3 fallback, relay last. | Scope and key design decisions |
 | 2026-10-20 | Retained old directory member payloads may outlive exact parent advertisements. Add schema-34 source/root-bound hints and fair six-device paging, bounded deadlines and signed content validation to file/directory case reconstruction. Preserve pending/native/recovery/reference guards; reproduce hierarchical seed 1878823561 before a batched repair. | Case payload route design; docs/proposals/P1-case-payload-routes.md |
+| 2026-10-20 | Case payload deadlines include a 256 KiB/second byte allowance plus one second (maximum 33 seconds per 8 MiB candidate) within a 300-second source attempt, so fixed one-second metadata-style timing cannot reject valid slow payload transfers. Add a delayed-payload regression before submission; bounded paging and caller cancellation remain binding. | Case payload route design |
 
 ---
 

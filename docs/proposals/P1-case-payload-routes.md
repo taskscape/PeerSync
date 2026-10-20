@@ -19,8 +19,11 @@ state. Retain source IDs, original envelopes and graph/native/recovery guards.
 Authenticated connection and signed length/hash validation authorize bytes;
 no current path/envelope advertisement is necessary. Freeze transport bytes,
 validate length and BLAKE3 before accepting a route, and continue after corrupt
-responses. Each candidate gets one second and each source attempt ten seconds
-of wall-clock network opportunity. Caller cancellation propagates. Unavailable,
+responses. Each candidate gets one second plus its requested byte count at a
+256 KiB/second transfer allowance (at most 33 seconds for an 8 MiB block).
+Each source attempt gets 300 seconds of wall-clock network opportunity, enough
+for all eight worst-case candidate slots plus local scheduling overhead.
+A fixed one-second payload limit would reject legitimate slower links. Caller cancellation propagates. Unavailable,
 corrupt and timed-out routes remain pending under existing durable backoff.
 No network await holds FolderReferenceGate. Emit redacted session/stage/count,
 error-type and HRESULT diagnostics, never paths, content, envelopes or hashes.

@@ -827,7 +827,8 @@ advertisements cannot discover every retained old member payload after parent
 versions advance. Use source/root-bound durable route hints and known-device
 cursor paging, one six-device page plus two hints per source attempt; validate
 owned response bytes against signed length/BLAKE3 regardless of advertisement.
-Bound each candidate to one second and the source attempt to ten seconds,
+Bound each candidate to one second plus requested bytes at 256 KiB/second
+(at most 33 seconds for 8 MiB), and the source attempt to 300 seconds,
 propagate caller cancellation and keep network awaits outside reference gates.
 Do not change the portable source ID or weaken recovery/graph/native guards.
 Follow `docs/proposals/P1-case-payload-routes.md`, including restart, corruption,
