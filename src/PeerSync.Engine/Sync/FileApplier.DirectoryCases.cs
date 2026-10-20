@@ -15,7 +15,8 @@ public sealed partial class FileApplier
     private async Task<(bool Created, int GraphWork, int NativeWork)> PrepareDirectoryCaseRootAsync(SafeFileTree tree, PendingCasePreservation pending, VersionView source,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch, int graphBudget, int memberBudget, CancellationToken token)
     {
-        int processed = 0, nativeWork = 0; byte[] preferred = pending.Source.SourceDevice;
+        int processed = 0, nativeWork = 0;
+        using var routes = new CaseBlockFetch(this, pending, source, fetch, token);
         try
         {
             FileMetadata.ValidateMtime(source.MtimeTicks);
@@ -29,7 +30,7 @@ public sealed partial class FileApplier
             // so another failing source cannot exceed the shared pass bound.
             processed = graphBudget;
             var graph = await new DirectorySnapshotGraph(rootPath, index, keys, pending.Source.SourceDevice, journal) { Checkpoint = Checkpoint }.AdvanceUnderGateAsync(source.Record,
-                FetchMetadata, graphBudget, token).ConfigureAwait(false); processed = graph.Processed;
+                routes.FetchAsync, graphBudget, token).ConfigureAwait(false); processed = graph.Processed;
             if (!graph.Complete)
             {
                 Signal("case-root-graph-pending", Guid.NewGuid());
@@ -46,7 +47,7 @@ public sealed partial class FileApplier
                     // Failure may follow successful member accounting. Charge
                     // the offered work until exact progress is returned.
                     nativeWork = memberBudget;
-                    var members = await PrepareDirectoryMembersAsync(tree, pending, source, FetchMetadata, memberBudget, token).ConfigureAwait(false);
+                    var members = await PrepareDirectoryMembersAsync(tree, pending, source, routes.FetchAsync, memberBudget, token).ConfigureAwait(false);
                     return (members.Changed, processed, members.Processed);
                 }
             }
@@ -83,20 +84,7 @@ public sealed partial class FileApplier
                 await index.AbandonApplyAsync(intent, token).ConfigureAwait(false); throw;
             }
 
-            async ValueTask<ReadOnlyMemory<byte>> FetchMetadata(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
-            {
-                try { return await fetch(preferred, hash, length, cancellation).ConfigureAwait(false); }
-                catch (Exception error) when (CaseSourceUnavailable(error, cancellation))
-                {
-                    foreach (var alternative in index.RemotesForPath(pending.Source.PathKey).Where(row => !row.DeviceId.AsSpan().SequenceEqual(preferred)
-                        && row.Record.Body.SequenceEqual(pending.Source.Record.Body) && row.Record.Signature.SequenceEqual(pending.Source.Record.Signature)))
-                    {
-                        try { var bytes = await fetch(alternative.DeviceId, hash, length, cancellation).ConfigureAwait(false); preferred = alternative.DeviceId.ToArray(); Signal("case-root-source-failover", Guid.NewGuid()); return bytes; }
-                        catch (Exception next) when (CaseSourceUnavailable(next, cancellation)) { }
-                    }
-                    throw new IOException("No authenticated directory case advertiser is available.", error);
-                }
-            }
+
         }
         catch (Exception error) when (error is IOException or InvalidDataException or Win32Exception or UnauthorizedAccessException or CryptographicException or ArgumentOutOfRangeException)
         {

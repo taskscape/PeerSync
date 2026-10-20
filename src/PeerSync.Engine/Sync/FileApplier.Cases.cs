@@ -61,32 +61,12 @@ public sealed partial class FileApplier
                 Signal("case-reserved", session);
                 try
                 {
-                    byte[] preferred = pending.Source.SourceDevice;
-                    async ValueTask<ReadOnlyMemory<byte>> FetchCaseChunk(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
-                    {
-                        try { return await fetch(preferred, hash, length, cancellation).ConfigureAwait(false); }
-                        catch (Exception error) when (CaseSourceUnavailable(error, cancellation))
-                        {
-                            var alternatives = index.RemotesForPath(pending.Source.PathKey)
-                                .Where(row => !row.DeviceId.AsSpan().SequenceEqual(preferred) && row.Record.Body.SequenceEqual(pending.Source.Record.Body)
-                                    && row.Record.Signature.SequenceEqual(pending.Source.Record.Signature)).ToArray();
-                            foreach (var alternative in alternatives)
-                            {
-                                try
-                                {
-                                    var bytes = await fetch(alternative.DeviceId, hash, length, cancellation).ConfigureAwait(false);
-                                    preferred = alternative.DeviceId.ToArray(); Signal("case-source-failover", session); return bytes;
-                                }
-                                catch (Exception nextError) when (CaseSourceUnavailable(nextError, cancellation)) { }
-                            }
-                            throw new IOException("No current authenticated case source is available.", error);
-                        }
-                    }
+                    using var routes = new CaseBlockFetch(this, pending, source, fetch, token);
                     using (var borrowed = new SafeFileHandle(file.DangerousGetHandle(), ownsHandle: false))
                     using (var stream = new FileStream(borrowed, FileAccess.ReadWrite, 0, isAsync: false))
                     {
                         await new ChunkAssembler(tree, index, journal).AssembleAsync(source, stream,
-                            FetchCaseChunk, token).ConfigureAwait(false);
+                            routes.FetchAsync, token).ConfigureAwait(false);
                         stream.Flush(flushToDisk: true);
                     }
                     FileMetadata.PrepareNewFile(parent, file); FileMetadata.SetMtime(file, source.MtimeTicks); RandomAccess.FlushToDisk(file);
