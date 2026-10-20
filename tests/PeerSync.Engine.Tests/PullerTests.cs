@@ -342,6 +342,23 @@ public sealed class PullerTests : IDisposable
     private Puller Coordinator(FolderIndex index, Func<ReadOnlyMemory<byte>,ReadOnlyMemory<byte>,int,CancellationToken,ValueTask<ReadOnlyMemory<byte>>>? fetch=null,
         FolderSettings? settings=null, TimeProvider? clock=null, DiagnosticJournal? journal=null) => new(Root,index,keys,Own,
             fetch??((_,_,_,_)=>ValueTask.FromResult<ReadOnlyMemory<byte>>(New)),settings,clock,journal);
+    [Theory]
+    [InlineData("recreate")]
+    [InlineData("absent")]
+    [InlineData("incoming-delete")]
+    public async Task ReviewSuspendedChildReactivatesAfterAFileAncestorStopsBlockingIt(string transition)
+    {
+        File.WriteAllBytes(Disk("parent"), Old); await using var index = await FolderIndex.OpenAsync(Database, Token); using var puller = Coordinator(index);
+        await puller.RunPassAsync(Token); await puller.ReceiveIndexAsync(Peer, 0, 1, [Record(index, "parent/child", 1, New)], Token);
+        index.Needed.Find("parent/child").ShouldBeNull(); index.RemotesForPath("parent/child").Single().ShouldNotBeNull();
+        if (transition == "incoming-delete") await puller.ReceiveIndexAsync(Peer, 1, 2, [Record(index, "parent", 2, deleted: true)], Token);
+        else { File.Delete(Disk("parent")); puller.RequestScan(); }
+        await puller.RunPassAsync(Token);
+        if (transition == "recreate") { Directory.CreateDirectory(Disk("parent")); puller.RequestScan(); }
+        for (int pass = 0; pass < 4; pass++) await puller.RunPassAsync(Token);
+        File.ReadAllBytes(Disk("parent/child")).ShouldBe(New); index.Needed.Count().ShouldBe(0); index.HasPendingDirectoryPublications().ShouldBeFalse();
+    }
+
     private Envelope Record(FolderIndex index,string path,ulong sequence,byte[]? data=null,uint type=0,bool deleted=false)
     {
         data??=[]; long now=DateTime.UtcNow.AddMinutes(1).Ticks;
