@@ -16,7 +16,9 @@ jobs:
       matrix:
         runtime: [win-x64, win-arm64]
     runs-on: windows-latest
-    timeout-minutes: 15
+    # Retained hierarchy regressions add about three local minutes; keep the
+    # existing job count and allow headroom over its previous ten-minute run.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
