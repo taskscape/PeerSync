@@ -31,6 +31,8 @@ jobs:
       source: ${{ steps.plan.outputs.source }}
     steps:
       - uses: actions/checkout@v7
+      - name: Verify campaign planner and evidence controls
+        run: python3 -m unittest discover -s tests -p 'campaign_*_test.py' -v
       - name: Verify immutable source and activation bounds
         id: plan
         env:
