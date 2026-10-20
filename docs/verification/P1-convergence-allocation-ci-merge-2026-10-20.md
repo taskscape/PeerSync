@@ -139,7 +139,11 @@ is dispatched once as workflow number 3, attempt 1. The daily 05:12 UTC trigger
 supplies later attempts. Do not dispatch extra preflights or rerun campaign
 attempts, extend the ceiling, or treat dispatch as a completed day.
 
-The first campaign outcome and five qualifying consecutive UTC completion
-dates remain unverified. Actual authoritative run/attempt conclusions and
-artifact/history checks are mandatory; the preflight and Linux diagnostics
-remain non-qualifying. The complete Gate P1 stays open. P2 has not started.
+The [first campaign day](P1-campaign-day-2026-10-20.md) subsequently passes all
+seven jobs, 1000 distinct flat seeds, five hierarchy samples, all six retained
+regressions, 41 actual methods and five cleanup scenarios. Independent full
+artifact validation exactly matches the coordinator, and authoritative
+run/attempt metadata verifies the single completion date 2026-10-20 UTC.
+Four further consecutive UTC dates and the complete history remain unverified.
+The preflight and Linux diagnostics remain non-qualifying. The complete Gate
+P1 stays open. P2 has not started.
