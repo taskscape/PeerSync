@@ -1588,6 +1588,16 @@ Preserve flat seed replay; keep bounded smoke distinct from measured 1000-seed
 CI/five-day/100000-file gates. Follow
 `docs/proposals/P1-hierarchical-property-scenarios.md`.
 
+Gate P1's thousand-seed/five-day evidence uses a bounded opt-in campaign,
+separate from PR smoke and the local 100000-file corpus. Pin one green source,
+split 1000 flat seeds across five Windows shards, add one hierarchy sample per
+shard and run the three retained hierarchy regressions once per day. Verify
+actual unique counts, complete native/queue/reference/loss oracles and five
+consecutive UTC completion dates; do not claim 1000 hierarchical cases from
+these explicit counts. Scheduling starts disabled and activation permits only
+five attempts, with no automatic budget extension. Follow
+`docs/proposals/P1-bounded-ci-campaign.md`.
+
 | Layer | What it proves | How |
 | --- | --- | --- |
 | Unit | Key chain and checksums, version-vector comparison, ignore matcher, path rules, FastCDC boundaries, conflict naming | `xunit.v3` with fixed test vectors |

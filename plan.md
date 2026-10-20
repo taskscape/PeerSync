@@ -213,6 +213,7 @@ Newest first. Every row is also reflected in the design doc.
 | 2026-10-20 | Submit bounded hierarchy smoke and the three retained regression seeds with the directory repair in one CI batch. Based on 181-second fixed and 363-second 20-case local measurements, give the existing packaging job a 20-minute ceiling; add no jobs or schedules. | Hierarchical scenario design and CI cost control |
 | 2026-10-20 | Hosted run 39361484050 reaches the 20-minute x64 deadline during the second retained seed after 551 unit cases, eight flat/four hierarchy samples and the six-node fixed case pass. Keep all scope; give only x64 a 40-minute ceiling, return Arm64 to 15 minutes, preserve cancellation evidence and submit one configuration repair. | Measured hierarchy CI scope; docs/verification/P1-hierarchy-ci-budget-2026-10-20.md |
 | 2026-10-20 | Run 39363534643 passes every Simulation case and native probe, then reaches 40 minutes during publishing. Move the unchanged simulations alongside ten-minute fuzz in that existing job; retain all five jobs and every check, restore packaging to 15 minutes and give boundary/simulation a measured 50-minute ceiling. | Hierarchical scenario design and second hosted artifact audit |
+| 2026-10-20 | Prepare an opt-in, source-pinned thousand-flat-seed/five-day campaign with explicit hierarchy/regression counts, five shards, strict artifact/history audit and a five-attempt scheduling bound. Keep activation disabled until a green merged P1 source and preflight exist. | docs/proposals/P1-bounded-ci-campaign.md |
 
 ---
 
@@ -1814,6 +1815,9 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
 
 - [ ] **P1.6.3 Five-node scale corpus runner and evidence** [WIP @codex 2026-10-20]
   - Done when: an explicit small/intermediate/full-corpus procedure reports actual file counts, source/runtime/progress, final native/queue/reference convergence and overwritten-version survival; a completed five-node 100000-file report supports the Gate P1 line. Follow the [scale validation design](docs/proposals/P1-scale-corpus-validation.md). No gate acceptance comes from a preflight or property smoke.
+
+- [ ] **P1.6.4 Bounded thousand-seed CI campaign and five-day evidence** [WIP @codex 2026-10-20]
+  - Done when: the [campaign design](docs/proposals/P1-bounded-ci-campaign.md) is implemented and validated locally/with hosted preflight; actual five-source-consistent consecutive UTC campaign days each prove 1000 distinct flat seeds, explicit hierarchy coverage and all retained regressions through unchanged production oracles. Source/run/count/history evidence is preserved, scheduling is bounded and retired after acceptance, and merged green CI requirements hold. Preflight and partial days never close this task or Gate P1.
 
 ### Gate P1
 
