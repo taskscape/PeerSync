@@ -3,9 +3,10 @@
 [PR #41 run 39411518907](https://github.com/taskscape/PeerSync/actions/runs/39411518907)
 checks submitted head 4c574b9fcbdca1890d98214c7d91d53d823a4100 through synthetic
 merge 1dc1da1598649f2df9eb703619e6d26b68559b2d. The x64, ARM64 and Server 2022
-jobs pass. Server 2025 fails its Engine child's eleven-minute deadline;
-simulation/fuzz is still active at this checkpoint. This run cannot qualify
-the PR or permit a merge.
+jobs pass. Server 2025 fails its Engine child's eleven-minute deadline.
+Simulation/fuzz subsequently also passes, completing the run with four
+successful jobs and this one failure. The run cannot qualify the PR or permit
+a merge.
 
 The completed Server 2025 job log is available through the job-log API while
 the overall run is active. Its native P0/cross-account summaries pass, but no
@@ -60,3 +61,15 @@ solution parsing and whitespace checks pass. No C# product source changed;
 current-product scale checks remain bound to their actual 4c574b9 source and
 binary hashes. Updated hosted Server 2025 and complete PR/main acceptance remain
 mandatory; P1.6.5 and the phase gate stay open.
+
+Terminal boundary evidence independently passes the strict thirteen-method /
+six-retained / one-maintenance scope validator. Eight flat/four hierarchy
+generated samples pass, as do all 28 campaign controls. Exact seeds 1608819303
+and 794669444 preserve fourteen/thirteen versions in eleven/eight rounds.
+Connected maintenance retires two archives and evicts two blocks while both
+payload versions survive. Fuzz reports all four targets, 108834 seeds,
+600.0036179 actual seconds and zero crashes; its 2135.4796367 supervisor seconds
+are separate. Evidence: `artifacts/ci41-revival-boundary/`, its job log and
+scope JSON. No further generated failure was found in this run. The one native
+runner repair can therefore travel in a single new source update; the failed
+old run is retained without an unchanged rerun.

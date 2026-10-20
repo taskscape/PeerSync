@@ -83,3 +83,14 @@ Evidence: `artifacts/hierarchy-revival-expanded-100/`, its separate TRX and log.
 Updated PR/main CI remains pending. Both live corpus runs retain their
 immutable earlier sources; their applicability to this further repair remains
 unverified. No P1 gate or task is ticked from these local results.
+
+The updated 4c574b9 PR run 39411518907 subsequently passes all thirteen actual
+Simulation methods, all six retained regressions, eight flat/four hierarchy
+samples and connected maintenance. This exact seed preserves thirteen versions
+in eight rounds on the hosted runner. Actual fuzz reaches 600.0036179 seconds,
+108834 seeds and zero crashes. X64/ARM64/Server 2022 also pass, with 1554 unit
+results independently verified. Server 2025 times out after 934 of its 1002
+required Engine results, so the overall run remains failed and merge/phase
+acceptance stays open. The separate [native critical-path repair](P1-native-server-critical-path-2026-10-20.md)
+retains its failure evidence and does not change these product sources or
+production convergence oracles.
