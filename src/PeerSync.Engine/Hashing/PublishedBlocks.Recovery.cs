@@ -46,6 +46,18 @@ public sealed partial class PublishedBlocks
                         using var data = TryTemporary(parent, proof, out bool replaced);
                         if (data is null)
                         {
+                            if (!replaced && final is not null
+                                && index.IsRegisteredBlockObject(proof.Hash, proof.Length, proof.RootId, BlockCaptureProof.Identity(final))
+                                && Complete(final, proof, cancellationToken))
+                            {
+                                // No owned staging bytes remain. A different,
+                                // verified and durably owned winner needs no
+                                // adoption; retire only this obsolete metadata.
+                                GuardedFile.DeleteOnClose(marker); removed++;
+                                journal?.TryWrite(new("block.recovery_obsolete_proof", "block-recovery")
+                                { SessionId = proof.Id, Level = DiagnosticLevel.Debug, ErrorCode = "cataloged-replacement", ItemsChanged = 1 });
+                                continue;
+                            }
                             if (final is not null || replaced) { deferred++; continue; }
                             // Remove only verified metadata. Unknown/replaced data stays untouched.
                             GuardedFile.DeleteOnClose(marker); removed++; continue;

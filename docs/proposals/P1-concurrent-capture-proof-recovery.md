@@ -27,7 +27,9 @@ linked/reparse objects and foreign occupied temporaries. Keep the existing
 Add deterministic two-owner and obsolete-proof/reference-coverage regressions,
 catalog/native negative controls, registration-failure/restart coverage and
 sanitized diagnostics. Record focused baseline failures, repaired focused/full
-validation and final PR/main acceptance. Reopen ownership parents for this new
+validation and forward each scale node's existing journal to its reference
+builder so coverage/recovery reasons remain visible during long runs. Record
+final PR/main acceptance. Reopen ownership parents for this new
 counterexample. Preserve all live corpus source identities and evidence; do not
 hot-patch or manually clean their fixtures. A confirmed nonconvergent run may
 be canceled only after preserving its actual failing state, never because an

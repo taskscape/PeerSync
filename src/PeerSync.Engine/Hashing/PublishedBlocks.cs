@@ -103,6 +103,9 @@ public sealed partial class PublishedBlocks : IDisposable
                 {
                     if (!VerifyExisting(parent, name, hash, bytes.Length, token, out existingId)) throw new IOException("Concurrent block installation disappeared.");
                     Track(hash, bytes.Length, existingId, DateTime.UtcNow.Ticks);
+                    // Flush must catalog the winner before retiring this loser's
+                    // proof, even though finally removes its owned temporary.
+                    proofs[proof.Id] = proof;
                 }
             }
             finally
