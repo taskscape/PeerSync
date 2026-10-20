@@ -1817,7 +1817,7 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
   - Done when: an explicit small/intermediate/full-corpus procedure reports actual file counts, source/runtime/progress, final native/queue/reference convergence and overwritten-version survival; a completed five-node 100000-file report supports the Gate P1 line. Follow the [scale validation design](docs/proposals/P1-scale-corpus-validation.md). No gate acceptance comes from a preflight or property smoke.
 
 - [ ] **P1.6.4 Bounded thousand-seed CI campaign and five-day evidence** [WIP @codex 2026-10-20]
-  - Done when: the [campaign design](docs/proposals/P1-bounded-ci-campaign.md) is implemented and validated locally/with hosted preflight; actual five-source-consistent consecutive UTC campaign days each prove 1000 distinct flat seeds, explicit hierarchy coverage and all retained regressions through unchanged production oracles. Source/run/count/history evidence is preserved, scheduling is bounded and retired after acceptance, and merged green CI requirements hold. Preflight and partial days never close this task or Gate P1.
+  - Done when: the [campaign design](docs/proposals/P1-bounded-ci-campaign.md) is implemented and validated locally/with hosted preflight; five consecutive UTC campaign days from the same source each prove 1000 distinct flat seeds, explicit hierarchy coverage and all retained regressions through unchanged production oracles. Source/run/count/history evidence is preserved, scheduling is bounded and retired after acceptance, and merged green CI requirements hold. Preflight and partial days never close this task or Gate P1.
 
 ### Gate P1
 
