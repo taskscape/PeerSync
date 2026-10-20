@@ -72,7 +72,7 @@ public sealed partial class Scanner
             // A newly staged directory has no published row yet. Its incidental
             // child-write timestamp can still settle after the first walk; keep
             // the original staged mtime just as for an existing published row.
-            long mtime = sameNative ? old!.MtimeTicks : sameQueuedNative ? VersionView.Open(existing!.Template, keys, device).MtimeTicks : entry.Native.MtimeTicks;
+            long mtime = sameNative ? old!.MtimeTicks : sameQueuedNative ? VersionView.Open(existing!.Template, keys, device).MtimeTicks : ObservedMtimeTicks(entry, old);
             if (existing is not null && existing.Path == entry.Path && existing.ExpectedLocalSequence == (old?.LocalSequence ?? 0)
                 && existing.Attributes == (uint)entry.Native.Attributes && existing.NativeId.AsSpan().SequenceEqual(entry.Native.FileId)
                 && existing.RootId.AsSpan().SequenceEqual(root) && existing.ExpectedChildren == inventory.Count && existing.ReconstructionOnly == reconstruct

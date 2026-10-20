@@ -64,7 +64,7 @@ class CampaignEvidenceTests(unittest.TestCase):
         report = self.check()
         self.assertEqual(1000, report["uniqueFlatSeeds"])
         self.assertEqual(5, report["hierarchyCases"])
-        self.assertEqual(4, len(report["retainedSeeds"]))
+        self.assertEqual(6, len(report["retainedSeeds"]))
         self.assertFalse(report["gateP1Passed"])
 
     def test_retained_registry_matches_executable_theory(self):

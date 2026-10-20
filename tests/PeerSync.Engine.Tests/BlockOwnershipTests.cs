@@ -27,6 +27,105 @@ public sealed class BlockOwnershipTests : IDisposable
     public BlockOwnershipTests() => Directory.CreateDirectory(Root);
 
     [Fact]
+    public async Task ConcurrentCaptureLoserRetiresItsProofOnlyAfterCanonicalCatalogCommit()
+    {
+        await using var index = await BindAsync(); byte[] bytes = "two independent owners of the same captured block"u8.ToArray(), hash = Hash(bytes);
+        using var tree = new SafeFileTree(Root); using var winner = new PublishedBlocks(tree);
+        using var loser = new PublishedBlocks(tree) { Checkpoint = boundary => { if (boundary == "flushed") winner.Put(bytes, hash, Token); } };
+        loser.Put(bytes, hash, Token);
+        Directory.GetFiles(ProofDirectory).Length.ShouldBe(2); index.ReadBlockObjects().ShouldBeEmpty();
+        (await loser.FlushAsync(index, Token)).ShouldBe(1);
+        Directory.GetFiles(ProofDirectory).Length.ShouldBe(1);
+        (await winner.FlushAsync(index, Token)).ShouldBe(1);
+        Directory.GetFiles(ProofDirectory).ShouldBeEmpty();
+        winner.TryRead(hash, bytes.Length, Token).ShouldBe(bytes);
+        index.ReadBlockObjects().Single().Hash.ShouldBe(hash);
+        (await new BlockReferences(Root, index, keys, device).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ConcurrentCaptureObsoleteProofDoesNotHoldReferenceCoverage()
+    {
+        await using var index = await BindAsync(); byte[] bytes = "durable winner after the losing temporary disappeared"u8.ToArray(), hash = Hash(bytes);
+        var old = Stage(bytes, bytes);
+        using var tree = new SafeFileTree(Root); using var winner = new PublishedBlocks(tree);
+        winner.Put(bytes, hash, Token); await winner.FlushAsync(index, Token);
+        File.Delete(Disk(old.Parent + "/" + old.Temporary));
+        var before = index.ReadBlockObjects().Single(); before.FileId.ShouldNotBe(old.DataId);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "recovery-logs"), "blocks", debugEnabled: true);
+        var result = await PublishedBlocks.RecoverCapturesAsync(tree, index, journal, Token);
+        (await new BlockReferences(Root, index, keys, device).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+        result.ProofsRemoved.ShouldBe(1); result.Deferred.ShouldBe(0); result.Registered.ShouldBe(0); result.Installed.ShouldBe(0);
+        Directory.GetFiles(ProofDirectory).ShouldBeEmpty(); winner.TryRead(hash, bytes.Length, Token).ShouldBe(bytes);
+        var after = index.ReadBlockObjects().Single(); after.FileId.ShouldBe(before.FileId);
+        after.RootId.ShouldBe(before.RootId); after.CapturedTicks.ShouldBe(before.CapturedTicks); after.LastUsedTicks.ShouldBe(before.LastUsedTicks);
+        string log = File.ReadAllText(Path.Combine(fixture, "recovery-logs", "debug.jsonl"));
+        log.ShouldContain("block.recovery_obsolete_proof"); log.ShouldContain("cataloged-replacement");
+        log.ShouldNotContain(Root); log.ShouldNotContain(Convert.ToHexString(hash)); log.ShouldNotContain(Convert.ToHexString(old.DataId));
+        log.ShouldNotContain(System.Text.Encoding.UTF8.GetString(bytes));
+    }
+
+    [Theory]
+    [InlineData("missing-catalog")]
+    [InlineData("foreign-root")]
+    [InlineData("foreign-identity")]
+    [InlineData("wrong-catalog-length")]
+    [InlineData("changed-content")]
+    [InlineData("hardlink")]
+    [InlineData("foreign-temporary")]
+    public async Task ConcurrentCaptureObsoleteProofCannotAdoptOrChangeUnverifiedReplacement(string change)
+    {
+        await using var index = await BindAsync(); byte[] bytes = "unchanged independent replacement"u8.ToArray(), hash = Hash(bytes);
+        var old = Stage(bytes, bytes); using var tree = new SafeFileTree(Root); using var winner = new PublishedBlocks(tree);
+        winner.Put(bytes, hash, Token); await winner.FlushAsync(index, Token);
+        string temporary = Disk(old.Parent + "/" + old.Temporary), final = Disk(old.Parent + "/" + old.Final);
+        if (change == "foreign-temporary")
+        { File.Move(temporary, temporary + ".unowned"); File.WriteAllText(temporary, "unknown replacement"); }
+        else File.Delete(temporary);
+        if (change == "missing-catalog") Sql("DELETE FROM block_objects;");
+        if (change == "foreign-root") Sql("UPDATE block_objects SET root_id=zeroblob(24);");
+        if (change == "foreign-identity") Sql("UPDATE block_objects SET file_id=zeroblob(16);");
+        if (change == "wrong-catalog-length") Sql("UPDATE block_objects SET length=length+1;");
+        if (change == "changed-content")
+        {
+            using var file = File.OpenHandle(final, FileMode.Open, FileAccess.Write, FileShare.Read);
+            RandomAccess.Write(file, new byte[bytes.Length], 0); RandomAccess.FlushToDisk(file);
+        }
+        if (change == "hardlink")
+        {
+            using var parent = tree.Directory(old.Parent, privatePath: true); using var top = tree.Directory("");
+            using var file = parent.OpenFile(old.Final, mutation: true); top.LinkHere(file, "unknown-linked-bytes");
+        }
+        var snapshots = Directory.GetFiles(Root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+        var result = await PublishedBlocks.RecoverCapturesAsync(tree, index, cancellationToken: Token);
+        result.Deferred.ShouldBe(1); result.Registered.ShouldBe(0); result.Installed.ShouldBe(0); result.ProofsRemoved.ShouldBe(0);
+        foreach (var pair in snapshots) File.ReadAllBytes(pair.Key).ShouldBe(pair.Value);
+        Directory.GetFiles(Root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ShouldBe(snapshots.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ConcurrentCaptureFailedCatalogCommitPreservesProofsForOwnerRestart()
+    {
+        await using var index = await BindAsync(); byte[] bytes = "a failed catalog commit must preserve both proofs"u8.ToArray(), hash = Hash(bytes);
+        using (var tree = new SafeFileTree(Root))
+        using (var winner = new PublishedBlocks(tree))
+        using (var loser = new PublishedBlocks(tree) { Checkpoint = boundary => { if (boundary == "flushed") winner.Put(bytes, hash, Token); } })
+        {
+            loser.Put(bytes, hash, Token);
+            Sql("CREATE TRIGGER reject_block BEFORE INSERT ON block_objects BEGIN SELECT RAISE(ABORT,'registration fault'); END;");
+            await Should.ThrowAsync<SqliteException>(() => loser.FlushAsync(index, Token));
+            Directory.GetFiles(ProofDirectory).Length.ShouldBe(2); index.ReadBlockObjects().ShouldBeEmpty();
+            winner.TryRead(hash, bytes.Length, Token).ShouldBe(bytes); Sql("DROP TRIGGER reject_block;");
+        }
+        using var recoveryTree = new SafeFileTree(Root);
+        for (int pass = 0; pass < 2 && Directory.GetFiles(ProofDirectory).Length != 0; pass++)
+            await PublishedBlocks.RecoverCapturesAsync(recoveryTree, index, cancellationToken: Token);
+        Directory.GetFiles(ProofDirectory).ShouldBeEmpty(); index.ReadBlockObjects().Single().Hash.ShouldBe(hash);
+        using var reader = new PublishedBlocks(recoveryTree); reader.TryRead(hash, bytes.Length, Token).ShouldBe(bytes);
+        (await new BlockReferences(Root, index, keys, device).RefreshAsync(Token)).AllKnownSourcesCovered.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task RegistrationPersistsExactIndependentObjectAndRemovesProofOnlyAfterCommit()
     {
         byte[] bytes = RandomNumberGenerator.GetBytes(123456), hash = Hash(bytes), identity;

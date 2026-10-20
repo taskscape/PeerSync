@@ -317,6 +317,23 @@ for pending application work; orphan expiry must not infer ownership from a
 filename alone. All reference-changing engine entry points must serialize with
 the folder sweep, and cleanup must verify root/file identity, length/hash and
 independent-file state under native guards before deleting known objects.
+**Concurrent capture ownership recovery.** Independent capture owners can race
+to install identical bytes. The losing owner deletes only its own temporary,
+but must retain its verified proof in the pending proof set until the winning
+native object is FULL-durably cataloged. Its subsequent flush can then remove
+the losing proof metadata. A restart may instead find that old temporary absent
+and a different, independently verified final file already committed in the
+same root/hash/length/native-identity catalog entry. Under the existing folder
+coordination and pinned native guards, reconcile only the verified obsolete
+proof metadata; never adopt the replacement from its name/hash alone or delete
+any data. Missing/foreign catalog entries, changed bytes, links, replaced
+temporaries, invalid proofs and reparse paths remain protected. Preserve the
+existing 24-hour policy for actual staged bytes and all reference/loss oracles.
+Use a bounded indexed ownership predicate rather than scanning the entire
+catalog per proof. Add direct two-owner race/restart/native/catalog negative
+controls and sanitized recovery diagnostics. A retained 100000-file fixture
+must not be manually repaired or relabeled as a successful run.
+
 Before policy pruning an indexed archive, FULL-durably record its exact archive
 row, bound root/file identity, hash/length and expiry/cap reason under the verified
 file guard. After native deletion is proven complete, atomically remove the
@@ -1679,6 +1696,31 @@ those bundles exercise protocol/diagnostic behavior, and can use the included
 all probe outputs, signatures and native runtime checks. Production service,
 app and CLI installer packaging retains its ReadyToRun requirement below.
 
+### Native Server verification critical path
+
+Run 39411518907 reaches the Server 2025 Engine child's eleven-minute deadline
+after 934 successful results, leaving 68 of its required 1002 cases unfinished.
+Its P0/cross-account probes pass; the unchanged complete 1003-case scope passes
+on Server 2022. Preserve this as incomplete CI, without retrying an unchanged
+head, dropping more tests or increasing the fifteen-minute job ceiling.
+
+Use an explicit native-verification solution containing Engine.Tests and every
+P0 spike required by the Server runner, instead of building unrelated WPF,
+packaging and other test projects before starting Engine. All required test
+and spike outputs are built before the immutable no-build Engine child starts;
+independent account-service publication may continue as before. Normal x64 /
+ARM64 packaging and canonical verification retain their full build scopes.
+Bound the complete Server verification script from before its build, reserving
+setup/upload/cleanup headroom inside the unchanged job ceiling; derive the
+Engine wait from that remaining shared budget rather than adding a fixed
+child deadline after an unmeasured solution build. Preserve process cleanup,
+stdout/stderr/TRX, all native probes and the existing single duplicate capacity
+exclusion on Server 2025. Record build and remaining-wait timings in success
+and failure evidence. Reproduce the hosted incomplete scope, measure the
+unchanged local runner, validate the narrowed build closure and execute the
+complete native runner locally before one batched CI update. Hosted acceptance
+still requires all five jobs and actual Server 2022/2025 results.
+
 ## Packaging and deployment
 
 One signed Inno Setup 7 installer per architecture (`PeerSync-Setup-<version>-x64.exe` and `-arm64.exe`) installs the service and the app for all users. It needs administrator rights once, and none for daily use after that. Inno Setup has no built-in service support, so the script drives `sc.exe`, `netsh` and `icacls` itself, and stops the service before replacing files.
@@ -1917,3 +1959,46 @@ no campaign shard/report runners, whereas preflight must execute and succeed.
 Retain authoritative per-attempt job/step metadata and cached planner identity.
 These diagnostic runs never execute product tests, allocate Windows runners,
 modify activation variables, consume campaign run numbers or count as days.
+
+### Unchanged directory publication convergence
+
+Main CI hierarchy seed 1608819303 exposes identical visible trees and empty
+needed queues while directory publications continue advancing local sequences
+on every healed round. Preserve the exact generated failure as a permanent
+regression and inspect its signed metadata, original envelopes and publication
+proofs. Repair the production cause without extending healing rounds, removing
+pending-work/reference requirements, suppressing generated cases or weakening
+native version survival. Require deterministic baseline reproduction, focused
+authority/metadata controls, canonical local verification and green PR/main CI.
+Existing live scale runs retain their immutable sources and remain independent
+evidence; any repaired-source applicability must be assessed explicitly.
+
+The retained signed records identify a directory-root feedback class split by
+ChangedTicks even when path, mtime, attributes and author agree. Parent
+root-set proof may group these causal timestamp variants only after validating
+every authenticated original root and proving all its direct children covered.
+Keep the selected publication's native metadata and signed authority intact.
+Keep ModifiedBy in the class: independently preserved case copies retain their
+original author boundaries. The direct same-body fallback stays strict. Version the proof-class digest so
+persisted witnesses from the old classification must be rebuilt. Incomplete,
+retiring, unavailable or changed-child graphs still withhold publication.
+
+### Subtree deletion and preserved-copy convergence
+
+PR #41 CI generates hierarchy seed 794669444: subtree deletion and later
+preserved-copy edits leave different visible trees and repeated failed apply
+items after all 24 healing rounds. Preserve the complete generated fixture,
+signed originals and journals, reproduce on the submitted source, and retain
+the seed permanently. Diagnose the precise apply/recovery failure before
+choosing a repair. Keep healing bounds, case-source ownership, native identity,
+authenticated metadata, reference/queue and global version-survival guards.
+Do not merge a failed CI run or replace a failing generated case with a smoke.
+
+A retained nonempty directory that is logically tombstoned is a new local
+revival when RW scanning republishes its surviving children. Its published
+directory mtime must reflect that revival and exceed the recorded deletion's
+change time; reusing an older incidental native mtime lets concurrent replicas
+reassert the old tombstone indefinitely. Preserve ordinary live-directory mtime
+stability and file mtimes. Keep staged revival templates stable across repeated
+walks, and retain all native/graph/ownership guards. An unrepresentable revival
+time must preserve data and report an error rather than publish invalid ticks.

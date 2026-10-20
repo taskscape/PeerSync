@@ -44,6 +44,19 @@ public sealed partial class FolderIndex
         }, cancellationToken);
     }
 
+    /// <summary>Catalog predicate only: callers must also verify guarded native
+    /// bytes and serialize with the folder's ownership/retirement operations.</summary>
+    public bool IsRegisteredBlockObject(byte[] hash, int length, byte[] rootId, byte[] fileId)
+    {
+        FolderMaps.RequireBytes(hash, 32); FolderMaps.RequireBytes(rootId, 24); FolderMaps.RequireBytes(fileId, 16);
+        if (length is <= 0 or > 8388608) throw new ArgumentOutOfRangeException(nameof(length));
+        using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM block_objects WHERE hash=$hash AND length=$length AND root_id=$root AND file_id=$file);";
+        command.Parameters.AddWithValue("$hash", hash); command.Parameters.AddWithValue("$length", length);
+        command.Parameters.AddWithValue("$root", rootId); command.Parameters.AddWithValue("$file", fileId);
+        return (long)command.ExecuteScalar()! != 0;
+    }
+
     public IEnumerable<BlockObjectRow> ReadBlockObjects()
     {
         using var connection = database.OpenReader(); using var command = connection.CreateCommand();

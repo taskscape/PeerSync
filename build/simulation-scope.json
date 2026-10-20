@@ -2,8 +2,10 @@
   "schema": "peersync-simulation-scope-v1",
   "prefix": "PeerSync.Simulation.RealEngineProperties.",
   "retainedSeeds": [
+    794669444,
     1044729930,
     1583987140,
+    1608819303,
     1648781653,
     1878823561
   ],

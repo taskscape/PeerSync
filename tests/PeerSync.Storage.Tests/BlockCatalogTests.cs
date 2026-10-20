@@ -14,6 +14,20 @@ public sealed class BlockCatalogTests : IDisposable
     public BlockCatalogTests() => Directory.CreateDirectory(fixture);
 
     [Fact]
+    public async Task RegisteredObjectPredicateRequiresTheWholeOwnershipTupleWithoutRegisteringAnything()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token); await Bind(index); var row = Row();
+        index.IsRegisteredBlockObject(row.Hash, row.Length, row.RootId, row.FileId).ShouldBeFalse();
+        await index.RegisterBlockObjectsAsync([row], Token);
+        index.IsRegisteredBlockObject(row.Hash, row.Length, row.RootId, row.FileId).ShouldBeTrue();
+        index.IsRegisteredBlockObject(new byte[32], row.Length, row.RootId, row.FileId).ShouldBeFalse();
+        index.IsRegisteredBlockObject(row.Hash, row.Length + 1, row.RootId, row.FileId).ShouldBeFalse();
+        index.IsRegisteredBlockObject(row.Hash, row.Length, new byte[24], row.FileId).ShouldBeFalse();
+        index.IsRegisteredBlockObject(row.Hash, row.Length, row.RootId, new byte[16]).ShouldBeFalse();
+        index.ReadBlockObjects().Count().ShouldBe(1);
+    }
+
+    [Fact]
     public async Task RootBindingAndBatchValidationAreAtomic()
     {
         await using var index = await FolderIndex.OpenAsync(Database, Token); var row = Row();

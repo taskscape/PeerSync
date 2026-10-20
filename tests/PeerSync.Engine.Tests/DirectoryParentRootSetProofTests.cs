@@ -30,6 +30,22 @@ public sealed partial class DirectorySnapshotCaptureTests
     [InlineData("member")]
     public Task UnprovenParentGraphsCannotAuthorizeClockClosure(string damage) => ExerciseParentRoots(true, 1000, false, damage);
 
+    [Theory]
+    [InlineData("changed-ticks")]
+    public Task DirectoryParentRootsProveCausalProvenanceVariantsBeforeClosingTheirClocks(string provenance)
+        => ExerciseParentRoots(true, 1000, false, provenance);
+
+    [Fact]
+    public Task DirectoryParentRootsKeepDifferentAuthorsOutsideClockClosure()
+        => ExerciseParentRoots(true, 1000, false, "author");
+
+    [Theory]
+    [InlineData("changed-ticks:incomplete")]
+    [InlineData("changed-ticks:retiring")]
+    [InlineData("changed-ticks:member")]
+    public Task UnprovenProvenanceParentGraphsCannotAuthorizeClockClosure(string damage)
+        => ExerciseParentRoots(true, 1000, false, damage);
+
     private async Task ExerciseParentRoots(bool reconstruct, int maximumWork, bool late, string? damage)
     {
         WriteFiles("a"); await using var producer = await FolderIndex.OpenAsync(Database, Token);
@@ -61,7 +77,14 @@ public sealed partial class DirectorySnapshotCaptureTests
         alternate.DirectorySnapshotHash = ByteString.CopyFrom(olderTree.Hash); alternate.DirectorySnapshotLength = (uint)olderTree.EncodedLength;
         ulong shortOwn = BinaryPrimitives.ReadUInt64LittleEndian(own); var counter = alternate.Vv.SingleOrDefault(entry => entry.Device == shortOwn);
         if (counter is null) alternate.Vv.Add(new VvEntry { Device = shortOwn, Counter = 100 }); else counter.Counter = 100;
-        byte[] peer = [42, .. new byte[31]]; var record = SignedRecordFactory.Create(alternate, keys, 1);
+        byte[] peer = [42, .. new byte[31]];
+        int separator = damage?.IndexOf(':') ?? -1;
+        string? provenance = separator >= 0 ? damage![..separator] : damage;
+        if (provenance == "changed-ticks") alternate.ChangedTicks++;
+        else if (provenance == "author")
+        { alternate.ModifiedBy = ByteString.CopyFrom(peer); alternate.Vv.Add(new VvEntry { Device = 42, Counter = 7 }); }
+        if (provenance is "changed-ticks" or "author") damage = separator >= 0 ? damage![(separator + 1)..] : null;
+        var record = SignedRecordFactory.Create(alternate, keys, 1);
         var needed = new NeededSet(index, keys, own);
         if (late)
         {
@@ -103,7 +126,14 @@ public sealed partial class DirectorySnapshotCaptureTests
         }
         passes.ShouldBeLessThan(64); index.HasPendingDirectoryPublications().ShouldBeFalse();
         var current = index.LocalFiles.Find("topic")!; var view = VersionView.Open(current.Record!, keys, own);
+        if (provenance == "author")
+        {
+            view.Vector[shortOwn].ShouldBeLessThan(100ul);
+            view.ExportBody().ModifiedBy.Span.SequenceEqual(own).ShouldBeTrue();
+            view.MtimeTicks.ShouldBe(original.MtimeTicks); return;
+        }
         view.Vector[shortOwn].ShouldBe(101ul);
+        view.MtimeTicks.ShouldBe(original.MtimeTicks); view.ExportBody().Attributes.ShouldBe(original.ExportBody().Attributes);
         needed.Decide(new("TOPIC", current, index.RemotesForPath("topic").ToArray())).RequiresApply.ShouldBeFalse();
         File.ReadAllText(Path.Combine(root, "topic", "a")).ShouldBe("local edit before reconstruction");
     }

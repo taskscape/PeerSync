@@ -4,14 +4,23 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $root 'artifacts/p0-services'
 $engineProcess = $null
+$engineClock = $null
+$buildSeconds = $null
+$remaining = $null
+$verificationClock = [Diagnostics.Stopwatch]::StartNew()
+# The unchanged 15-minute job also needs SDK setup, artifact upload and cleanup.
+# Charge the build and probes to this shared 13-minute verification budget.
+$verificationBudgetMilliseconds = 780000
 $verificationRunId = [Guid]::NewGuid().ToString('N')
 $startedUtc = [DateTime]::UtcNow.ToString('O')
 Push-Location $root
 try {
     New-Item -ItemType Directory -Force $out | Out-Null
-    @{status='running';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;caseCapacityStress=(-not $SkipCaseCapacityStress);watcherRuntimeChecks=$false} | ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
-    & dotnet build PeerSync.slnx -c Release
+    @{status='running';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;caseCapacityStress=(-not $SkipCaseCapacityStress);watcherRuntimeChecks=$false;verificationBudgetSeconds=($verificationBudgetMilliseconds/1000)} | ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
+    & dotnet build build/PeerSync.NativeVerification.slnx -c Release -p:RestoreLockedMode=true
+    $buildSeconds = $verificationClock.Elapsed.TotalSeconds
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+    if ($verificationClock.ElapsedMilliseconds -ge $verificationBudgetMilliseconds) { throw 'Native verification budget exhausted during build' }
     # All active test files are immutable copied build output. P0 publishes only
     # Core/SpikeSupport probe outputs and never rebuilds this test output directory.
     $start = [Diagnostics.ProcessStartInfo]::new('dotnet')
@@ -35,14 +44,15 @@ try {
     # stress. Duplicating it here competes with Engine flush tests for disk I/O.
     & "$PSScriptRoot/Run-P0.ps1" -SkipWatcher
     & "$PSScriptRoot/Run-ServiceP0.ps1"
-    $remaining = [Math]::Max(0, 660000 - [int]$engineClock.ElapsedMilliseconds)
-    if (-not $engineProcess.WaitForExit($remaining)) { throw 'Native Engine scope exceeded its eleven-minute deadline' }
+    $remaining = [int][Math]::Max(0, $verificationBudgetMilliseconds - $verificationClock.ElapsedMilliseconds)
+    if ($remaining -eq 0 -or -not $engineProcess.WaitForExit($remaining)) { throw 'Native verification exceeded its shared thirteen-minute budget' }
     if ($engineProcess.ExitCode -ne 0) { throw "Native Engine scope failed ($($engineProcess.ExitCode)); see engine stdout/stderr and TRX" }
-    @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;caseCapacityStress=(-not $SkipCaseCapacityStress);caseCapacityCoverage='required Server 2022 job and default local runner';serviceAccountChecks=$true;watcherRuntimeChecks=$false;watcherCoverage='required x64 canonical job';secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;gateP1Passed=$false} |
+    if ($verificationClock.ElapsedMilliseconds -ge $verificationBudgetMilliseconds) { throw 'Native verification completed outside its shared budget' }
+    @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;caseCapacityStress=(-not $SkipCaseCapacityStress);caseCapacityCoverage='required Server 2022 job and default local runner';serviceAccountChecks=$true;watcherRuntimeChecks=$false;watcherCoverage='required x64 canonical job';secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;verificationBudgetSeconds=($verificationBudgetMilliseconds/1000);buildSeconds=$buildSeconds;remainingWaitMilliseconds=$remaining;totalSeconds=$verificationClock.Elapsed.TotalSeconds;gateP1Passed=$false} |
         ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
 }
 catch {
-    @{status='failed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;caseCapacityStress=(-not $SkipCaseCapacityStress);watcherRuntimeChecks=$false;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult} |
+    @{status='failed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;caseCapacityStress=(-not $SkipCaseCapacityStress);watcherRuntimeChecks=$false;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult;verificationBudgetSeconds=($verificationBudgetMilliseconds/1000);buildSeconds=$buildSeconds;remainingWaitMilliseconds=$remaining;totalSeconds=$verificationClock.Elapsed.TotalSeconds} |
         ConvertTo-Json | Set-Content (Join-Path $out 'parallel-summary.json')
     throw
 }

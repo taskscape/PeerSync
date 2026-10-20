@@ -35,7 +35,7 @@ internal sealed partial class ScaleScenario
             {
                 bool references = true;
                 foreach (var node in nodes)
-                    references &= (await new BlockReferences(node.Root, node.Index, keys, node.Id).RefreshAsync(token).ConfigureAwait(false)).AllKnownSourcesCovered;
+                    references &= (await new BlockReferences(node.Root, node.Index, keys, node.Id, node.Journal).RefreshAsync(token).ConfigureAwait(false)).AllKnownSourcesCovered;
                 if (references) return VerifyNative(requireInitialCount, token);
             }
             previous = high; AdvanceWhenWaiting(passes);
