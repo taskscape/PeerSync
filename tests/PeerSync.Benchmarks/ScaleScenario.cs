@@ -9,6 +9,7 @@ using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
+using PeerSync.Engine.Native;
 using PeerSync.Engine.Sync;
 using PeerSync.Net.InMemory;
 using PeerSync.Storage.FolderDb;
@@ -76,6 +77,7 @@ internal sealed partial class ScaleScenario
                 try { await node.Engine.DisposeAsync().ConfigureAwait(false); } catch (Exception error) { failure ??= error; }
                 try { await node.Index.DisposeAsync().ConfigureAwait(false); } catch (Exception error) { failure ??= error; }
                 try { node.Journal.Dispose(); } catch (Exception error) { failure ??= error; }
+                try { node.Tree.Dispose(); } catch (Exception error) { failure ??= error; }
             }
             await heartbeatStop.CancelAsync().ConfigureAwait(false);
             try { await heartbeat.ConfigureAwait(false); } catch (Exception error) { failure ??= error; }
@@ -108,10 +110,19 @@ internal sealed partial class ScaleScenario
         {
             string directory = Path.Combine(fixture, "node-" + number.ToString(CultureInfo.InvariantCulture));
             string root = Path.Combine(directory, "tree"); Directory.CreateDirectory(root);
-            var index = await FolderIndex.OpenAsync(Path.Combine(directory, "index.db"), token).ConfigureAwait(false);
-            byte[] id = new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(id, (ulong)number + 1);
-            var clock = new ScaleClock(initialUtc); var journal = new DiagnosticJournal(Path.Combine(directory, "logs"), "scale", debugEnabled: true);
-            nodes.Add(new(root, id, index, new(root, index, keys, id, timeProvider: clock, journal: journal), clock, journal));
+            var tree = new SafeFileTree(root); FolderIndex? index = null; DiagnosticJournal? journal = null;
+            try
+            {
+                index = await FolderIndex.OpenAsync(Path.Combine(directory, "index.db"), token).ConfigureAwait(false);
+                byte[] id = new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(id, (ulong)number + 1);
+                var clock = new ScaleClock(initialUtc); journal = new DiagnosticJournal(Path.Combine(directory, "logs"), "scale", debugEnabled: true);
+                nodes.Add(new(root, id, index, new(root, index, keys, id, timeProvider: clock, journal: journal), clock, journal, tree));
+            }
+            catch
+            {
+                if (index is not null) await index.DisposeAsync().ConfigureAwait(false);
+                journal?.Dispose(); tree.Dispose(); throw;
+            }
         }
         SetPhase("generate");
         for (int number = 0; number < files; number++) { Write(nodes[0], number, "original"); generated++; token.ThrowIfCancellationRequested(); }
@@ -128,8 +139,14 @@ internal sealed partial class ScaleScenario
         for (int number = 0; number < sample; number++) { Write(nodes[1], number, "left"); Write(nodes[3], number, "right"); overwrites += 2; }
         for (int number = 0; number < 4; number++)
         {
-            string source = Disk(nodes[1], files - 1 - number); File.Move(source, source + ".renamed"); renames++;
-            File.Delete(Disk(nodes[3], files - 5 - number)); deletes++;
+            int source = files - 1 - number;
+            using (var directory = nodes[1].Tree.Directory(Bucket(source)))
+            using (var file = directory.OpenFile(Leaf(source), mutation: true))
+            { PublishedBlocks.RequireIndependent(file); directory.MoveHere(file, Leaf(source) + ".renamed"); renames++; }
+            int removed = files - 5 - number;
+            using (var directory = nodes[3].Tree.Directory(Bucket(removed)))
+            using (var file = directory.OpenFile(Leaf(removed), mutation: true))
+            { PublishedBlocks.RequireIndependent(file); GuardedFile.DeleteOnClose(file); deletes++; }
         }
         nodes[1].Engine.RequestScan(); nodes[3].Engine.RequestScan();
         await DrainLocal(nodes[1], token).ConfigureAwait(false); await DrainLocal(nodes[3], token).ConfigureAwait(false);
@@ -140,12 +157,21 @@ internal sealed partial class ScaleScenario
     private void Write(Node node, int number, string version)
     {
         byte[] bytes = Encoding.UTF8.GetBytes($"PeerSync scale corpus v1; file={number.ToString(CultureInfo.InvariantCulture)}; version={version}");
-        string path = Disk(node, number); Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllBytes(path, bytes); File.SetLastWriteTimeUtc(path, node.Clock.GetUtcNow().UtcDateTime);
+        using var directory = node.Tree.Directory(Bucket(number), create: true);
+        bool original = version == "original"; string leaf = Leaf(number);
+        using var file = directory.CreateFile(original ? leaf : "scale-write-" + Guid.NewGuid().ToString("N"));
+        using var stream = new FileStream(file, FileAccess.Write); stream.Write(bytes); stream.Flush(flushToDisk: true);
+        FileMetadata.SetMtime(file, node.Clock.GetUtcNow().UtcTicks);
+        if (!original)
+        {
+            using (var prior = directory.OpenFile(leaf, mutation: true))
+            { PublishedBlocks.RequireIndependent(prior); GuardedFile.DeleteOnClose(prior); }
+            directory.MoveHere(file, leaf);
+        }
         expected.Add(Convert.ToHexString(SHA256.HashData(bytes)));
     }
-    private static string Disk(Node node, int number) => Path.Combine(node.Root,
-        "bucket-" + (number / 128).ToString("D4", CultureInfo.InvariantCulture), "file-" + number.ToString("D6", CultureInfo.InvariantCulture));
+    private static string Bucket(int number) => "bucket-" + (number / 128).ToString("D4", CultureInfo.InvariantCulture);
+    private static string Leaf(int number) => "file-" + number.ToString("D6", CultureInfo.InvariantCulture);
     private void SetPhase(string next)
     {
         double now = watch.Elapsed.TotalSeconds; timings[phase] = now - phaseStart; phaseStart = now; phase = next;
@@ -173,7 +199,7 @@ internal sealed partial class ScaleScenario
             || File.ReadAllText(Path.Combine(actual, "owner.txt")) != owner) throw new IOException("Generated fixture ownership changed; preserve it.");
         Directory.Delete(actual, recursive: true);
     }
-    private sealed record Node(string Root, byte[] Id, FolderIndex Index, TransportFolder Engine, ScaleClock Clock, DiagnosticJournal Journal);
+    private sealed record Node(string Root, byte[] Id, FolderIndex Index, TransportFolder Engine, ScaleClock Clock, DiagnosticJournal Journal, SafeFileTree Tree);
     private sealed record Link(int From, int To, PeerFolderConnection Peer);
     private sealed record NodeState(long HighWater, long Needed, bool Apply, bool Cases, bool Publications, long? NextAttemptTicks);
     private sealed class ScaleClock(DateTimeOffset start) : TimeProvider
