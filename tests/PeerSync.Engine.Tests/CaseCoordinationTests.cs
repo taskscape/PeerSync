@@ -175,6 +175,40 @@ public sealed class CaseCoordinationTests : IDisposable
         await c.Engine.RunPassAsync(Token); RequireVisibleVersions(c); c.Index.ReadPendingCasePreservations().ShouldBeEmpty(); c.Index.Needed.Count().ShouldBe(0);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetainedPayloadCanComeFromAPeerWithoutTheOriginalPathAdvertisement(bool directory)
+    {
+        await using var author = await NodeAsync(1); await using var winner = await NodeAsync(2);
+        await using var holder = await NodeAsync(3); await using var receiver = await NodeAsync(4);
+        if (directory) await PublishDirectory(author, "topic", "nested/shared", First, early);
+        else await Publish(author, "topic", First, early);
+        await Publish(winner, "TOPIC", Second, early.AddMinutes(1));
+        await Publish(holder, "unrelated", First, early);
+        var network = new InMemoryNetwork(); network.Register(author.Id, author.Engine.CreateHandler);
+        network.Register(winner.Id, winner.Engine.CreateHandler); network.Register(holder.Id, holder.Engine.CreateHandler);
+        var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        await using var original = await receiver.Engine.ConnectAsync(endpoint.Connect(author.Id), Token);
+        await using var winning = await receiver.Engine.ConnectAsync(endpoint.Connect(winner.Id), Token);
+        await using var retained = await receiver.Engine.ConnectAsync(endpoint.Connect(holder.Id), Token);
+        await original.SynchronizeAsync(cancellationToken: Token); await winning.SynchronizeAsync(cancellationToken: Token);
+        await receiver.Index.Devices.UpsertAsync([new(holder.Id)], Token);
+        if (directory)
+        {
+            await receiver.Engine.RunPassAsync(Token);
+            receiver.Index.ReadPendingCasePreservations().Single().InstalledFileId.ShouldNotBeNull();
+        }
+        await original.DisposeAsync();
+        for (int pass = 0; pass < 10; pass++) { var result = await receiver.Engine.RunPassAsync(Token); receiver.Clock.AdvanceTo(result.NextAttemptTicks); }
+        receiver.Index.RemotesForPath("topic").ShouldNotContain(row => row.DeviceId.SequenceEqual(holder.Id));
+        receiver.Index.ReadPendingCasePreservations().ShouldBeEmpty(CaseState(receiver));
+        receiver.Index.Needed.Count().ShouldBe(0, CaseState(receiver));
+        File.ReadAllText(Path.Combine(receiver.Root, "TOPIC")).ShouldBe(Second);
+        string copy = Directory.EnumerateFileSystemEntries(receiver.Root).Single(path => Path.GetFileName(path).Contains(".case-conflict", StringComparison.Ordinal));
+        File.ReadAllText(directory ? Path.Combine(copy, "nested", "shared") : copy).ShouldBe(First);
+    }
+
     private static void RequireVisibleVersions(Node node)
     {
         string[] paths=Directory.GetFiles(node.Root).Where(path=>PathRules.IsValid(Path.GetFileName(path))).ToArray();
