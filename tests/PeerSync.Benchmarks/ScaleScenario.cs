@@ -156,7 +156,8 @@ internal sealed partial class ScaleScenario
         {
             while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
             {
-                string line = JsonSerializer.Serialize(new { phase = Volatile.Read(ref phase), generated, rounds, seconds = watch.Elapsed.TotalSeconds, fixture });
+                string line = JsonSerializer.Serialize(new { phase = Volatile.Read(ref phase), generated, rounds,
+                    states = Volatile.Read(ref lastStates), seconds = watch.Elapsed.TotalSeconds, fixture });
                 Console.WriteLine(line); File.AppendAllText(Path.Combine(output, "progress.jsonl"), line + Environment.NewLine);
             }
         }
