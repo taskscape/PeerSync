@@ -26,9 +26,10 @@ requires a release signing identity.
 
 ## Deployment status
 
-The product is in P0. The production service, tracker, relay, CLI and installer
-are scaffold projects and do not synchronize files yet. The P0 probes below
-are deployable test executables, not a v1 release.
+The product is in P1. The engine is exercised through connected in-memory
+transport with real Windows files and SQLite indexes. Production service,
+tracker, relay, CLI and installer integration is incomplete. The P0 probes
+below are deployable test executables, not a v1 release.
 
 Structured events use UTC timestamps, component, process/run ID, session ID,
 trace ID when present, transport, operation, byte counts, elapsed milliseconds,
@@ -57,6 +58,33 @@ different from a rejected folder proof, approval wait, missing block, or failed
 filesystem apply. Keep the original error code when reporting a failure.
 Those production-stage event hooks are added with their implementing phases;
 the QUIC probe already records start, TLS authentication, completion and errors.
+
+## P1: directory reconstruction and case recovery
+
+Engine diagnostics distinguish content reachability from publication proof.
+Enable debug events when capturing a stalled directory case. Use the session
+ID and timestamp to follow an attempt; ordinary retry backoff is reported in
+milliseconds. A pending proof preserves the original signed version until its
+children can be verified. Repeated retries should be investigated before
+restarting or modifying the files.
+
+| Event | Meaning and useful fields |
+| --- | --- |
+| `apply.case-route-unavailable` | A candidate could not supply valid old content. `errorCode`, `hResult`, `bytes` and elapsed time identify the failure category. |
+| `apply.case-route-timeout` | A route exceeded its transfer allowance. A source attempt is bounded to 300 seconds; individual routes allow one second plus bytes at 256 KiB/s. |
+| `apply.case-route-failover` | Another known peer supplied verified content. The durable hint can be reused on later attempts. |
+| `directory.metadata_deferred` | Snapshot metadata recovery could not advance. Inspect the exception category and native error; missing metadata is never an empty subtree. |
+| `directory.publication_pending` | A bounded child capture needs more passes; visited/changed counts show progress. |
+| `directory.rebase_pending` | A received original subtree still needs causal verification. `itemsDeferred` distinguishes waiting from budget continuation. |
+| `directory.parent_roots_pending` | At least one eligible original parent root remains unproven. Metadata recovery or ordinary child receipt may be required. |
+| `directory.parent_roots_complete` | Every eligible root is covered by authenticated current children for this attempt. Final commit still revalidates the witnesses. |
+| `directory.parent_clock_template` | Parent clocks were absorbed before publication. `proven-root-floor` means all eligible roots were proven. |
+| `directory.publication_retry` | `errorCode` starts with the failing stage, such as `parent-roots`, `history` or `commit`, followed by the exception category or `pending`. Inspect native error and retry delay. |
+
+These events intentionally omit file paths, content hashes, keys and signed
+records. Counts and session IDs support comparison without disclosing folder
+contents. The current engine tests exercise these stages locally; they do not
+establish deployment readiness for the production service.
 
 ## P0: two-machine QUIC test
 
