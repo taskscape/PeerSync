@@ -15,8 +15,9 @@ are now included with the production repair for the next single CI batch.
 A fresh requested batch passes all 20 distinct hierarchy seeds on three to
 seven actual TransportFolder nodes, with real Windows files and SQLite. It
 records 282 operations, 254 published payload versions, 21 directory renames,
-49 subtree deletions and 23 kind changes. These are actual recorded changes,
-separate from skipped/generated attempts. All cases pass the recursive exact
+49 subtree deletions and 23 kind changes. The operation count includes
+generated attempts; mutation counters record completed changes, and traces
+retain skips. All cases pass the recursive exact
 native tree, stable index/drained queue, authenticated reference coverage and
 visible/indexed-native-archive preservation oracles. Private caches cannot
 satisfy the version oracle. No failure artifact was produced.
