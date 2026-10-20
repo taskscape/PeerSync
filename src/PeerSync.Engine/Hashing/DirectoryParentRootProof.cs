@@ -77,10 +77,14 @@ internal static class DirectoryParentRootProof
 
     private static FileRecordBody ClassOf(VersionView version)
     {
-        var body = version.ExportBody(); body.Vv.Clear(); body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0; return body;
+        var body = version.ExportBody(); body.Vv.Clear(); body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0;
+        // Publication provenance can differ after a verified reconstruction.
+        // Every root still requires authenticated child coverage before its
+        // clock is absorbed; path/mtime/attributes and author remain in the class.
+        body.ChangedTicks = 0; return body;
     }
     private static byte[] ClassHash(FileRecordBody body)
     {
-        using var hash = Blake3.Hasher.New(); hash.Update("PeerSync directory parent class v1"u8); hash.Update(body.ToByteArray()); return hash.Finalize().AsSpan().ToArray();
+        using var hash = Blake3.Hasher.New(); hash.Update("PeerSync directory parent class v2"u8); hash.Update(body.ToByteArray()); return hash.Finalize().AsSpan().ToArray();
     }
 }

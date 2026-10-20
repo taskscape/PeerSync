@@ -1930,3 +1930,13 @@ native version survival. Require deterministic baseline reproduction, focused
 authority/metadata controls, canonical local verification and green PR/main CI.
 Existing live scale runs retain their immutable sources and remain independent
 evidence; any repaired-source applicability must be assessed explicitly.
+
+The retained signed records identify a directory-root feedback class split by
+ChangedTicks even when path, mtime, attributes and author agree. Parent
+root-set proof may group these causal timestamp variants only after validating
+every authenticated original root and proving all its direct children covered.
+Keep the selected publication's native metadata and signed authority intact.
+Keep ModifiedBy in the class: independently preserved case copies retain their
+original author boundaries. The direct same-body fallback stays strict. Version the proof-class digest so
+persisted witnesses from the old classification must be rebuilt. Incomplete,
+retiring, unavailable or changed-child graphs still withhold publication.

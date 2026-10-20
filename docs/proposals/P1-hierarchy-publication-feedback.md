@@ -24,3 +24,14 @@ worktrees and binaries; assess their source applicability after the repair.
 Retain the original raw job log and downloaded evidence under
 `artifacts/ci40-main-failed.log` and `artifacts/ci40-main-failed-evidence/`.
 Batch the repair and acceptance reports into one push after local validation.
+
+The read-only signed-record inspection finds different topic roots with equal
+path/mtime/attributes but different ChangedTicks provenance. Root-set discovery
+currently classifies those separately; repeated publications increment clocks
+without closing the other class. Test timestamp variants with a distinct
+covered older tree and a higher remote clock; retain ModifiedBy boundaries.
+Group only ChangedTicks out of the full authenticated root-set
+classification, use a v2 digest to invalidate old witnesses, and retain strict
+user metadata classification and exact-body fallback. The full child coverage,
+original-envelope, root/native/input/revision guards continue to authorize the
+clock merge; provenance alone never authorizes it.
