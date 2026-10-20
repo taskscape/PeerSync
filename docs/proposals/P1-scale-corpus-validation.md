@@ -62,3 +62,10 @@ copy and reparse alias before any large run is accepted. Successful fixtures
 may be removed only after validating the exact generated temporary root and
 ownership marker; failures retain their complete fixture without an enormous
 automatic ZIP.
+
+Derive this runner's synthetic folder keys from a versioned public label and
+its generated owner marker, matching the hierarchical harness's public test
+key approach. This lets a retained generated-only database be inspected after
+process exit without putting actual keys in diagnostic events or bundles.
+Document the derivation and prohibit these keys for any real folder. Normal
+production key creation and authorization remain unchanged.
