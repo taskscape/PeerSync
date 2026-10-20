@@ -9,3 +9,4 @@ TestResults/
 *.p12
 *.key
 BenchmarkDotNet.Artifacts/
+__pycache__/
