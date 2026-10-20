@@ -16,9 +16,9 @@ jobs:
       matrix:
         runtime: [win-x64, win-arm64]
     runs-on: windows-latest
-    # Retained hierarchy regressions add about three local minutes; keep the
-    # existing job count and allow headroom over its previous ten-minute run.
-    timeout-minutes: 20
+    # Hosted hierarchy smoke takes 466s and one fixed case 341s; the 20-minute
+    # x64 job was cancelled during its next fixed case. Preserve all scope.
+    timeout-minutes: ${{ matrix.runtime == 'win-x64' && 40 || 15 }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
