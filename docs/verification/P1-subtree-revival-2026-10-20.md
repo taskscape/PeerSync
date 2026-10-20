@@ -47,7 +47,39 @@ Evidence: `artifacts/ci41-failed-evidence/`, `artifacts/ci41-failed.log`,
 `artifacts/hierarchy-794669444-decisions-wal.log`,
 `artifacts/revival-clock-before.log`, `artifacts/revival-clock-after.log`,
 `artifacts/revival-directory-controls.log` and actual corresponding TRX.
-Full canonical, larger generated hierarchy coverage and updated PR/main CI
-remain pending. Both live corpus runs retain their immutable earlier sources;
-their applicability to this further repair remains unverified. No P1 gate or
-task is ticked from these local focused results.
+Full canonical `build/Verify.ps1 -Runtime win-x64` passes on committed repair
+9c631e46bf569dbc808164ac892a167d057dfdf5, exit 0 in 613.9128954 seconds.
+Actual fresh TRX proves 1554 unit results (1003 Engine plus 551 others), and
+the strict scope validator confirms thirteen successful Simulation methods,
+all six retained regressions and connected maintenance. Generated smoke
+completes eight flat/four hierarchy cases. Maintenance retires two archives,
+evicts two blocks and preserves both payload versions. Native probes and
+publishing pass. Fuzz completes the four required targets for 600.0015363
+seconds, 217565 seeds and zero crashes; its supervisor duration remains separate.
+Evidence: `artifacts/p1-revival-canonical.log`, matching scope/unit JSON and saved
+canonical TRX, plus
+`artifacts/simulation/20261020T100350-32fe9420e97a42e199a935574291e45f/`.
+
+A larger 100-case hierarchy batch also passes on those unchanged binaries,
+exit 0 in 43m17.719s test-process time (2596.2877171 scenario seconds). The
+terminal summary, single successful method in TRX, 100 distinct replay seeds
+and unchanged Engine/Simulation/Fuzz hashes are independently checked in
+`artifacts/hierarchy-revival-expanded-100-audit.json`. All three-to-seven node
+counts occur. The cases perform 1439 operations, 1285 writes, 274 renames,
+481 deletions, 117 directory renames, 188 subtree deletions and 84 kind changes;
+all 1285 published payload versions survive. Maximum healing is 23 of the
+unchanged 24 rounds. Native equality, stable index high waters, covered
+references and needed/recovery/case/publication queue drain remain required.
+
+Four cases each report one root staging file: seeds 365615982, 187918476,
+853246416 and 45124414. This diagnostic is not a zero-staging acceptance
+requirement: the existing protected staging lifecycle retains owned objects
+for at least 24 hours, and regression 1146310622 explicitly permits parked
+internal staging at user-tree convergence. No production oracle or policy was
+changed. The first audit script incorrectly imposed zero staging; it was
+corrected to retain the actual counts and apply the existing acceptance scope.
+Evidence: `artifacts/hierarchy-revival-expanded-100/`, its separate TRX and log.
+
+Updated PR/main CI remains pending. Both live corpus runs retain their
+immutable earlier sources; their applicability to this further repair remains
+unverified. No P1 gate or task is ticked from these local results.
