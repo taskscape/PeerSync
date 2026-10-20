@@ -209,6 +209,7 @@ Newest first. Every row is also reflected in the design doc.
 | 2026-10-20 | Case payload deadlines include a 256 KiB/second byte allowance plus one second (maximum 33 seconds per 8 MiB candidate) within a 300-second source attempt, so fixed one-second metadata-style timing cannot reject valid slow payload transfers. Add a delayed-payload regression before submission; bounded paging and caller cancellation remain binding. | Case payload route design |
 | 2026-10-20 | Repair automatic directory publication clock closure using only authenticated original-parent envelopes whose entire non-vector body and snapshot root match. Merge that floor before one local increment and revalidate under the final reference gate; different subtrees/metadata remain outside the proof. Retain hierarchy seed 1648781653 and its stable-index/queue criteria. | Directory parent clock closure; docs/proposals/P1-directory-parent-clock-repair.md |
 | 2026-10-20 | Same-body parent clock closure does not prove different snapshot roots. Add a bounded durable root-set/child-causality proof with protected graph representatives, progress preserved across vector-only forwarding, exact input/native witnesses and final root-set validation. Retained seed 1044729930 remains a failing integration gate. | Directory parent root-set proof design |
+| 2026-10-20 | Prepare an explicit five-node 100000-file corpus runner with real public transport/native loss and reference oracles, progress/provenance and preserved failures. Measure small/intermediate corpora separately, keep normal CI bounded, and never infer gate acceptance from smoke. | Local P1 scale evidence; docs/proposals/P1-scale-corpus-validation.md |
 
 ---
 
@@ -1806,6 +1807,9 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
     - Done when: three-to-seven-node generated nested/case/kind/rename/delete operations heal through public coordinators with identical visible native trees, preserved published versions, complete references and drained queues. Recursive oracle negative controls, seed/mode replay and failure retention pass local/canonical/CI/main checks. Follow the [scenario design](docs/proposals/P1-hierarchical-property-scenarios.md); smoke does not close 1000-seed/five-day/100k gates.
     - The [recursive oracle prerequisite](docs/verification/P1.6.2b-recursive-oracle-2026-10-20.md) adds guarded recursive native trees and indexed-archive hashing, with two passing negative/positive native controls and all five Simulation methods/eight flat scenarios passing locally. Hierarchical generation, canonical/CI/main and full phase gates remain open.
     - [Hierarchical route checkpoint](docs/verification/P1-hierarchical-routing-repair-2026-10-20.md): retained seven-node seed 1878823561 now passes with all final oracles; fresh eight-flat/four-hierarchy smoke and six methods pass in 137.186 seconds. This is local smoke, separate from merged/CI/1000-case/five-day/100k-file acceptance.
+
+- [ ] **P1.6.3 Five-node scale corpus runner and evidence** [WIP @codex 2026-10-20]
+  - Done when: an explicit small/intermediate/full-corpus procedure reports actual file counts, source/runtime/progress, final native/queue/reference convergence and overwritten-version survival; a completed five-node 100000-file report supports the Gate P1 line. Follow the [scale validation design](docs/proposals/P1-scale-corpus-validation.md). No gate acceptance comes from a preflight or property smoke.
 
 ### Gate P1
 

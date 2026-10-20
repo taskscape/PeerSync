@@ -1808,6 +1808,16 @@ The biggest technical risk is NAT hole punching with `System.Net.Quic`; the bigg
 - [ ] Do you have a code-signing certificate?
 - [ ] Team size: the estimates assume one senior .NET developer.
 
+### Local P1 scale evidence
+
+The five-node 100000-file gate uses an explicit measured local corpus runner,
+real native files/indexes and public connected engine transport, with final
+recursive native-byte equality, durable queue drain, reference coverage and
+overwritten-version preservation. Keep small preflights and normal property
+smoke distinct from full corpus acceptance. No large default/scheduled CI job
+is implied. Follow `docs/proposals/P1-scale-corpus-validation.md` and preserve
+failed generated fixtures, progress metrics and exact source provenance.
+
 ## Sources
 
 Opened on 2026-10-18. Resilio help-centre articles describe Sync 2.x–3.x behaviour.
