@@ -1940,3 +1940,14 @@ Keep ModifiedBy in the class: independently preserved case copies retain their
 original author boundaries. The direct same-body fallback stays strict. Version the proof-class digest so
 persisted witnesses from the old classification must be rebuilt. Incomplete,
 retiring, unavailable or changed-child graphs still withhold publication.
+
+### Subtree deletion and preserved-copy convergence
+
+PR #41 CI generates hierarchy seed 794669444: subtree deletion and later
+preserved-copy edits leave different visible trees and repeated failed apply
+items after all 24 healing rounds. Preserve the complete generated fixture,
+signed originals and journals, reproduce on the submitted source, and retain
+the seed permanently. Diagnose the precise apply/recovery failure before
+choosing a repair. Keep healing bounds, case-source ownership, native identity,
+authenticated metadata, reference/queue and global version-survival guards.
+Do not merge a failed CI run or replace a failing generated case with a smoke.
