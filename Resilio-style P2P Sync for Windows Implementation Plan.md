@@ -1870,3 +1870,15 @@ the barrier. This metadata-only progress can satisfy a child reconstruction's
 causal proof without discarding queues or weakening directory graph/GC proofs.
 See docs/proposals/P1-publication-tombstone-progress.md for the retained regression
 and required controls.
+
+### Connected production maintenance validation
+
+Before Gate P1, simulation must exercise the real archive/history/reference/block
+maintenance APIs around public connected transfers, including actual expired
+archive removal and eligible owned-block eviction. Use injected peer clocks,
+retain pending/current references and unknown objects, then prove delayed peer
+transfer, native convergence and global preservation of every published version.
+The delayed peer's fresh archive preserves the earlier version after the updated
+peers' older archives expire; the native loss oracle remains unchanged.
+See docs/proposals/P1-connected-maintenance-simulation.md. Host timer supervision
+remains in its existing service phase; this test invokes the production worker.
