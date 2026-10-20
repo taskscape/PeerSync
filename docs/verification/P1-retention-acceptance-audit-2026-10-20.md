@@ -1,9 +1,9 @@
 # Retention acceptance audit
 
-Status: unit/native requirements verified on merged green main #38;
-connected maintenance passes PR #39 final CI and is merged. Its main-push
-run 39381507911 is still pending; see the separate #39 merge audit.
-This report does not authorize ticking the remaining retention parents yet.
+Status: unit/native and connected cleanup requirements verified on merged green
+main #39. Run 39381507911 passes all five jobs; downloaded actual main TRX
+contains eleven successful Simulation methods including native connected
+maintenance. The exact-tree #39 merge audit supplies the complete proof.
 
 ## Persistent ownership, references and recovery
 
@@ -47,7 +47,7 @@ The production 1001-object case deletes at most 1000 then continues next pass.
 History retention/provenance, policy release, archive manifests and reference
 activation have independent transactional rollback/restart assertions.
 
-## Connected production-path requirement awaiting CI/main
+## Connected production-path requirement verified in PR/main CI
 
 PR #39 adds `ConnectedMaintenanceExpiresArchivesAndBlocksWithoutLosingDelayedPeerVersions`
 using three public TransportFolder/IPeerTransport peers and public BlockRetention
@@ -58,8 +58,11 @@ and unknown cache bytes survive, a partitioned delayed update completes after
 healing, and unchanged global native version/convergence oracles pass.
 Only injected fixture clocks advance; the host clock does not change.
 
-Once actual #39 PR/main evidence proves that added case on the merged tested
-tree, P1.6.2c and P1.2.4b2b2c/b2b2/b2b/b2/b/P1.2.4 can close from the combined
-native/unit/connected proof. Until then their boxes remain unchecked. The full
+Actual #39 PR/main evidence proves the added case on the merged tested tree,
+with two native archive retirements, two block evictions and both versions
+preserved through delayed transfer. Current main also passes all 1545 unit
+results, including full Engine/Storage guards. P1.6.2c and
+P1.2.4b2b2c/b2b2/b2b/b2/b/P1.2.4 meet the combined native/unit/connected criteria.
+The full
 corpus, five consecutive 1000-seed CI dates and complete P1/production-service
 acceptance stay separate regardless of this connected scenario's outcome.

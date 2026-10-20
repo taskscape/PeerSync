@@ -31,10 +31,24 @@ preserved and all reference/native/queue checks passing; see its separate
 report. Small/intermediate runs never prove the full corpus line.
 
 Main-push [run 39381507911](https://github.com/taskscape/PeerSync/actions/runs/39381507911)
-is running on the exact squash. Its acceptance remains pending, so connected
-maintenance/retention and campaign rerun-review checklist items remain open.
+passes all five jobs on the exact squash: x64 8m09s, ARM64 2m57s, Server 2022
+11m21s, Server 2025 13m52s and boundary/simulation 39m18s.
+Downloaded actual Server 2022 TRX proves 994/994 Engine cases; x64 TRX proves
+the other 551 unit results (including 299 Storage, 39 Contracts, eight Service
+and 13 App), all passed. These are distributed CI results, not a new local
+canonical run. Evidence is in `artifacts/ci39-main-server2022/` and
+`artifacts/ci39-main-x64/`. Downloaded main boundary evidence independently
+passes the exact eleven-method scope, all four retained regressions, eight
+flat/four hierarchy samples and connected cleanup (two native archives/two
+blocks, 64 fixture days, both payload versions retained). Native fuzz proves
+118104 seeds, 600.0002874 seconds and zero crashes. Its supervisor duration
+2200.7225822 seconds remains separate. Evidence: `artifacts/ci39-main-evidence/`.
+This closes connected maintenance and the audited retention parents. Campaign
+rerun hardening retains the new hosted cached-planner proof child P1.6.4a1.
 The new final-source 100000-file run started on the same squash in a clean
 isolated worktree; the old immutable-source run remains undisturbed. Neither
 has a claimed passing full-corpus report. Campaign scheduling remains inactive;
-hosted preflight and five actual consecutive UTC campaign days are required.
+Hosted campaign preflight run 39385642102 has been dispatched on this immutable
+source; it is non-gating and still running. Five actual consecutive UTC campaign
+days and the separate hosted allocation diagnostic are required before closure.
 Complete P1, production clock/service integration and later gates remain open.
