@@ -215,6 +215,7 @@ Newest first. Every row is also reflected in the design doc.
 | 2026-10-20 | Hosted run 39361484050 reaches the 20-minute x64 deadline during the second retained seed after 551 unit cases, eight flat/four hierarchy samples and the six-node fixed case pass. Keep all scope; give only x64 a 40-minute ceiling, return Arm64 to 15 minutes, preserve cancellation evidence and submit one configuration repair. | Measured hierarchy CI scope; docs/verification/P1-hierarchy-ci-budget-2026-10-20.md |
 | 2026-10-20 | Run 39363534643 passes every Simulation case and native probe, then reaches 40 minutes during publishing. Move the unchanged simulations alongside ten-minute fuzz in that existing job; retain all five jobs and every check, restore packaging to 15 minutes and give boundary/simulation a measured 50-minute ceiling. | Hierarchical scenario design and second hosted artifact audit |
 | 2026-10-20 | Prepare an opt-in, source-pinned thousand-flat-seed/five-day campaign with explicit hierarchy/regression counts, five shards, strict artifact/history audit and a five-attempt scheduling bound. Keep activation disabled until a green merged P1 source and preflight exist. | docs/proposals/P1-bounded-ci-campaign.md |
+| 2026-10-20 | Implement explicit five-node corpus validation in the existing benchmark console, with guarded native oracles, bounded public transport, generated-only fixtures, ownership-checked cleanup and preserved failures. Start with native oracle controls and a small corpus. | P1 scale runner design |
 
 ---
 
