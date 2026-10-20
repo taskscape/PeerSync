@@ -58,8 +58,10 @@ internal sealed partial class DirectorySnapshotCapture
                 || ((uint)FileSnapshot.Read(native).Attributes & attributes) != (queued.Attributes & attributes)) throw new IOException("Directory queue native identity or attributes changed.");
             stage = "commit-row-cache"; Checkpoint?.Invoke("before-queue-publication");
             using var references = await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false);
+            stage = "verify-parent-clock";
             if (publication is not null && !body.Equals(DirectoryPublicationClock.Template(index, keys, sourceHint, queued, version.ChangedTicks)))
                 throw new InvalidDataException("Directory publication metadata or parent clock changed.");
+            stage = "commit-row-cache";
             var result = await index.CommitDirectoryPublicationAsync(queued, draft, publication, nowTicks, token).ConfigureAwait(false);
             stage = "publication-committed"; Checkpoint?.Invoke("queue-published");
             journal?.TryWrite(new(result.Changed ? "directory.queue_published" : "directory.queue_unchanged", "directory-publication")

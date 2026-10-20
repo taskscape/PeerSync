@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using PeerSync.Core.Sync;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
 using PeerSync.Protocol.Records;
@@ -11,7 +12,7 @@ internal static class DirectoryPublicationClock
 {
     // Same non-vector body means the exact original tree/metadata already
     // covered by this publication's existing authority, not a different root.
-    internal static FileRecordBody Template(FolderIndex index, FolderKeys keys, byte[] own, DirectoryPublication queued, long changedTicks)
+    internal static FileRecordBody Template(FolderIndex index, FolderKeys keys, byte[] own, DirectoryPublication queued, long changedTicks, DiagnosticJournal? journal = null)
     {
         var template = VersionView.Open(queued.Template, keys, own);
         var body = queued.ReconstructionOnly
@@ -23,13 +24,20 @@ internal static class DirectoryPublicationClock
         var original = VersionView.Open(prior.Record, keys, own);
         var metadata = original.ExportBody();
         if (metadata.DirectorySnapshotHash.Length != 32) return body;
-        metadata.Vv.Clear(); IReadOnlyDictionary<ulong, ulong> floor = original.Vector;
+        metadata.Vv.Clear(); IReadOnlyDictionary<ulong, ulong> floor = original.Vector; int absorbed = 0;
         foreach (var remote in index.RemotesForPath(queued.Path))
         {
             var version = VersionView.Open(remote.Record, keys, remote.DeviceId); var other = version.ExportBody(); other.Vv.Clear();
-            if (metadata.Equals(other)) floor = VersionVector.Merge(floor, version.Vector);
+            if (metadata.Equals(other))
+            {
+                var next = VersionVector.Merge(floor, version.Vector);
+                if (VersionVector.Compare(next, floor) != VvOrder.Equal) absorbed++;
+                floor = next;
+            }
         }
         if (VersionVector.Compare(floor, original.Vector) == VvOrder.Equal) return body;
+        journal?.TryWrite(new("directory.parent_clock_template", "directory-publication")
+        { SessionId = queued.Version, Level = DiagnosticLevel.Debug, ErrorCode = "same-body-floor", ItemsVisited = absorbed, ItemsChanged = 1 });
         var vector = VersionVector.Merge(body.Vv.ToDictionary(entry => entry.Device, entry => entry.Counter),
             VersionVector.Increment(floor, BinaryPrimitives.ReadUInt64LittleEndian(own)));
         var entries = body.Vv.ToDictionary(entry => entry.Device);
