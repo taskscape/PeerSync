@@ -1858,3 +1858,15 @@ Opened on 2026-10-18. Resilio help-centre articles describe Sync 2.x–3.x behav
 - [Inno Setup licence](https://jrsoftware.org/files/is/license.txt)
 - [Inno Setup help: ArchitecturesAllowed](https://jrsoftware.org/ishelp/topic_setup_architecturesallowed.htm)
 - [Inno Setup help: SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm)
+
+### Metadata-only tombstone progress under directory publication
+
+A staged directory mutation barrier must permit a scheduled authenticated newer
+regular-file tombstone for an already published deleted local file only after
+complete sender-range, case-barrier, bound-root and guarded native-absence proof.
+Keep operation/reference gates and expected-sequence durable application; recheck
+absence after preparation. Native occupants and live/unknown local rows retain
+the barrier. This metadata-only progress can satisfy a child reconstruction's
+causal proof without discarding queues or weakening directory graph/GC proofs.
+See docs/proposals/P1-publication-tombstone-progress.md for the retained regression
+and required controls.
