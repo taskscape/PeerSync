@@ -35,9 +35,35 @@ matching and no implicit registration. The recovery diagnostic contains a
 constant reason/count/session with no root path, block hash, file ID or payload.
 Scale reference refreshes now receive their existing node journal, making
 coverage/recovery reasons visible without changing convergence checks.
-Engine/Storage and both test-project Roslyn checks have no warnings/errors or
-workspace-load warnings. Full repaired-source release/corpus and hosted
-acceptance remain pending; no task is ticked from these focused checks.
+Engine/Storage, both test projects and Benchmarks Roslyn checks have no
+warnings/errors or workspace-load warnings.
+
+Full `build/Verify.ps1 -Runtime win-x64` subsequently passes on committed repair
+dd7059b43b25ff18614d7145211e8851c668a23a, exit 0, manifest duration 629.6409798
+seconds. Fresh actual TRX proves 1565 unit results across nine projects
+(1013 Engine/300 Storage); the strict Simulation scope confirms thirteen
+successful methods, all six retained regressions and connected maintenance.
+Generated smoke passes eight flat/four hierarchy cases. Maintenance retires two
+archives and evicts two blocks while both versions survive. Native probes and
+publishing pass. Fuzz completes all four targets, 210690 seeds in 600.0030007
+actual seconds with zero crashes. `artifacts/p1-capture-recovery-release/`
+snapshots the manifest, actual scope/unit/TRX/raw fuzz evidence and five source-
+bound binary hashes/informational versions. Product/build inputs still match
+the committed repair. Separate console evidence is
+`artifacts/p1-capture-recovery-canonical.log`.
+
+Only after the old process is terminal and its source/binaries/fixture are
+preserved, its clean managed worktree is reused at the committed repair. A
+locked build followed by unchanged-binary `-NoBuild` checks passes 32 files in
+15.4699812 seconds/six rounds and 4096 files in 753.1064081 seconds/29 rounds.
+The latter has 4096 initial/4092 final native files after 24 overwrites/four
+renames/four deletions; all 4120 versions survive, references cover and all
+queues drain. Actual clean source/exit 0, binary hashes and successful fixture
+removal are independently checked, including native absence of both fixtures.
+Evidence is copied to `artifacts/scale-capture-{32,4096}-dd7059b/`.
+The same immutable binaries now run a fresh 100000-file corpus with a twelve-
+hour deadline. This full outcome and updated hosted PR/main acceptance remain
+pending; no P1 gate or task is ticked from local/preflight results.
 
 The old run is preserved as a confirmed nonconvergent diagnostic case. Before
 canceling, the exact executable path, source arguments, PID 13812 and creation
