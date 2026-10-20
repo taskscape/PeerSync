@@ -1581,6 +1581,12 @@ traces for direct replay and promotion to checked-in regression fixtures. Keep
 bounded smoke sampling separate from the mandatory 1,000-case CI and five-day
 gate evidence, and keep case/hierarchy/stale-temp work visible while the initial
 flat-path scenario is expanded.
+Add a separately versioned hierarchical scenario over the public coordinator:
+nested/case/kind/rename/delete operations, recursive visible-tree and native
+loss oracles, complete graph coverage and durable queue drain after healing.
+Preserve flat seed replay; keep bounded smoke distinct from measured 1000-seed
+CI/five-day/100000-file gates. Follow
+`docs/proposals/P1-hierarchical-property-scenarios.md`.
 
 | Layer | What it proves | How |
 | --- | --- | --- |

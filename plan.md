@@ -73,6 +73,7 @@ Newest first. Every row is also reflected in the design doc.
 | Date | Decision | Design doc section |
 | --- | --- | --- |
 | 2026-10-20 | PR #38 review identifies pre-reconstruction metadata loss, legacy-root pass abort, suspended-child wake gaps and receive-before-scan initialization. Reproduce each; retain observed attributes beside immutable originals, defer unavailable sources, rebuild on unblock and pin/bind roots before admitted pages. Batch locally verified fixes before one CI update. | Directory integration hardening |
+| 2026-10-20 | Expand property coverage with a separately versioned hierarchical mode over public coordinators. Require recursive native/loss oracles excluding private/reparse data, deterministic replay, queue drain and graph coverage; preserve flat seeds and separate smoke from measured CI/five-day/100k gates. | Testing strategy: real-engine properties |
 | 2026-10-20 | Activate snapshot staging/publication through public Puller/TransportFolder coordinators after connected/recovery acceptance; leave standalone Scanner legacy because it owns no publication worker. Require direct public-entry regressions, full local verification and CI/main acceptance. | Directory snapshot coordinator activation |
 | 2026-10-20 | Offline-owner RW forwarding preserves bytes but retains received-root queues after child resolution. Add bounded schema-33 causal rebase proof against authenticated original graph members and the local mutation epoch; require exact/dominating local children before guarded FULL RW publication. RO stays unsigned. | Directory snapshot reconstruction |
 | 2026-10-20 | Bound each metadata route to one second inside the source's ten-second deadline so stalled preferred hints cannot starve fallback; caller/source cancellation still stops work. | Directory metadata fetching |
@@ -1802,6 +1803,9 @@ On start-up, stale `*.!psp` files whose record is still needed are kept: their v
     - A [fresh local 1,000-case batch](docs/verification/P1-simulation-current-head-1000-2026-10-19.md) on submitted PR #35 head passes after the review/hierarchy/staging changes: 1,000 distinct seeds, 9,696 ledger versions, 508 actual renames and 940 actual deletions; exit 0 in 12m42s. Flat-path coverage remains separate from expanded scenarios, 1,000 CI cases, five consecutive days and the 100k-file gate.
 
 ### Gate P1
+
+- [ ] **P1.6.2b Hierarchical generated scenarios and recursive loss oracle** [WIP @codex 2026-10-20]
+  - Done when: three-to-seven-node generated nested/case/kind/rename/delete operations heal through public coordinators with identical visible native trees, preserved published versions, complete references and drained queues. Recursive oracle negative controls, seed/mode replay and failure retention pass local/canonical/CI/main checks. Follow the [scenario design](docs/proposals/P1-hierarchical-property-scenarios.md); smoke does not close 1000-seed/five-day/100k gates.
 
 - [ ] All P1 tasks ticked.
 - [ ] Five simulated nodes converge on a 100,000-file corpus with zero lost versions (attach the report).
