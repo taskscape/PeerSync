@@ -317,6 +317,23 @@ for pending application work; orphan expiry must not infer ownership from a
 filename alone. All reference-changing engine entry points must serialize with
 the folder sweep, and cleanup must verify root/file identity, length/hash and
 independent-file state under native guards before deleting known objects.
+**Concurrent capture ownership recovery.** Independent capture owners can race
+to install identical bytes. The losing owner deletes only its own temporary,
+but must retain its verified proof in the pending proof set until the winning
+native object is FULL-durably cataloged. Its subsequent flush can then remove
+the losing proof metadata. A restart may instead find that old temporary absent
+and a different, independently verified final file already committed in the
+same root/hash/length/native-identity catalog entry. Under the existing folder
+coordination and pinned native guards, reconcile only the verified obsolete
+proof metadata; never adopt the replacement from its name/hash alone or delete
+any data. Missing/foreign catalog entries, changed bytes, links, replaced
+temporaries, invalid proofs and reparse paths remain protected. Preserve the
+existing 24-hour policy for actual staged bytes and all reference/loss oracles.
+Use a bounded indexed ownership predicate rather than scanning the entire
+catalog per proof. Add direct two-owner race/restart/native/catalog negative
+controls and sanitized recovery diagnostics. A retained 100000-file fixture
+must not be manually repaired or relabeled as a successful run.
+
 Before policy pruning an indexed archive, FULL-durably record its exact archive
 row, bound root/file identity, hash/length and expiry/cap reason under the verified
 file guard. After native deletion is proven complete, atomically remove the
