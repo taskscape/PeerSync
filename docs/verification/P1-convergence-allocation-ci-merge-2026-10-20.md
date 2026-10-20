@@ -107,6 +107,11 @@ pass; they do not replace the full corpus. The original failing fixture remains
 untouched. P1.2.4 and its reopened ownership descendants stay open until the
 mandatory actual repaired-source corpus evidence is complete.
 
+The earlier timestamp-repair source completes its own
+[100000-file corpus](P1-scale-timestamp-100000-2026-10-20.md), with all 100024
+versions preserved and independent source/binary/cleanup checks. It retains its
+actual earlier revision and does not replace the running repaired-source case.
+
 The new bounded hosted preflight,
 [39439657652](https://github.com/taskscape/PeerSync/actions/runs/39439657652),
 passes all seven jobs on the merged source, workflow number 2, attempt 1.
