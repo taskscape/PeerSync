@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [switch]$SkipRuntimeChecks, [switch]$SkipEngineTests, [switch]$SkipFuzz, [int]$FuzzSeconds = 600)
+param([ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64', [switch]$SkipRuntimeChecks, [switch]$SkipEngineTests, [switch]$SkipSimulation, [switch]$SkipFuzz, [int]$FuzzSeconds = 600)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
@@ -39,7 +39,7 @@ try {
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }
         }
-        & "$PSScriptRoot/Run-Simulation.ps1" -Cases 8 -NoBuild
+        if (-not $SkipSimulation) { & "$PSScriptRoot/Run-Simulation.ps1" -Cases 8 -NoBuild }
         & "$PSScriptRoot/Run-P0.ps1"
         & "$PSScriptRoot/Test-QuicDiagnostics.ps1"
     }
@@ -56,7 +56,7 @@ try {
     $clock.Stop()
     $fuzzDuration = 0
     if ($fuzz) { $fuzzDuration = $FuzzSeconds }
-    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);engineTestsRun=(-not $SkipRuntimeChecks -and -not $SkipEngineTests);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P1';gateP1Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
+    @{status='passed';runtime=$Runtime;runtimeChecks=(-not $SkipRuntimeChecks);engineTestsRun=(-not $SkipRuntimeChecks -and -not $SkipEngineTests);simulationRun=(-not $SkipRuntimeChecks -and -not $SkipSimulation);fuzzSeconds=$fuzzDuration;seconds=$clock.Elapsed.TotalSeconds;phase='P1';gateP1Passed=$false} | ConvertTo-Json | Set-Content "artifacts/verification-$Runtime.json"
 }
 finally {
     if ($fuzz) {

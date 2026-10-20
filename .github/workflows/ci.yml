@@ -16,9 +16,7 @@ jobs:
       matrix:
         runtime: [win-x64, win-arm64]
     runs-on: windows-latest
-    # Hosted hierarchy smoke takes 466s and one fixed case 341s; the 20-minute
-    # x64 job was cancelled during its next fixed case. Preserve all scope.
-    timeout-minutes: ${{ matrix.runtime == 'win-x64' && 40 || 15 }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -32,7 +30,8 @@ jobs:
           $skip = '${{ matrix.runtime }}' -eq 'win-arm64'
           # Server 2022 runs the full Engine suite; Server 2025 omits only
           # the duplicate generic 1,001-conflict capacity stress method.
-          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipEngineTests -SkipFuzz
+          # The boundary job owns the complete Simulation suite alongside fuzz.
+          ./build/Verify.ps1 -Runtime '${{ matrix.runtime }}' -SkipRuntimeChecks:$skip -SkipEngineTests -SkipSimulation -SkipFuzz
       - name: Sign and verify a test EXE with a temporary development identity
         shell: pwsh
         run: ./build/Test-Signing.ps1 -Runtime '${{ matrix.runtime }}'
@@ -58,21 +57,26 @@ jobs:
           retention-days: 7
   fuzz-smoke:
     runs-on: windows-latest
-    timeout-minutes: 15
+    # The unchanged native Simulation suite takes about 32 hosted minutes.
+    # Its independent IO overlaps the required ten-minute CPU boundary fuzz.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - name: Required ten-minute boundary fuzz
+      - name: Required ten-minute boundary fuzz and real-engine simulations
         shell: pwsh
-        run: ./build/Run-Fuzz.ps1 -Seconds 600
+        run: ./build/Run-BoundarySimulation.ps1 -FuzzSeconds 600
       - name: Upload fuzz evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-smoke-evidence
-          path: artifacts/fuzz/
+          path: |
+            artifacts/fuzz/
+            artifacts/simulation/
+            artifacts/tests/simulation/
   service-security:
     strategy:
       fail-fast: false
