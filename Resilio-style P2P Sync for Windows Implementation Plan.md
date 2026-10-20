@@ -822,6 +822,14 @@ canonical ancestry, recovery/root guards and session admission generations stay
 binding. Follow `docs/proposals/P1-directory-review-hardening.md` and reproduce
 the four PR #38 findings before a batched repair.
 
+Automatic directory publication closes its original parent clock over current
+authenticated records with the exact same non-vector body and signed snapshot
+root, then increments the local counter once. It never absorbs a different
+subtree/metadata/spelling as equivalent proof. Shared construction and final
+reference-gated validation must agree on the current same-body clock floor;
+late changes retry. Follow `docs/proposals/P1-directory-parent-clock-repair.md`
+for owned restaging, received reconstruction and quiescence race regressions.
+
 The immutable source's first forwarding device is only a routing hint. Current
 advertisements cannot discover every retained old member payload after parent
 versions advance. Use source/root-bound durable route hints and known-device
