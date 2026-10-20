@@ -57,7 +57,10 @@ and the last permitted workflow number is 7, leaving four bounded attempts
 their results are unverified. Do not manually consume another attempt,
 dispatch a preflight, rerun a day, or auto-extend the ceiling.
 
-The immutable repaired-source full corpus remains active. P1.6.4 and Gate P1
-stay open until five actual consecutive UTC completion dates, authoritative
+The immutable repaired-source full corpus subsequently
+[passes its independent final audit](P1-scale-capture-100000-2026-10-20.md).
+This first complete 1000-seed CI day and merged child/normal-CI acceptance
+close the P1.6.2 property-suite task. P1.6.4 and Gate P1 stay open until five
+actual consecutive UTC completion dates, authoritative
 GitHub conclusions, full artifact/history checks and all other P1 criteria
 are verified. No P2 work starts from this first successful day.
