@@ -43,13 +43,14 @@ public sealed class PullerTests : IDisposable
             Record(index,"dir/sub/big",3,[4,4,4,4]), Record(index,"dir/sub/small",4,[2,2]),
             Record(index,"old",5,deleted:true), Record(index,"gone",6,type:1,deleted:true), Record(index,"gone/child",7,deleted:true)];
         await puller.AnnounceIndexRangeAsync(Peer, 7, Token); await puller.ReceiveIndexAsync(Peer, 0, 7, records, Token);
-        var result = await puller.RunPassAsync(Token); result.Applied.ShouldBe(7); result.Failed.ShouldBe(0); result.Scans.ShouldBe(0); fetched.ShouldBe([2,4]);
+        var result = await puller.RunPassAsync(Token); result.Applied.ShouldBe(7); result.Failed.ShouldBe(0); result.Scans.ShouldBe(1); fetched.ShouldBe([2,4]);
         long Sequence(string path) => index.LocalFiles.Find(path)!.LocalSequence;
         Sequence("dir").ShouldBeLessThan(Sequence("dir/sub")); Sequence("dir/sub").ShouldBeLessThan(Sequence("dir/sub/small"));
         Sequence("dir/sub/small").ShouldBeLessThan(Sequence("dir/sub/big")); Sequence("dir/sub/big").ShouldBeLessThan(Sequence("old"));
         Sequence("gone/child").ShouldBeLessThan(Sequence("gone"));
         File.Exists(Disk("old")).ShouldBeFalse(); Directory.Exists(Disk("gone")).ShouldBeFalse(); index.Needed.Count().ShouldBe(0);
-        index.ReadApplyIntents().ShouldBeEmpty(); result.NextAttemptTicks.ShouldBeNull();
+        index.ReadApplyIntents().ShouldBeEmpty(); index.HasPendingDirectoryPublications().ShouldBeTrue(); result.MoreWork.ShouldBeTrue();
+        var settled = await puller.RunPassAsync(Token); settled.Applied.ShouldBe(0); index.HasPendingDirectoryPublications().ShouldBeFalse(); settled.NextAttemptTicks.ShouldBeNull();
     }
 
     [Fact]
@@ -252,6 +253,8 @@ public sealed class PullerTests : IDisposable
         await puller.AnnounceIndexRangeAsync(Peer,1,Token); await puller.ReceiveIndexAsync(Peer,0,1,[Record(index,"dir",1,type:1,deleted:true)],Token);
         var result=await puller.RunPassAsync(Token); result.Applied.ShouldBe(1); result.Scans.ShouldBe(1);
         File.ReadAllBytes(Disk("dir/unknown")).ShouldBe(Old); index.LocalFiles.Find("dir/unknown")!.Record.ShouldNotBeNull();
+        index.LocalFiles.Find("dir")!.Deleted.ShouldBeTrue(); index.HasPendingDirectoryPublications().ShouldBeTrue();
+        var published = await puller.RunPassAsync(Token); published.Failed.ShouldBe(0); index.HasPendingDirectoryPublications().ShouldBeFalse();
         index.LocalFiles.Find("dir")!.Deleted.ShouldBeFalse(); index.ReadApplyIntents().ShouldBeEmpty();
     }
 
@@ -291,7 +294,7 @@ public sealed class PullerTests : IDisposable
         await using var index=await FolderIndex.OpenAsync(Database,Token); using var puller=Coordinator(index); await puller.RunPassAsync(Token);
         const string invalid="e\u0301"; File.WriteAllBytes(Disk(invalid),Old); puller.RequestScan();
         await puller.ReceiveIndexAsync(Peer,0,1,[Record(index,"good",1,New)],Token);
-        var result=await puller.RunPassAsync(Token); result.Applied.ShouldBe(1); result.Scans.ShouldBe(1);
+        var result=await puller.RunPassAsync(Token); result.Applied.ShouldBe(1); result.Scans.ShouldBe(2);
         index.LocalFiles.ReadAll().Single(r=>r.Path==invalid).Flags.HasFlag(LocalFileState.Unsyncable).ShouldBeTrue();
         File.ReadAllBytes(Disk(invalid)).ShouldBe(Old); File.ReadAllBytes(Disk("good")).ShouldBe(New);
     }

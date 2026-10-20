@@ -381,7 +381,7 @@ public sealed class CaseCoordinationTests : IDisposable
         string directory=Path.Combine(fixture,identity.ToString(System.Globalization.CultureInfo.InvariantCulture)); string root=Path.Combine(directory,"tree"); Directory.CreateDirectory(root);
         var index=await FolderIndex.OpenAsync(Path.Combine(directory,"index.db"),Token); byte[] id=new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(id,identity);
         var access=readOnly?FolderKeys.FromText(keys.ExportReadOnlyText()):null;
-        var clock = new CaseClock(); var engine=new TransportFolder(root,index,access??keys,id,settings:null,timeProvider:clock,journal:null,directorySnapshots:true); await engine.RunPassAsync(Token); return new(root,index,engine,id,access,clock);
+        var clock = new CaseClock(); var engine=new TransportFolder(root,index,access??keys,id,settings:null,timeProvider:clock,journal:null); await engine.RunPassAsync(Token); return new(root,index,engine,id,access,clock);
     }
     private sealed record Node(string Root,FolderIndex Index,TransportFolder Engine,byte[] Id,FolderKeys? Access,CaseClock Clock) : IAsyncDisposable
     { public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); await Index.DisposeAsync(); Access?.Dispose(); } }

@@ -52,7 +52,7 @@ public sealed class Puller : IDisposable
     public Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
         FolderSettings? settings = null, TimeProvider? timeProvider = null, DiagnosticJournal? journal = null)
-        : this(rootPath, index, keys, ownDevice, fetch, settings, timeProvider, journal, directorySnapshots: false) { }
+        : this(rootPath, index, keys, ownDevice, fetch, settings, timeProvider, journal, directorySnapshots: true) { }
 
     internal Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,

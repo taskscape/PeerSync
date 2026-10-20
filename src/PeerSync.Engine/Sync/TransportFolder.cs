@@ -31,7 +31,7 @@ public sealed class TransportFolder : IAsyncDisposable
 
     public TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         FolderSettings? settings = null, TimeProvider? timeProvider = null, DiagnosticJournal? journal = null)
-        : this(rootPath, index, keys, ownDevice, settings, timeProvider, journal, directorySnapshots: false) { }
+        : this(rootPath, index, keys, ownDevice, settings, timeProvider, journal, directorySnapshots: true) { }
 
     internal TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots)
