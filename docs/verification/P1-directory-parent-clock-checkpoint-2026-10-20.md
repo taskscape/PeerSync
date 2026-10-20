@@ -48,3 +48,12 @@ failures, one shrink and three skipped samples. It must not be called a green
 20-case batch. No new PR #38 push/CI run or merge occurred during these local
 repairs. All hierarchy, merged/CI, 1000-seed/five-day/100000-file, installed
 service, LAN and NAT acceptance requirements remain open.
+
+A subsequent checked-in two-case root-set baseline now fails for both owned
+and received roots in `artifacts/p1-directory-root-set-baseline.log` (MTP 2,
+1.398 seconds). Both authenticated old graphs are available, current child
+versions dominate their old members, but the narrow clock helper ignores the
+alternate root and signs counters 3/1 instead of 101. These are intentional
+failing acceptance regressions for the next proof implementation. The 1512-case
+green canonical run above predates these two new cases; the latest test tree
+is not claimed green. No production relaxation was made to satisfy them.
