@@ -54,6 +54,26 @@ public sealed partial class DirectorySnapshotCaptureTests
     }
 
     [Fact]
+    public async Task MetadataRouteCandidatesStayWithinOnePageForTheEntireSourceAttempt()
+    {
+        WriteFiles("a", "b"); await using var producer = await FolderIndex.OpenAsync(Database, Token);
+        var original = await PrepareProjection(producer, buildGraph: false); var source = DirectoryMetadataSources.FromVersion(VersionView.Open(original, keys, device))!;
+        await using var receiver = await OpenMetadataReceiver(keys);
+        await receiver.Devices.UpsertAsync(Enumerable.Range(2, 19).Select(value => new DeviceRow([(byte)value, .. new byte[31]])).ToArray(), Token);
+        await receiver.AdmitDirectoryMetadataSourcesAsync(receiver.Meta.Find("_root-identity")!.Value!, [source], DateTime.UtcNow.Ticks, Token);
+        using var published = new PublishedBlocks(Root, producer); var tried = new List<int>();
+        var worker = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice, TimeProvider.System, (peer, hash, length, token) =>
+        {
+            tried.Add(peer.Span[0]);
+            if (peer.Span[0] == 3 || peer.Span[0] == 2 && hash.Span.SequenceEqual(source.Hash))
+                return ValueTask.FromResult<ReadOnlyMemory<byte>>(published.TryRead(hash.Span, length, token)!);
+            throw new IOException("This peer lacks that metadata node.");
+        });
+        (await worker.RunAsync(token: Token)).Completed.ShouldBe(1); tried.ShouldContain(3); tried.ShouldNotContain(value => value > 7);
+        receiver.ReadDirectoryMetadataSource(source.SourceId).ShouldBeNull();
+    }
+
+    [Fact]
     public async Task MetadataStalledPreferredHintLeavesTimeForAWorkingForwarder()
     {
         WriteFiles("a"); await using var producer = await FolderIndex.OpenAsync(Database, Token);

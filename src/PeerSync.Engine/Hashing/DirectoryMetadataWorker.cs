@@ -58,6 +58,7 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
             using var activity = new Activity("directory-metadata").SetIdFormat(ActivityIdFormat.W3C).Start();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(10));
             byte[] route = job.Source.RouteHint.ToArray(); byte[]? routeAfter = job.RouteAfter?.ToArray();
+            DirectoryMetadataRoutes? routePage = null;
             try
             {
                 var version = VersionView.Open(job.Source.Record, keys, job.Source.RouteHint);
@@ -79,8 +80,8 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
 
                 async ValueTask<ReadOnlyMemory<byte>> Fetch(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellation)
                 {
-                    var page = index.ReadDirectoryMetadataRoutes(root, routeAfter); routeAfter = page.NextAfter;
-                    var candidates = new[] { route, version.ModifiedBy.ToArray() }.Concat(page.Devices)
+                    if (routePage is null) { routePage = index.ReadDirectoryMetadataRoutes(root, routeAfter); routeAfter = routePage.NextAfter; }
+                    var candidates = new[] { route, version.ModifiedBy.ToArray() }.Concat(routePage.Devices)
                         .Where(candidate => !candidate.AsSpan().SequenceEqual(own)).DistinctBy(Convert.ToHexString);
                     foreach (var candidate in candidates)
                     {
