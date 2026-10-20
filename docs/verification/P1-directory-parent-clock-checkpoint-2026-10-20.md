@@ -1,5 +1,11 @@
 # Directory parent clock checkpoint: integration still open
 
+Historical checkpoint. The subsequent schema-35 repair passes both focused
+baselines and all three retained hierarchy seeds; see
+[current root-set verification](P1-directory-parent-root-set-2026-10-20.md).
+The failures and source-specific measurements below remain the original
+baseline evidence, not current results.
+
 The exact-original-body repair closes newer known parent clock knowledge
 before one local publication increment. It validates the same deterministic
 body again under the final reference gate. Original/source/native/rebase

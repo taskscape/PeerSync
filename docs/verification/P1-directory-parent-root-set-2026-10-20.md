@@ -46,6 +46,17 @@ visible files/indexed archives. Scenario time 83.231 seconds; MTP exit 0 in
 `artifacts/p1-hierarchical-root-set-first.log` and
 `artifacts/simulation/hier1044729930-root-set/`.
 
+Both other retained hierarchy seeds also pass on the same production source:
+1648781653 (seven nodes, nine operations, 18 ledger versions, ten rounds,
+55.358 scenario seconds, MTP exit 0 in 56.559 seconds) and 1878823561 (seven
+nodes, 18 operations, 18 ledger versions, 11 rounds, 62.477 scenario seconds,
+MTP exit 0 in 63.573 seconds). Both report zero staging files and pass the
+same native/queue/reference/version-preservation oracle. Evidence there:
+`artifacts/p1-hierarchical-root-set-second.log`,
+`artifacts/p1-hierarchical-root-set-third.log`,
+`artifacts/simulation/hier1648781653-root-set/` and
+`artifacts/simulation/hier1878823561-root-set/`.
+
 The canonical verifier `build/Verify.ps1 -Runtime win-x64 -SkipFuzz` passes
 with exit 0 in 187.6505745 seconds on the production source above. All 1534
 cases pass (983 Engine, 299 Storage), plus eight flat generated scenarios,
@@ -55,8 +66,8 @@ locally; the previous green remote head does not validate this repair.
 Evidence: `artifacts/p1-parent-root-set-canonical.log`,
 `artifacts/verification-win-x64.json` and `artifacts/tests/`.
 
-Remaining retained-seed replays, expanded hierarchy batch, CI submission and
-merge are still pending at this checkpoint. The 1000-seed
+Expanded hierarchy batch, CI submission and merge are still pending at this
+checkpoint. The 1000-seed
 CI/five-day and five-node 100000-file gates, installed service, LAN and native
 NAT validation remain separate and unverified. No new remote CI run was
 started for these local repairs.
