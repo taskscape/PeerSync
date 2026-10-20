@@ -8,6 +8,10 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using PeerSync.Crypto.Chunking;
 
+if (args is ["--scale", var scaleFiles, var scaleSeconds, var scaleOutput, var scaleRevision])
+    return await PeerSync.Benchmarks.ScaleScenario.RunAsync(int.Parse(scaleFiles, CultureInfo.InvariantCulture), int.Parse(scaleSeconds, CultureInfo.InvariantCulture), scaleOutput, scaleRevision);
+if (args is ["--scale-oracle", var oracleOutput, var oracleRevision])
+    return await PeerSync.Benchmarks.ScaleScenario.RunAsync(0, 60, oracleOutput, oracleRevision, oracleOnly: true);
 if (args is ["--micro"])
 {
     BenchmarkRunner.Run<PeerSync.Benchmarks.ChunkingBenchmark>();
