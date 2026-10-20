@@ -1907,3 +1907,13 @@ shard and report jobs require github.run_attempt=1 before runner allocation.
 Daily and standalone history validation independently require integer attempt 1.
 Explicit manual preflight reruns remain supported and non-gating. See
  docs/proposals/P1-campaign-rerun-budget-repair.md for regression controls.
+
+Hosted rerun validation uses a separate manual Linux-only allocation probe.
+Its plan/shard/report allocation expressions must exactly match the campaign
+workflow, with drift checked in normal CI. A successful synthetic planner emits
+campaign or preflight outputs; one deliberate first-attempt shard failure permits
+GitHub's failed-job rerun while reusing that planner. Attempt two must allocate
+no campaign shard/report runners, whereas preflight must execute and succeed.
+Retain authoritative per-attempt job/step metadata and cached planner identity.
+These diagnostic runs never execute product tests, allocate Windows runners,
+modify activation variables, consume campaign run numbers or count as days.

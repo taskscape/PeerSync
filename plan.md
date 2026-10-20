@@ -72,6 +72,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-20 | Complete the remaining hosted cached-planner rerun verification with a separate manual Linux-only probe using exact campaign allocation expressions and CI drift controls. Deliberate diagnostic failure enables failed-job reruns; require zero campaign allocations on attempt two and positive preflight reuse, preserving per-attempt metadata. No Windows campaign/day budget is consumed. | Hosted campaign rerun allocation validation |
 | 2026-10-20 | User explicitly approves narrow clock validation phasing: retain engine/in-memory admission, verified real local pipe and rendered UI in P1; defer only actual installed-service and authenticated production-transport integration to mandatory P2.5.7/Gate P2. Keep unavailable status, security and native evidence requirements unchanged. | Clock integration validation phasing |
 | 2026-10-20 | PR #39 review identifies failed-job reruns reusing successful planner outputs. Require first attempt before every campaign job allocation and independently in daily/history evidence, preserving explicit preflight reruns. Reproduce uniform-rerun and cached-plan controls before repair. | Campaign first-attempt allocation and evidence |
 | 2026-10-20 | Close the explicit P1 cleanup-simulation gap with three public connected peers, a delayed needed transfer, real archive expiry and block eviction under injected clocks, then unchanged native/global version oracles. Include it in every campaign baseline. | Connected production maintenance validation |
@@ -1807,6 +1808,8 @@ unneeded objects; an unfamiliar `*.!psp` name alone never authorizes deletion.
   - [ ] **P1.6.4a Campaign rerun resource-bound review hardening** [WIP @codex 2026-10-20]
     - Done when: cached successful planner outputs cannot allocate campaign plan/shard/report runners on later attempts; daily/history reject uniformly rerun evidence, manual preflight reruns remain non-gating, and failing/fixed allocation/evidence controls plus CI/main acceptance pass. Follow the [rerun repair design](docs/proposals/P1-campaign-rerun-budget-repair.md).
     - The [review repair checkpoint](docs/verification/P1-campaign-rerun-budget-2026-10-20.md) reproduces eight failing assertions/subcases, then passes all 26 planner/evidence/allocation controls, pre-build campaign rejection and a real seven-method attempt-2 preflight. Updated CI/main remains pending; schedules stay inactive.
+    - [ ] **P1.6.4a1 Hosted cached-planner allocation proof** [WIP @codex 2026-10-20]
+      - Done when: the [manual Linux probe](docs/proposals/P1-hosted-rerun-allocation-proof.md) shares exact production allocation expressions with drift controls, actual failed-job reruns preserve the successful planner, campaign attempt two executes no fresh shard/report steps and preflight attempt two succeeds. Retain actual source/run/attempt/job/step metadata and green PR/main proof; diagnostics never count as campaign dates or consume Windows campaign attempts.
 
 ### Gate P1
 
