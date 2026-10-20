@@ -62,3 +62,23 @@ same-body and different-metadata/root negative controls. Rerun both saved
 hierarchy failures, route seed 1878823561, a measured expanded batch and the
 canonical suite before one CI submission. Do not tick P1 or multi-node gates
 from these local checkpoints.
+
+Implementation witness details: schema 35 keeps proof state independently of
+transient queue restaging, while binding every operation to the exact current
+queue version/local source. Direct-child local-table triggers maintain a
+per-proof causal epoch (including flags, readiness, identities and tombstones).
+A separate remote-parent revision invalidates discovery, not verified tree
+prefixes. Discovery reads at most 32 remote envelopes/8 MiB per page and uses a
+persisted generation/cursor. It must finish at the same remote revision before
+publication; vector-only restarts retain per-root verified prefixes. A changed
+local original root restarts root discovery. Final body construction still
+rechecks current clocks under the reference gate.
+
+Rebinding the global capture epoch is allowed only after the exact live child
+input hash is revalidated and the direct-child causal epoch remains unchanged.
+This prevents readiness/tombstone changes with unchanged live signed hashes
+from reusing an old proof. Representative roots remain held across queue
+restaging; release them on successful publication or bounded stale-proof
+cleanup when no queue remains. Root representatives and discovery pages use
+existing capacity/byte backpressure conventions. No proof is accepted from an
+incomplete discovery generation, retiring graph or changed queue/native source.
