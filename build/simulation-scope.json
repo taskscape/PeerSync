@@ -1,0 +1,19 @@
+{
+  "schema": "peersync-simulation-scope-v1",
+  "prefix": "PeerSync.Simulation.RealEngineProperties.",
+  "retainedSeeds": [
+    1044729930,
+    1583987140,
+    1648781653,
+    1878823561
+  ],
+  "baselineMethods": [
+    "ConnectedMaintenanceExpiresArchivesAndBlocksWithoutLosingDelayedPeerVersions",
+    "GeneratedFlatPathCasesConvergeAndPreserveEveryPublishedPayload",
+    "GeneratedHierarchicalCasesConvergeAndPreservePublishedNestedPayloads",
+    "Regression1146310622ParkedInternalStagingDoesNotPreventUserTreeConvergence",
+    "LossOracleRejectsPrivateCacheAloneAndAcceptsReconstructedArchive",
+    "RecursiveLossOracleFindsNestedUserBytesButRejectsPrivateCachesUntilArchived",
+    "RecursiveOracleNeverCountsAnUnindexedPrivateCopyOrAReparseFile"
+  ]
+}

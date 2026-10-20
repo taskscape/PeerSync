@@ -62,6 +62,9 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
+      - name: Campaign planner and evidence controls
+        shell: pwsh
+        run: python -m unittest discover -s tests -p 'campaign_*_test.py' -v
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json

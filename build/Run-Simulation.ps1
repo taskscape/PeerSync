@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateRange(1,10000)][int]$Cases = 1000, [ValidateRange(1,10000)][int]$HierarchicalCases = 4, [switch]$NoBuild)
+param([ValidateRange(1,10000)][int]$Cases = 1000, [ValidateRange(1,10000)][int]$HierarchicalCases = 4, [switch]$NoBuild, [switch]$SkipRetainedRegressions)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $previousArtifacts = $env:PEERSYNC_SIMULATION_ARTIFACTS
@@ -21,7 +21,9 @@ try {
     $env:PEERSYNC_SIMULATION_CASE = $null
     $env:PEERSYNC_SIMULATION_HIERARCHY_CASES = $HierarchicalCases.ToString([Globalization.CultureInfo]::InvariantCulture)
     $env:PEERSYNC_SIMULATION_HIERARCHY_CASE = $null
-    & dotnet test --project tests/PeerSync.Simulation -c Release --no-build --report-trx --results-directory artifacts/tests/simulation
+    $testArguments = @('test','--project','tests/PeerSync.Simulation','-c','Release','--no-build','--report-trx','--results-directory','artifacts/tests/simulation')
+    if ($SkipRetainedRegressions) { $testArguments += @('--filter-not-method','*RetainedHierarchicalRegressions*') }
+    & dotnet @testArguments
     if ($LASTEXITCODE -ne 0) { throw "Real-engine simulation failed; evidence: $env:PEERSYNC_SIMULATION_ARTIFACTS" }
     $summaryPath = Join-Path $env:PEERSYNC_SIMULATION_ARTIFACTS summary.json
     $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json

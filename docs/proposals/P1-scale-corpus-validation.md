@@ -47,3 +47,25 @@ then measure intermediate scale before the full 100000-file run. Keep every
 smaller run labeled with its actual file count and `gateP1Passed=false`.
 Only a fully completed 100000-file report can satisfy the corpus line; it does
 not close remaining P1 tasks, 1000-seed/five-day CI or external P2/P4 checks.
+
+Implement the opt-in runner in the existing PeerSync.Benchmarks console,
+invoked by `build/Run-Scale.ps1` with an explicit file count and deadline.
+This reuses the existing build/restore graph and adds no CI job or default
+large test. Give this test console internal access only for guarded native
+oracles, while all replication uses public TransportFolder/peer APIs. Use
+five RW peers, bounded index pages and engine passes, and complete signed
+initial convergence before partitioned conflicting overwrites, renames and
+deletions. Keep expected old/new payloads independent of private block caches.
+Report actual corpus and mutation counts separately. An explicit native
+oracle self-check must reject an omitted nested file, unindexed internal
+copy and reparse alias before any large run is accepted. Successful fixtures
+may be removed only after validating the exact generated temporary root and
+ownership marker; failures retain their complete fixture without an enormous
+automatic ZIP.
+
+Derive this runner's synthetic folder keys from a versioned public label and
+its generated owner marker, matching the hierarchical harness's public test
+key approach. This lets a retained generated-only database be inspected after
+process exit without putting actual keys in diagnostic events or bundles.
+Document the derivation and prohibit these keys for any real folder. Normal
+production key creation and authorization remain unchanged.
