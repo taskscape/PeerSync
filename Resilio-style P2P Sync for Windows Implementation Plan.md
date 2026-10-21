@@ -1611,25 +1611,35 @@ then checks byte-identical visible trees after healing and searches current,
 archive and conflict bytes for every recorded version. Private block caches
 alone do not count as preserved user versions. Save failing cases and operation
 traces for direct replay and promotion to checked-in regression fixtures. Keep
-bounded smoke sampling separate from the mandatory 1,000-case CI and five-day
+bounded smoke sampling separate from the mandatory 1,000-case CI and two-day
 gate evidence, and keep case/hierarchy/stale-temp work visible while the initial
 flat-path scenario is expanded.
 Add a separately versioned hierarchical scenario over the public coordinator:
 nested/case/kind/rename/delete operations, recursive visible-tree and native
 loss oracles, complete graph coverage and durable queue drain after healing.
 Preserve flat seed replay; keep bounded smoke distinct from measured 1000-seed
-CI/five-day/100000-file gates. Follow
+CI/two-day/100000-file gates. Follow
 `docs/proposals/P1-hierarchical-property-scenarios.md`.
 
-Gate P1's thousand-seed/five-day evidence uses a bounded opt-in campaign,
+Gate P1's thousand-seed/two-day evidence uses a bounded opt-in campaign,
 separate from PR smoke and the local 100000-file corpus. Pin one green source,
 split 1000 flat seeds across five Windows shards, add one hierarchy sample per
-shard and run the three retained hierarchy regressions once per day. Verify
-actual unique counts, complete native/queue/reference/loss oracles and five
+shard and run all six retained hierarchy regressions once per day. Verify
+actual unique counts, complete native/queue/reference/loss oracles and two
 consecutive UTC completion dates; do not claim 1000 hierarchical cases from
 these explicit counts. Scheduling starts disabled and activation permits only
-five attempts, with no automatic budget extension. Follow
+two attempts, with no automatic budget extension. Follow
 `docs/proposals/P1-bounded-ci-campaign.md`.
+
+On 2026-10-21 the user explicitly changes the required consecutive UTC dates
+from five to two. This changes the calendar acceptance policy only: each day
+still requires 1000 distinct flat seeds, five hierarchy samples, all retained
+regressions, maintenance and every production oracle. Existing actual October
+20/21 runs may qualify on their unchanged green source pin after independent
+artifact and authoritative GitHub audits. A policy-only history-validator
+update does not relabel or reset those tested binaries. Reduce the active
+campaign ceiling to its second attempt and retire activation/scheduling after
+acceptance. See `docs/requirements/P1-two-day-campaign.md`.
 
 | Layer | What it proves | How |
 | --- | --- | --- |
@@ -1943,7 +1953,7 @@ remains in its existing service phase; this test invokes the production worker.
 
 ### Campaign first-attempt allocation and evidence
 
-The five-attempt campaign resource bound applies at each job allocation boundary,
+The two-attempt campaign resource bound applies at each job allocation boundary,
 including failed-job reruns that reuse successful planner outputs. Campaign plan,
 shard and report jobs require github.run_attempt=1 before runner allocation.
 Daily and standalone history validation independently require integer attempt 1.
