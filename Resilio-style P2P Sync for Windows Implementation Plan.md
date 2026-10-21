@@ -145,6 +145,31 @@ key strings, which cannot be reliably erased from managed memory.
 
 A folder can optionally require approval: unknown DeviceIds are held as Pending until approved in the UI, like Resilio's "Approve all peers".
 
+P2 transport implementation uses a single mutually authenticated peer connection
+with bounded control requests on stream 0, a persistent bidirectional index
+stream per admitted folder and a bounded pool of short-lived block streams.
+Both peers can initiate requests. Hello carries request_id/response and at
+most 256 announced FolderIds; its wire nonce and certificate identity stay
+fixed for the connection while UTC samples refresh. The adapter supplies
+configured device/version text and preserves the engine's UTC sample.
+FolderAuth requests have request IDs; FolderAuthResult includes the responder's
+direction-bound proof and the matching request ID. Neither peer creates an
+engine handler before validating folder proofs and local pin/approval policy.
+Index queries/responses carry request IDs; zero denotes an unsolicited update
+or the initial folder-stream binder. The lower certificate DeviceId opens the
+folder index stream, preventing duplicate streams. All readers have one owner,
+writes are serialized, pending work is bounded and cancellation drains before
+handler/key/certificate ownership is released. Shared diagnostic session IDs
+derive from the ordered certificate identities and connection nonces, without
+logging keys, FolderIds, paths or packet bodies.
+
+Direction-bound RW authentication signs "psp1 rw-auth" followed by sender and
+receiver certificate DeviceIds, sender and receiver nonces and FolderId.
+The ordinary/RO MACs use their existing distinct labels and derived keys.
+Certificate validation requires current P-256 device certificates and TLS 1.3
+with ALPN psp/1; folder proofs and optional pins establish authorization for
+self-signed peers. Clear exported auth-key buffers after proof operations.
+
 ### Messages
 
 P2 fixes the wire type numbers as Hello=1, FolderAuth=2, FolderAuthResult=3,

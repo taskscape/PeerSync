@@ -74,6 +74,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-21 | Start real QUIC transport with mutual TLS certificate identity, direction-bound folder proofs and pin/approval admission. Use bounded bidirectional control correlation, fixed connection nonces, per-folder elected index streams and owned block streams; drain requests before handler disposal. Engine UTC samples remain fresh while wire identity/nonce are transport-bound. | Connection and handshake |
 | 2026-10-21 | Define P2 ingress bounds and certificate-identity violation policy: authenticate folder context, verify original record signatures before parsing, preserve engine metadata/chunk invariants, cap index/request/bitmap/block sizes and close with a reason while adding a peer strike. Keep payloads/paths/keys out of errors. | Protocol specification: Messages |
 | 2026-10-21 | Start P2 with fixed PSP/1 type numbers 1..12, canonical body-length varints/16-MiB cap, fragmented PipeReader framing and explicit after/last sequence cursors. Add complete message schemas without changing signed bytes; cover malformed/truncated/canceled input and fuzz framing alongside existing targets. Message semantics/authentication remain the next protocol/transport tasks. | Protocol specification: Messages |
 | 2026-10-21 | User explicitly approves deferring the hosted CI timing blocker and continuing implementation. Permit the requirement/tooling merge and qualified Gate P1 acceptance using complete unchanged-source correctness evidence; retain failed/incomplete CI, every test/oracle and complete verification before release. Stop performance tuning and proceed to P2. | Correctness-first implementation phasing; docs/proposals/P1-correctness-first-implementation-phasing.md |
@@ -1945,7 +1946,7 @@ static bool TryReadVarint(ref SequenceReader<byte> r, out ulong value)
 
 ### P2.2 Transport and handshake
 
-- [ ] **P2.2.1 QUIC transport** (`PeerSync.Net/Quic/`)
+- [ ] **P2.2.1 QUIC transport** (`PeerSync.Net/Quic/`) [WIP @codex 2026-10-21]
   - Done when: the listener and dialler from 6.1 run with stream 0 for control, one stream per folder index, and a pool of block-request streams. Connections close cleanly with `Close {reason}`.
 - [ ] **P2.2.2 TCP plus TLS 1.3 fallback** (`PeerSync.Net/Tcp/`)
   - Done when: TCP listens on the same port number as QUIC. Each peer gets one control connection plus up to 3 data connections, each with its own `SslStream` and the same certificate rules as QUIC.
