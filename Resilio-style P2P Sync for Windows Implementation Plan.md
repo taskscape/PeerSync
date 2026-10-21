@@ -2024,6 +2024,25 @@ controls/full execution and actual PR/main CI remain mandatory; this runner-only
 change does not create a new thousand-seed campaign or waive any acceptance.
 See docs/proposals/P1-bounded-ci-simulation-cohorts.md.
 
+### Workspace NTFS Simulation fixtures
+
+Run 39598885501 proves two cohorts alone do not meet the hosted budget: all
+seven baseline methods pass, but five retained cases consume almost forty
+minutes before the last case is stopped at the shared deadline. There is no
+new failed product assertion. Preserve that failed result and all prior proof.
+
+Keep unchanged Simulation sources/oracles and run each cohort with child-only
+TMP/TEMP pointing to a unique workspace-owned NTFS directory. Record actual
+original/selected paths, filesystem/volume information and small Flush(true)
+measurements on both locations. Verify a fresh child resolves the selected
+temporary path before executing tests. Neither a particular drive letter nor
+a speedup is assumed: GitHub images/storage can change, and hosted timings
+must establish the result. Keep FULL/native durability, all thirteen methods,
+600-second fuzz, five jobs and existing time limits. The default campaign
+runner and accepted dates remain unchanged. Never use a RAM disk, disable
+flush/security or alter user/global temporary environment settings.
+See docs/proposals/P1-workspace-ntfs-simulation-fixtures.md.
+
 ### Subtree deletion and preserved-copy convergence
 
 PR #41 CI generates hierarchy seed 794669444: subtree deletion and later
