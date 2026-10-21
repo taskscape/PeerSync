@@ -1641,6 +1641,17 @@ update does not relabel or reset those tested binaries. Reduce the active
 campaign ceiling to its second attempt and retire activation/scheduling after
 acceptance. See `docs/requirements/P1-two-day-campaign.md`.
 
+The user also explicitly approves the reporting-only exception for October
+21 run 39582029908. Its planner and all five hosted test jobs pass on attempt
+1 with complete source/binary/method/count/date evidence; only the final
+reporter is denied by the Actions budget before runner allocation (ID 0,
+no steps). Accept the report reconstructed by the exact pinned-source daily
+verifier while preserving the failed overall workflow and its original
+annotation. This exception does not cover failed tests, missing evidence,
+reruns, mixed sources or an executed failing reporter. Ordinary merged
+PR/main CI remains required for the tooling change. See
+`docs/proposals/P1-two-day-report-budget-recovery.md`.
+
 | Layer | What it proves | How |
 | --- | --- | --- |
 | Unit | Key chain and checksums, version-vector comparison, ignore matcher, path rules, FastCDC boundaries, conflict naming | `xunit.v3` with fixed test vectors |

@@ -1,7 +1,8 @@
-# Proposed reporting-only recovery for October 21
+# Approved reporting-only recovery for October 21
 
-Status: proposed, pending user approval. The user has already approved the
-two-day duration; this separate proposal concerns the hosted reporter's
+Status: explicitly approved by the user on 2026-10-21: "Accept verified local
+report (Recommended)". The user has already approved the two-day duration;
+this separate approval concerns the hosted reporter's
 budget-denied startup, not test execution or calendar duration.
 
 The campaign runbook requires reports from distinct successful run IDs and
@@ -20,7 +21,7 @@ Both real UTC dates pass the updated two-report history check, with the same
 green merged source and identical actual Simulation binaries. No data or
 case count is synthesized.
 
-Proposed narrow exception: accept this locally reconstructed reporting
+Approved narrow exception: accept this locally reconstructed reporting
 result as the October 21 campaign test date only after authoritative audit
 proves the planner and every required hosted test job succeeded on attempt
 1, full artifact/method/source/count/date checks pass, and the sole failure
@@ -35,7 +36,7 @@ product campaign is dispatched and no ceiling is extended. Approval permits
 recording the reporting exception and retiring this completed two-attempt
 campaign; it does not waive budget-blocked validation of the new tooling.
 
-Alternative: require a separately hosted recovery report after the Actions
+Alternative not selected: require a separately hosted recovery report after the Actions
 budget is restored. Preserve the original attempt and use the same actual
 test artifacts; do not rerun the thousand-seed jobs merely to regenerate
 reporting. The existing campaign rerun guard intentionally prevents treating
