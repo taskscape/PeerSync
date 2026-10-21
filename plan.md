@@ -1886,8 +1886,10 @@ Goal: real PCs on one LAN, the engine inside a Windows service, and a CLI to dri
 
 - [ ] **P2.1.1 `.proto` files and frame codec** (`PeerSync.Protocol/`) [WIP @codex 2026-10-21]
   - Done when: every message in the design doc's message table is defined. Frames are `varint length ‖ type byte ‖ body`, with a 16 MiB maximum. The codec handles frames split across reads (8.1) and is fuzzed.
+  - [Local implementation/validation](docs/verification/P2-protocol-and-validation-2026-10-21.md): all twelve families, canonical bounded framing, segmented/partial/EOF/cancellation/disposal controls and expanded fuzz pass. Complete canonical verification passes 1612 unit cases, thirteen Simulation methods, native/probe/publishing and 600-second five-target fuzz. Merge/review and real transport integration remain open.
 - [ ] **P2.1.2 Message validation** (`PeerSync.Protocol/Validation/`) [WIP @codex 2026-10-21]
   - Done when: limits are enforced: 1,000 records per `IndexUpdate`, 64 block requests per frame, path rules on every record. A violation closes the connection with a reason code and adds a strike against that DeviceId.
+  - The same [canonical report](docs/verification/P2-protocol-and-validation-2026-10-21.md) proves pre-allocation limits, verified original signatures, folder/metadata/chunk/path bounds and a real loopback close/reason/identity-strike control. Actual TLS/folder proof binding is retained for P2.2, not inferred from the supplied-identity guard test.
 
 ### 8.1 Code: frame reader over `PipeReader` (P2.1.1)
 
