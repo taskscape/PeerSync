@@ -162,6 +162,23 @@ last_seq so complete reviewed ranges can include unpublished sequence gaps.
 P2 message schemas supplement, rather than rewrite, original signed bodies.
 Frame fuzz adds coverage alongside all four existing boundary targets.
 
+P2 ingress validation is separate from structural Protobuf parsing. Require
+protocol version 1, 32-byte Hello identity/nonce, valid nonzero UTC ticks,
+single-line strict UTF-8 device/client names capped at 128/64 bytes, and
+known role/decision/reason values. Folder-scoped post-handshake messages
+require the authenticated folder context, not an identity/key from the body.
+Enforce 1000 ordered index records and 64 block requests per frame, signed
+64-byte signatures, reviewed sequence ranges within Int64, and existing path,
+version metadata, chunk class/hash/length/total rules. Verify original signed
+bytes before opening FileRecordBody; forwarding preserves those exact bytes.
+Availability bitmaps are capped at 64 KiB (more bits than can be represented
+by a legal 16-MiB signed chunk list). Data blocks are at most the class-2
+8-MiB maximum and must match their BLAKE3 digest; response/request matching
+and folder permissions remain mandatory in the transport/transfer layer.
+Protocol violations add a strike to the certificate-derived device identity
+and close the owned connection with a reason, even if recording a strike
+fails. Error messages contain safe codes, not records, paths or keys.
+
 Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`. Stream 0 is control. Each folder gets one index stream. Block requests use a pool of short-lived streams, so one slow request never blocks another.
 
 | Message | Purpose |

@@ -74,6 +74,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-21 | Define P2 ingress bounds and certificate-identity violation policy: authenticate folder context, verify original record signatures before parsing, preserve engine metadata/chunk invariants, cap index/request/bitmap/block sizes and close with a reason while adding a peer strike. Keep payloads/paths/keys out of errors. | Protocol specification: Messages |
 | 2026-10-21 | Start P2 with fixed PSP/1 type numbers 1..12, canonical body-length varints/16-MiB cap, fragmented PipeReader framing and explicit after/last sequence cursors. Add complete message schemas without changing signed bytes; cover malformed/truncated/canceled input and fuzz framing alongside existing targets. Message semantics/authentication remain the next protocol/transport tasks. | Protocol specification: Messages |
 | 2026-10-21 | User explicitly approves deferring the hosted CI timing blocker and continuing implementation. Permit the requirement/tooling merge and qualified Gate P1 acceptance using complete unchanged-source correctness evidence; retain failed/incomplete CI, every test/oracle and complete verification before release. Stop performance tuning and proceed to P2. | Correctness-first implementation phasing; docs/proposals/P1-correctness-first-implementation-phasing.md |
 | 2026-10-21 | User directs implementation to focus on correctness and completion, stopping further CI performance tuning after the extended investigation. Drop the unimplemented fixture-storage optimization, retain all correctness evidence and the actual hosted timeout, and seek only the explicit narrow gate exception needed to continue P2 under this checklist's strict phase rule. | Workspace NTFS Simulation fixtures; docs/proposals/P1-correctness-first-implementation-phasing.md |
@@ -1885,7 +1886,7 @@ Goal: real PCs on one LAN, the engine inside a Windows service, and a CLI to dri
 
 - [ ] **P2.1.1 `.proto` files and frame codec** (`PeerSync.Protocol/`) [WIP @codex 2026-10-21]
   - Done when: every message in the design doc's message table is defined. Frames are `varint length ‖ type byte ‖ body`, with a 16 MiB maximum. The codec handles frames split across reads (8.1) and is fuzzed.
-- [ ] **P2.1.2 Message validation** (`PeerSync.Protocol/Validation/`)
+- [ ] **P2.1.2 Message validation** (`PeerSync.Protocol/Validation/`) [WIP @codex 2026-10-21]
   - Done when: limits are enforced: 1,000 records per `IndexUpdate`, 64 block requests per frame, path rules on every record. A violation closes the connection with a reason code and adds a strike against that DeviceId.
 
 ### 8.1 Code: frame reader over `PipeReader` (P2.1.1)
