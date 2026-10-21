@@ -2004,6 +2004,26 @@ original author boundaries. The direct same-body fallback stays strict. Version 
 persisted witnesses from the old classification must be rebuilt. Incomplete,
 retiring, unavailable or changed-child graphs still withhold publication.
 
+### Bounded CI simulation cohorts
+
+The ordinary CI boundary job retains its five-job workflow, 50-minute ceiling,
+600-second four-target fuzz and complete thirteen-method Simulation scope.
+PR #42 exhausted that ceiling after eleven passing methods; the canceled seed
+passes unchanged in a focused replay. Run the seven baseline methods and six
+retained regressions as two owned concurrent processes against immutable build
+outputs. Keep the default local/campaign Simulation runner unchanged. Charge
+build and execution to one 45-minute script budget, reserve the remaining job
+time for setup/evidence/cleanup, and terminate only owned process trees on error.
+
+Use a unique evidence directory and separate cohort TRX directories. Accept
+only the exact thirteen unique successful methods across both fresh reports,
+with consistent complete counters and unchanged generated case, maintenance,
+native/reference/queue/version oracles. A missing, duplicate, failed or partial
+cohort is a failure. Preserve stdout/stderr and source/binary hashes. Local
+controls/full execution and actual PR/main CI remain mandatory; this runner-only
+change does not create a new thousand-seed campaign or waive any acceptance.
+See docs/proposals/P1-bounded-ci-simulation-cohorts.md.
+
 ### Subtree deletion and preserved-copy convergence
 
 PR #41 CI generates hierarchy seed 794669444: subtree deletion and later
