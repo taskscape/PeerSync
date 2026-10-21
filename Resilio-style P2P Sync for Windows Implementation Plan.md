@@ -147,6 +147,21 @@ A folder can optionally require approval: unknown DeviceIds are held as Pending 
 
 ### Messages
 
+P2 fixes the wire type numbers as Hello=1, FolderAuth=2, FolderAuthResult=3,
+IndexSummary=4, IndexRequest=5, IndexUpdate=6, Availability=7,
+BlockRequestBatch=8, BlockResponse=9, Ping=10, Pong=11 and Close=12.
+The canonical unsigned varint is the Protobuf body length, excluding the
+one-byte type; body length is at most 16 MiB. Reject overlong/noncanonical
+prefixes, oversized bodies and truncated EOF. Unknown types and malformed
+Protobuf are connection violations, with safe numeric reason codes.
+PipeReader bodies remain valid only until the next iterator advance/disposal;
+message decoding copies/parses before that boundary. Always advance examined
+to the available buffer end when a frame is incomplete. Reader ownership
+stays with the connection. IndexUpdate explicitly carries after_seq and
+last_seq so complete reviewed ranges can include unpublished sequence gaps.
+P2 message schemas supplement, rather than rewrite, original signed bodies.
+Frame fuzz adds coverage alongside all four existing boundary targets.
+
 Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`. Stream 0 is control. Each folder gets one index stream. Block requests use a pool of short-lived streams, so one slow request never blocks another.
 
 | Message | Purpose |
