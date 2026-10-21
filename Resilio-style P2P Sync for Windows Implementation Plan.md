@@ -178,6 +178,10 @@ and folder permissions remain mandatory in the transport/transfer layer.
 Protocol violations add a strike to the certificate-derived device identity
 and close the owned connection with a reason, even if recording a strike
 fails. Error messages contain safe codes, not records, paths or keys.
+Enforce repeated-message limits before generated Protobuf collection
+allocation. Reject deprecated groups; keep ordinary unknown fields and opaque
+signed bodies intact. After signature verification, preflight nested chunk
+and vector entries before opening their full repeated collections.
 
 Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`. Stream 0 is control. Each folder gets one index stream. Block requests use a pool of short-lived streams, so one slow request never blocks another.
 

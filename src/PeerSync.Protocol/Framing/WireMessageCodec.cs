@@ -2,6 +2,7 @@ using System.Buffers;
 using Google.Protobuf;
 using PeerSync.Protocol.Handshake;
 using PeerSync.Protocol.Wire;
+using PeerSync.Protocol.Validation;
 
 namespace PeerSync.Protocol.Framing;
 
@@ -45,7 +46,12 @@ public static class WireMessageCodec
             WireType.Pong => Pong.Parser, WireType.Close => Close.Parser,
             _ => throw new ProtocolException(ProtocolError.UnknownMessageType),
         };
-        try { return parser.ParseFrom(frame.Body.ToArray()); }
+        try
+        {
+            byte[] bytes = frame.Body.ToArray();
+            ProtobufIngressLimits.Validate((WireType)frame.Type, bytes);
+            return parser.ParseFrom(bytes);
+        }
         catch (InvalidProtocolBufferException) { throw new ProtocolException(ProtocolError.MalformedMessage); }
     }
 }
