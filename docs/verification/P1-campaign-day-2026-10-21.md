@@ -56,10 +56,20 @@ overall failure, reporter budget block and `qualifiedCampaignDay=false` at
 the authoritative-acceptance layer. The separate artifact validator's
 qualified result does not turn a failed GitHub run green.
 
-The active ceiling is reduced from 7 to 4, so these are the only two campaign
-attempts. The source pin is unchanged; no budget extension or product rerun
-is made. The [reporting fallback proposal](../proposals/P1-two-day-report-budget-recovery.md)
-requires explicit approval under the existing successful-run requirement.
-P1.6.4b/P1.6.4 and Gate P1 remain open pending that reporting decision and
-green merged PR/main validation of the two-day tooling. The already accepted
-100000-file corpus and every other gate remain unchanged.
+The ceiling is reduced from 7 to 4, so these are the only two campaign
+attempts. The tested source pin is unchanged; no budget extension or product
+rerun is made. On 2026-10-21 the user explicitly
+[accepts the reporting-only recovery](../proposals/P1-two-day-report-budget-recovery.md).
+`approved-reporting-acceptance.json` rechecks current GitHub metadata, the
+exact pinned verifier, all five successful hosted test jobs/41 methods and
+the two-date history. It records the approval and accepted dates while
+preserving the original failed workflow, runner ID 0/no steps and denial.
+The earlier unapproved audit is retained unchanged.
+
+Both October 20/21 dates are accepted under that narrow exception. Both
+activation variables are removed and read back absent; the daily trigger
+is removed in this change, retaining manual diagnostics only. The retirement
+record is `artifacts/p1-two-day-campaign-retirement.json`. P1.6.4b/P1.6.4 and
+Gate P1 remain open pending green merged PR/main validation of the two-day
+tooling. The already accepted 100000-file corpus and every other gate remain
+unchanged.

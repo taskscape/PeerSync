@@ -19,6 +19,14 @@ hierarchy samples and six fixed regressions. These counts do not mean
 have 50 minutes. Two attempts are the activation maximum. Timings and counts
 remain observable in uploaded artifacts.
 
+The October 20/21 campaign is complete under the
+[approved reporting-only recovery](proposals/P1-two-day-report-budget-recovery.md).
+Both activation variables are removed and this change retires the daily
+schedule. The workflow remains available for explicitly requested manual
+diagnostics; it does not schedule additional product campaigns. Original
+failed reporter metadata remains preserved alongside the approved local
+reconstruction. Normal green merged PR/main validation is still required.
+
 Before activation, merge the campaign implementation, require green PR/main
 CI, then manually dispatch **P1 bounded seed campaign** in `preflight` mode.
 It runs ten flat/five hierarchy samples, omits the six long regressions,
@@ -30,8 +38,9 @@ checks are all green. Set repository variables `PEERSYNC_P1_SOAK_SOURCE` to
 that full SHA and `PEERSYNC_P1_SOAK_LAST_RUN` to the next campaign workflow
 run number plus one. Calculate the next number from the actual latest
 workflow record, after preflight; do not guess it from another workflow.
-Dispatch the first `campaign` run, then the daily 05:12 UTC trigger supplies
-the remaining attempts. No activation variable is set by this implementation.
+After retirement, an explicitly authorized future campaign would require
+manual dispatch on each of its two consecutive UTC dates. The daily trigger
+is removed. No activation variable is set by this implementation.
 
 The scheduled job condition allocates no runner without both activation
 variables or after the permitted workflow run number. Planning rejects

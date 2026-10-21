@@ -2,6 +2,10 @@
 
 Gate P1 needs actual CI evidence for 1000 seeds on two consecutive days,
 under the [user-approved 2026-10-21 requirement](../requirements/P1-two-day-campaign.md).
+After accepting October 20/21 under the approved reporting exception,
+activation is retired and the workflow's daily trigger is removed. The
+remaining manual diagnostic entry point does not automatically start a new
+campaign.
 Local 1000-case runs, bounded PR smoke and one successful day do not satisfy
 that gate. Keep the current documented modes explicit: 1000 distinct flat
 seeds per campaign day, five generated hierarchy samples and all six

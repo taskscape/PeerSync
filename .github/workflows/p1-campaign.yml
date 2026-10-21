@@ -10,8 +10,7 @@ on:
         type: string
         required: false
         description: Immutable source SHA; campaign must match its activation pin
-  schedule:
-    - cron: '12 5 * * *'
+# P1's two accepted UTC dates are complete; retain explicit manual diagnostics.
 permissions:
   contents: read
   actions: read
