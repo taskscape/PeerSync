@@ -10,20 +10,26 @@ SHA = "a" * 40
 class CampaignPlanTests(unittest.TestCase):
     def setUp(self):
         self.env = dict(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_RUN_NUMBER="11", GITHUB_RUN_ATTEMPT="1",
-                        GITHUB_SHA=SHA, SOAK_MODE="campaign", SOAK_LAST_RUN="15", SOAK_PINNED_SOURCE=SHA)
+                        GITHUB_SHA=SHA, SOAK_MODE="campaign", SOAK_LAST_RUN="12", SOAK_PINNED_SOURCE=SHA)
 
     @staticmethod
     def good(source, required):
         return dict(sha=source, merged=True, successfulChecks=sorted(campaign.REQUIRED_CHECKS))
 
-    def test_campaign_pins_source_and_five_attempt_bound(self):
+    def test_campaign_pins_source_and_two_attempt_bound(self):
         result = campaign.plan(self.env, self.good)
         self.assertEqual(200, result["cases"])
         self.assertEqual(SHA, result["source"])
         self.assertFalse(result["gateP1Passed"])
 
+    def test_final_permitted_attempt_preserves_source_and_scope(self):
+        result = campaign.plan(dict(self.env, SOAK_LAST_RUN="11"), self.good)
+        self.assertEqual("11", result["lastPermittedRun"])
+        self.assertEqual(SHA, result["source"])
+        self.assertEqual(200, result["cases"])
+
     def test_missing_expired_excessive_bound_or_rerun_is_rejected(self):
-        for changes in (dict(SOAK_LAST_RUN=""), dict(SOAK_LAST_RUN="10"), dict(SOAK_LAST_RUN="16"), dict(GITHUB_RUN_ATTEMPT="2")):
+        for changes in (dict(SOAK_LAST_RUN=""), dict(SOAK_LAST_RUN="10"), dict(SOAK_LAST_RUN="13"), dict(GITHUB_RUN_ATTEMPT="2")):
             with self.subTest(changes=changes), self.assertRaises(ValueError): campaign.plan(dict(self.env, **changes), self.good)
 
     def test_unmerged_or_non_green_source_is_rejected(self):

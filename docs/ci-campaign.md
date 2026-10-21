@@ -1,6 +1,9 @@
 # Bounded P1 CI campaign
 
-This workflow is inactive until deliberately configured. Normal PR/main CI
+The [user-approved requirement](requirements/P1-two-day-campaign.md) is two
+consecutive UTC campaign dates, reduced from five on 2026-10-21. Historical
+reports retain their original policy and actual observations. Activation is
+explicit. Normal PR/main CI
 keeps its five jobs and all default tests; its existing boundary job also runs
 the campaign planner/evidence control tests before starting the long checks. Campaigns are separate evidence
 for Gate P1; they never close the phase by themselves.
@@ -13,8 +16,16 @@ the existing native/preservation/reference/queue oracles
 and seven baseline Simulation methods. Total: 1000 distinct flat seeds, five
 hierarchy samples and six fixed regressions. These counts do not mean
 1000 hierarchical cases. Shard zero has a 75-minute failure ceiling; others
-have 50 minutes. Five attempts are the activation maximum. Timings and counts
+have 50 minutes. Two attempts are the activation maximum. Timings and counts
 remain observable in uploaded artifacts.
+
+The October 20/21 campaign is complete under the
+[approved reporting-only recovery](proposals/P1-two-day-report-budget-recovery.md).
+Both activation variables are removed and this change retires the daily
+schedule. The workflow remains available for explicitly requested manual
+diagnostics; it does not schedule additional product campaigns. Original
+failed reporter metadata remains preserved alongside the approved local
+reconstruction. Normal green merged PR/main validation is still required.
 
 Before activation, merge the campaign implementation, require green PR/main
 CI, then manually dispatch **P1 bounded seed campaign** in `preflight` mode.
@@ -25,14 +36,15 @@ Review every shard, its executed TRX methods and the coordinator artifact.
 Activation requires one immutable, merged source SHA whose five normal CI
 checks are all green. Set repository variables `PEERSYNC_P1_SOAK_SOURCE` to
 that full SHA and `PEERSYNC_P1_SOAK_LAST_RUN` to the next campaign workflow
-run number plus four. Calculate the next number from the actual latest
+run number plus one. Calculate the next number from the actual latest
 workflow record, after preflight; do not guess it from another workflow.
-Dispatch the first `campaign` run, then the daily 05:12 UTC trigger supplies
-the remaining attempts. No activation variable is set by this implementation.
+After retirement, an explicitly authorized future campaign would require
+manual dispatch on each of its two consecutive UTC dates. The daily trigger
+is removed. No activation variable is set by this implementation.
 
 The scheduled job condition allocates no runner without both activation
 variables or after the permitted workflow run number. Planning rejects
-non-merged/non-green sources, more than five remaining attempts, source
+non-merged/non-green sources, more than two remaining attempts, source
 overrides and rerun attempts. Every campaign job independently checks attempt 1
 before allocating a runner, including when a failed-job rerun reuses a successful
 planner. Daily and history validation independently reject campaign attempt 2+.
@@ -49,21 +61,21 @@ Every shard must also report actual archive retirement/block eviction, with
 maintenance evidence matching its executable hash and campaign source pin.
 Generated manifests used in validator unit tests are controls, not CI days.
 
-For final history, download five actual `p1-campaign-day` artifacts from
+For final history, download two actual `p1-campaign-day` artifacts from
 distinct successful run IDs. Check each authoritative GitHub run and attempt
 conclusion, event, workflow, source pin and coordinator/shard results; require
 the same pinned source and consecutive UTC completion dates. Then audit the
-five saved reports:
+two saved reports:
 
 ```powershell
 python build/campaign_evidence.py --source <full-source-SHA> `
-  --history <day1.json> <day2.json> <day3.json> <day4.json> <day5.json> `
+  --history <day1.json> <day2.json> `
   --output artifacts/soak-history.json
 ```
 
 The artifact-only audit keeps `gateP1Passed=false` and explicitly requires
-the live GitHub check. A status badge, preflight, local 1000-case run or five
-attempts on one calendar date cannot prove five campaign days. Keep the
+the live GitHub check. A status badge, preflight, local 1000-case run or two
+attempts on one calendar date cannot prove two campaign days. Keep the
 100000-file local corpus, required main CI and approved external validation
 gates separate. No checkbox is ticked before actual evidence and merged CI.
 

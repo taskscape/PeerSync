@@ -58,4 +58,4 @@ separately.
 Small/intermediate passes have `corpusRequirementSatisfied=false`. A successful
 100000-file run supports only the corpus line of Gate P1. `gateP1Passed` remains
 false until every phase criterion, including merged CI and the separate
-1000-seed/five-day requirement, has been satisfied.
+1000-seed/two-day requirement, has been satisfied.

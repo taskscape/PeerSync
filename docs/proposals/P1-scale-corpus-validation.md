@@ -46,7 +46,7 @@ Begin with a five-node small corpus to verify runner/report/oracle failures,
 then measure intermediate scale before the full 100000-file run. Keep every
 smaller run labeled with its actual file count and `gateP1Passed=false`.
 Only a fully completed 100000-file report can satisfy the corpus line; it does
-not close remaining P1 tasks, 1000-seed/five-day CI or external P2/P4 checks.
+not close remaining P1 tasks, 1000-seed/two-day CI or external P2/P4 checks.
 
 Implement the opt-in runner in the existing PeerSync.Benchmarks console,
 invoked by `build/Run-Scale.ps1` with an explicit file count and deadline.

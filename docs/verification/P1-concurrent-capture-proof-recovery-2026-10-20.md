@@ -92,3 +92,19 @@ supervisor takes 2532.8416656 seconds, separate from actual fuzz duration.
 The exact artifacts and strict scope are under `artifacts/ci41-budget-*`.
 That green bounded run does not cover the new two-owner state, so PR #41 is
 held unmerged until this additional repair meets local and PR/main acceptance.
+
+Subsequently, [final PR/main acceptance](P1-convergence-allocation-ci-merge-2026-10-20.md)
+passes all five jobs on the repaired source. The older immutable 4c574b9 full
+corpus independently [confirms the same stale-proof state](P1-scale-revival-capture-deferral-2026-10-20.md)
+with a verified 246-byte canonical block. Its identified process is stopped
+after read-only native/catalog validation and evidence preservation; its
+original fixture remains unmodified. It is not a passing full corpus.
+
+The fresh immutable repaired-source full run subsequently
+[completes successfully](P1-scale-capture-100000-2026-10-20.md), with parent
+exit 0, clean dd7059b source and unchanged preflight binaries. It preserves all
+100024 versions after the actual 100000-file initial corpus and partitioned
+mutations; all five native/reference/queue checks and guarded cleanup pass.
+The fixture is independently absent. Combined with final PR/main acceptance,
+this closes P1.2.4b1a and its reopened ownership/retention parents. Only the
+corpus line of Gate P1 closes; the five-date campaign remains open.

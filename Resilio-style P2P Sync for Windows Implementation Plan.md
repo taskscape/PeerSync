@@ -1611,25 +1611,46 @@ then checks byte-identical visible trees after healing and searches current,
 archive and conflict bytes for every recorded version. Private block caches
 alone do not count as preserved user versions. Save failing cases and operation
 traces for direct replay and promotion to checked-in regression fixtures. Keep
-bounded smoke sampling separate from the mandatory 1,000-case CI and five-day
+bounded smoke sampling separate from the mandatory 1,000-case CI and two-day
 gate evidence, and keep case/hierarchy/stale-temp work visible while the initial
 flat-path scenario is expanded.
 Add a separately versioned hierarchical scenario over the public coordinator:
 nested/case/kind/rename/delete operations, recursive visible-tree and native
 loss oracles, complete graph coverage and durable queue drain after healing.
 Preserve flat seed replay; keep bounded smoke distinct from measured 1000-seed
-CI/five-day/100000-file gates. Follow
+CI/two-day/100000-file gates. Follow
 `docs/proposals/P1-hierarchical-property-scenarios.md`.
 
-Gate P1's thousand-seed/five-day evidence uses a bounded opt-in campaign,
+Gate P1's thousand-seed/two-day evidence uses a bounded opt-in campaign,
 separate from PR smoke and the local 100000-file corpus. Pin one green source,
 split 1000 flat seeds across five Windows shards, add one hierarchy sample per
-shard and run the three retained hierarchy regressions once per day. Verify
-actual unique counts, complete native/queue/reference/loss oracles and five
+shard and run all six retained hierarchy regressions once per day. Verify
+actual unique counts, complete native/queue/reference/loss oracles and two
 consecutive UTC completion dates; do not claim 1000 hierarchical cases from
 these explicit counts. Scheduling starts disabled and activation permits only
-five attempts, with no automatic budget extension. Follow
+two attempts, with no automatic budget extension. Follow
 `docs/proposals/P1-bounded-ci-campaign.md`.
+
+On 2026-10-21 the user explicitly changes the required consecutive UTC dates
+from five to two. This changes the calendar acceptance policy only: each day
+still requires 1000 distinct flat seeds, five hierarchy samples, all retained
+regressions, maintenance and every production oracle. Existing actual October
+20/21 runs may qualify on their unchanged green source pin after independent
+artifact and authoritative GitHub audits. A policy-only history-validator
+update does not relabel or reset those tested binaries. Reduce the active
+campaign ceiling to its second attempt and retire activation/scheduling after
+acceptance. See `docs/requirements/P1-two-day-campaign.md`.
+
+The user also explicitly approves the reporting-only exception for October
+21 run 39582029908. Its planner and all five hosted test jobs pass on attempt
+1 with complete source/binary/method/count/date evidence; only the final
+reporter is denied by the Actions budget before runner allocation (ID 0,
+no steps). Accept the report reconstructed by the exact pinned-source daily
+verifier while preserving the failed overall workflow and its original
+annotation. This exception does not cover failed tests, missing evidence,
+reruns, mixed sources or an executed failing reporter. Ordinary merged
+PR/main CI remains required for the tooling change. See
+`docs/proposals/P1-two-day-report-budget-recovery.md`.
 
 | Layer | What it proves | How |
 | --- | --- | --- |
@@ -1943,7 +1964,7 @@ remains in its existing service phase; this test invokes the production worker.
 
 ### Campaign first-attempt allocation and evidence
 
-The five-attempt campaign resource bound applies at each job allocation boundary,
+The two-attempt campaign resource bound applies at each job allocation boundary,
 including failed-job reruns that reuse successful planner outputs. Campaign plan,
 shard and report jobs require github.run_attempt=1 before runner allocation.
 Daily and standalone history validation independently require integer attempt 1.
@@ -1982,6 +2003,26 @@ Keep ModifiedBy in the class: independently preserved case copies retain their
 original author boundaries. The direct same-body fallback stays strict. Version the proof-class digest so
 persisted witnesses from the old classification must be rebuilt. Incomplete,
 retiring, unavailable or changed-child graphs still withhold publication.
+
+### Bounded CI simulation cohorts
+
+The ordinary CI boundary job retains its five-job workflow, 50-minute ceiling,
+600-second four-target fuzz and complete thirteen-method Simulation scope.
+PR #42 exhausted that ceiling after eleven passing methods; the canceled seed
+passes unchanged in a focused replay. Run the seven baseline methods and six
+retained regressions as two owned concurrent processes against immutable build
+outputs. Keep the default local/campaign Simulation runner unchanged. Charge
+build and execution to one 45-minute script budget, reserve the remaining job
+time for setup/evidence/cleanup, and terminate only owned process trees on error.
+
+Use a unique evidence directory and separate cohort TRX directories. Accept
+only the exact thirteen unique successful methods across both fresh reports,
+with consistent complete counters and unchanged generated case, maintenance,
+native/reference/queue/version oracles. A missing, duplicate, failed or partial
+cohort is a failure. Preserve stdout/stderr and source/binary hashes. Local
+controls/full execution and actual PR/main CI remain mandatory; this runner-only
+change does not create a new thousand-seed campaign or waive any acceptance.
+See docs/proposals/P1-bounded-ci-simulation-cohorts.md.
 
 ### Subtree deletion and preserved-copy convergence
 

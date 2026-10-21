@@ -57,20 +57,26 @@ jobs:
           retention-days: 7
   fuzz-smoke:
     runs-on: windows-latest
-    # The unchanged native Simulation suite takes about 32 hosted minutes.
-    # Its independent IO overlaps the required ten-minute CPU boundary fuzz.
+    # Two bounded cohorts retain all thirteen Simulation methods and overlap
+    # independent IO with the required ten-minute CPU boundary fuzz.
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
-      - name: Campaign planner and evidence controls
+      - name: Campaign planner and simulation evidence controls
         shell: pwsh
-        run: python -m unittest discover -s tests -p 'campaign_*_test.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'campaign_*_test.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Campaign controls failed' }
+          ./build/Test-SimulationScope.ps1
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Required ten-minute boundary fuzz and real-engine simulations
         shell: pwsh
         run: ./build/Run-BoundarySimulation.ps1 -FuzzSeconds 600
+      - name: Boundary supervisor budget and owned cleanup controls
+        shell: pwsh
+        run: ./build/Test-BoundaryRunner.ps1
       - name: Upload fuzz evidence
         if: always()
         uses: actions/upload-artifact@v7
