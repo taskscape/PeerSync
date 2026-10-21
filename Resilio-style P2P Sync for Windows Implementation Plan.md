@@ -2024,6 +2024,19 @@ controls/full execution and actual PR/main CI remain mandatory; this runner-only
 change does not create a new thousand-seed campaign or waive any acceptance.
 See docs/proposals/P1-bounded-ci-simulation-cohorts.md.
 
+### Correctness-first implementation phasing
+
+On 2026-10-21 the user explicitly approves: "Defer CI timing blocker; continue
+implementation" after directing an end to further performance tuning. Permit
+qualified P1 acceptance and P2 implementation using the completed local/native,
+two-date campaign, full-corpus and unchanged-source hosted correctness evidence.
+Ordinary CI's timeout remains visible verification debt, not a successful run.
+This narrow exception permits the requirement/tooling merge and phase progress;
+failed product assertions still require repair. Preserve all tests, native
+durability/oracles and later service/LAN/NAT gates. Complete current-source
+verification remains mandatory before release. See
+docs/proposals/P1-correctness-first-implementation-phasing.md.
+
 ### Workspace NTFS Simulation fixtures
 
 Implementation stopped on 2026-10-21 at the user's direction to stop further

@@ -1,6 +1,7 @@
 # Correctness-first implementation phasing
 
-Status: awaiting the narrow approval requested on 2026-10-21. The user
+Status: explicitly approved on 2026-10-21: "Defer CI timing blocker; continue
+implementation (Recommended)". The user
 explicitly directs stopping further performance tuning and completing the
 system after the extended CI investigation. Performance work stops now.
 
@@ -23,7 +24,7 @@ hits its script deadline after all seven baseline methods and five retained
 results complete. Its final seed remains incomplete; no failed product
 assertion is established. Preserve the failure, missing coverage and logs.
 
-Proposed narrow exception: permit merging the requirement/tooling change and
+Approved narrow exception: permit merging the requirement/tooling change and
 continuing P2 implementation based on this complete correctness evidence,
 while recording the ordinary hosted deadline as open verification debt.
 The overall failed workflow must remain visible. Do not represent its

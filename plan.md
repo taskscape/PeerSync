@@ -50,6 +50,8 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 9. **Code examples:** if the real code diverges from an example here for a good reason, replace the example or add `Superseded by src/...` under it. A stale example is worse than none.
 10. **Spikes:** each spike (`P0.2.x`) produces `docs/spikes/P0.2.x-<name>.md` with the question, what was tried, the numbers, and the decision. Link it from the task.
 
+2026-10-21 explicit exception: the user [approves correctness-first phasing](docs/proposals/P1-correctness-first-implementation-phasing.md) for P1.6.4/P1.6.4b/P1.6.4c and Gate P1. Their ordinary hosted CI timeout may remain open while the requirement/tooling change merges and P2 implementation starts, using the complete unchanged-source correctness evidence. Preserve the failed/incomplete runs and every test/oracle; full current-source verification remains mandatory before release. This does not permit ignoring failed product assertions or waiving later service/LAN/NAT correctness gates.
+
 ---
 
 ## 1. Status summary
@@ -72,6 +74,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-21 | User explicitly approves deferring the hosted CI timing blocker and continuing implementation. Permit the requirement/tooling merge and qualified Gate P1 acceptance using complete unchanged-source correctness evidence; retain failed/incomplete CI, every test/oracle and complete verification before release. Stop performance tuning and proceed to P2. | Correctness-first implementation phasing; docs/proposals/P1-correctness-first-implementation-phasing.md |
 | 2026-10-21 | User directs implementation to focus on correctness and completion, stopping further CI performance tuning after the extended investigation. Drop the unimplemented fixture-storage optimization, retain all correctness evidence and the actual hosted timeout, and seek only the explicit narrow gate exception needed to continue P2 under this checklist's strict phase rule. | Workspace NTFS Simulation fixtures; docs/proposals/P1-correctness-first-implementation-phasing.md |
 | 2026-10-21 | Two concurrent cohorts still exhaust the 45-minute script budget: seven baseline methods/five retained cases pass, last retained case is stopped. Measure default versus workspace Flush(true) latency and use verified child-only workspace NTFS temporary fixtures, preserving all production/test inputs, durability, thirteen-method scope, five jobs and time limits. Require local and hosted proof; no drive-letter or speed claim is assumed. | Workspace NTFS Simulation fixtures; docs/proposals/P1-workspace-ntfs-simulation-fixtures.md |
 | 2026-10-21 | PR #42 exhausts the unchanged 50-minute boundary job after eleven passing methods; canceled seed 1648781653 passes unchanged in 55.6 seconds locally. Run seven baseline methods and six retained regressions in two owned concurrent cohorts, with strict thirteen-method aggregation and one 45-minute build/execution budget. Preserve five jobs, full fuzz/case/maintenance/oracle scope, default campaign runner and actual green PR/main requirements. | Bounded CI simulation cohorts; docs/proposals/P1-bounded-ci-simulation-cohorts.md |
