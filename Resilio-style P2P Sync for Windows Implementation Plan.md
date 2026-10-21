@@ -2026,6 +2026,11 @@ See docs/proposals/P1-bounded-ci-simulation-cohorts.md.
 
 ### Workspace NTFS Simulation fixtures
 
+Implementation stopped on 2026-10-21 at the user's direction to stop further
+performance tuning and complete the system. The storage hypothesis below was
+documented but not implemented. Preserve it as historical investigation only;
+it is not a correctness prerequisite or a claimed fix.
+
 Run 39598885501 proves two cohorts alone do not meet the hosted budget: all
 seven baseline methods pass, but five retained cases consume almost forty
 minutes before the last case is stopped at the shared deadline. There is no

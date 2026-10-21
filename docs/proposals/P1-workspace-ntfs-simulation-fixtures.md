@@ -1,5 +1,10 @@
 # Verified workspace NTFS Simulation fixtures
 
+Status: investigation stopped before implementation on 2026-10-21. The user
+explicitly directs stopping performance tuning and completing the system.
+The hypothesis and references below are retained as historical notes; no
+storage change or performance improvement is claimed.
+
 Normal PR run 39598885501 fails at the shared 2700-second script budget.
 The full seven-method baseline TRX passes (generated hierarchy 34m57s).
 Five retained result files pass; seed 1648781653 remains incomplete after
