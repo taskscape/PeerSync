@@ -17,8 +17,8 @@ def plan(env, inspect_source):
     attempt = int(env.get("GITHUB_RUN_ATTEMPT", "1"))
     if mode == "campaign":
         bound = env.get("SOAK_LAST_RUN", "")
-        if not bound.isdecimal() or not run <= int(bound) <= run + 4 or attempt != 1:
-            raise ValueError("Campaign needs a five-attempt run bound; reruns cannot extend it")
+        if not bound.isdecimal() or not run <= int(bound) <= run + 1 or attempt != 1:
+            raise ValueError("Campaign needs a two-attempt run bound; reruns cannot extend it")
         source = env.get("SOAK_PINNED_SOURCE", "")
         if env.get("SOAK_REQUESTED_SOURCE") and env["SOAK_REQUESTED_SOURCE"].lower() != source.lower():
             raise ValueError("Manual campaign source differs from its activation pin")

@@ -153,7 +153,7 @@ def validate_day(root, source, run_id, mode):
 
 
 def validate_history(paths, source):
-    require(len(paths) == 5 and SHA.fullmatch(source) is not None, "History requires five reports and one pinned source")
+    require(len(paths) == 2 and SHA.fullmatch(source) is not None, "History requires two reports and one pinned source")
     reports = [read_json(Path(path)) for path in paths]
     for report in reports:
         require(integer(report.get("runAttempt"), "history runAttempt", 1) == 1, "Campaign history requires first workflow attempt")
@@ -166,11 +166,11 @@ def validate_history(paths, source):
         require(report.get("maintenanceCases") == 5 and integer(report.get("maintenanceRetiredArchives"), "history retired archives", 10) >= 10
                 and integer(report.get("maintenanceDeletedBlocks"), "history deleted blocks", 10) >= 10, "Incomplete maintenance history")
         require(timestamp(report.get("completedUtc")).date().isoformat() == report.get("date"), "Completion date mismatch")
-    require(len({report.get("runId") for report in reports}) == 5, "A rerun is not a new campaign day")
+    require(len({report.get("runId") for report in reports}) == 2, "A rerun is not a new campaign day")
     dates = sorted(dt.date.fromisoformat(report["date"]) for report in reports)
-    require(len(set(dates)) == 5 and all((right - left).days == 1 for left, right in zip(dates, dates[1:])), "Campaign dates are not consecutive")
+    require(len(set(dates)) == 2 and all((right - left).days == 1 for left, right in zip(dates, dates[1:])), "Campaign dates are not consecutive")
     return dict(status="passed", sourceRevision=source, dates=[day.isoformat() for day in dates],
-                campaignDays=5, flatSeedsPerDay=1000, gateP1Passed=False,
+                campaignDays=2, flatSeedsPerDay=1000, gateP1Passed=False,
                 note="Artifact audit only; verify authoritative GitHub run/attempt conclusions before ticking the gate.")
 
 

@@ -30,7 +30,7 @@ checked-in regression.
 Keep flat and hierarchical counts, summaries and replay variables distinct.
 The runner verifies both requested batches and restores prior environment.
 Bounded smoke remains separate from a measured 1000-seed CI configuration,
-five consecutive days and the five-node/100000-file phase gate. Measure runtime
+two consecutive UTC days and the five-node/100000-file phase gate. Measure runtime
 before selecting bounded CI shards; this proposal starts no scheduled or
 additional remote runs. Plan checkpoints never claim those gates from smoke.
 

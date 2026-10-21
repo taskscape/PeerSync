@@ -105,7 +105,7 @@ class CampaignEvidenceTests(unittest.TestCase):
 
     def test_uniformly_rerun_history_is_rejected(self):
         report = self.check(); paths = []
-        for number in range(5):
+        for number in range(2):
             row = dict(report, runAttempt=2, runId=str(123 + number), completedUtc=f"2026-10-{20+number}T06:00:04Z", date=f"2026-10-{20+number}")
             path = self.root / f"rerun-{number}.json"; self.save(path, row); paths.append(path)
         with self.assertRaises(evidence.EvidenceError): evidence.validate_history(paths, SOURCE)
@@ -149,18 +149,28 @@ class CampaignEvidenceTests(unittest.TestCase):
         (self.root / "4/campaign-shard.json").unlink()
         with self.assertRaises(evidence.EvidenceError): self.check()
 
-    def test_history_requires_five_distinct_consecutive_qualified_days(self):
+    def test_history_requires_two_distinct_consecutive_qualified_days(self):
         report = self.check(); paths = []
-        for number in range(5):
+        for number in range(2):
             row = dict(report, runId=str(123 + number), completedUtc=f"2026-10-{20+number}T06:00:04+00:00", date=f"2026-10-{20+number}")
             path = self.root / f"day-{number}.json"; self.save(path, row); paths.append(path)
-        self.assertEqual(5, evidence.validate_history(paths, SOURCE)["campaignDays"])
+        self.assertEqual(2, evidence.validate_history(paths, SOURCE)["campaignDays"])
         for change in (dict(runId="123"), dict(date="2026-10-26", completedUtc="2026-10-26T06:00:04Z"),
+                       dict(date="2026-10-20", completedUtc="2026-10-20T06:00:04Z"),
                        dict(qualifiedCampaignDay=False), dict(sourceRevision="b" * 40), dict(uniqueFlatSeeds=999)):
             with self.subTest(change=change):
-                row = evidence.read_json(paths[4]); original = dict(row); row.update(change); self.save(paths[4], row)
+                row = evidence.read_json(paths[1]); original = dict(row); row.update(change); self.save(paths[1], row)
                 with self.assertRaises(evidence.EvidenceError): evidence.validate_history(paths, SOURCE)
-                self.save(paths[4], original)
+                self.save(paths[1], original)
+
+    def test_history_rejects_insufficient_or_extra_days(self):
+        report = self.check(); paths = []
+        for number in range(3):
+            row = dict(report, runId=str(123 + number), completedUtc=f"2026-10-{20+number}T06:00:04Z", date=f"2026-10-{20+number}")
+            path = self.root / f"count-{number}.json"; self.save(path, row); paths.append(path)
+        for count in (0, 1, 3):
+            with self.subTest(count=count), self.assertRaises(evidence.EvidenceError):
+                evidence.validate_history(paths[:count], SOURCE)
 
 
 if __name__ == "__main__":

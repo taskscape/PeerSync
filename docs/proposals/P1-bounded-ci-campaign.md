@@ -4,8 +4,8 @@ Gate P1 needs actual CI evidence for 1000 seeds on two consecutive days,
 under the [user-approved 2026-10-21 requirement](../requirements/P1-two-day-campaign.md).
 Local 1000-case runs, bounded PR smoke and one successful day do not satisfy
 that gate. Keep the current documented modes explicit: 1000 distinct flat
-seeds per campaign day, five generated hierarchy samples and all four
-retained hierarchy regressions (currently six). This does not claim 1000 hierarchical cases.
+seeds per campaign day, five generated hierarchy samples and all six
+retained hierarchy regressions. This does not claim 1000 hierarchical cases.
 Preserve the existing recursive native/version/reference/queue oracles.
 
 Use an opt-in dedicated workflow with five Windows shards of 200 flat cases

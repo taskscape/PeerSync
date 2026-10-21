@@ -14,7 +14,7 @@ selects the separate nested-directory mode (default 4). Both are required by
 the runner and have separate counters and summary files. `-NoBuild` requires
 fresh Release binaries. The canonical local verifier requests eight flat
 cases plus the default four hierarchical cases. No new scheduled CI job is
-created by this harness. A 1000-case expanded CI configuration and five-day
+created by this harness. A 1000-case expanded CI configuration and two-day
 acceptance remain open; measure runtime before selecting shards and budgets.
 
 Hierarchy scenarios create three to seven actual engine nodes. They generate
