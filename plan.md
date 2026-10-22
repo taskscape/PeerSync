@@ -2593,10 +2593,10 @@ checks below remain mandatory before any WAN beta or v1.0 release.
   - Done when: an external or peer review covers the threats table in the design doc. Findings are fixed or logged with a rationale. Keys are absent from logs, crash dumps and the control API (except `GetFolderKeys`).
 - [ ] **P5.3 Scale: 1M files**
   - Done when: first index of 1M files takes under 20 minutes on SSD, idle CPU is under 1%, memory is under 300 MB, and a 1M-file folder syncs to a new peer.
-- [ ] **P5.4 Faster start-up with the USN journal** (`PeerSync.Engine/Scanning/UsnJournal.cs`)
-  - Done when: changes made while the service was stopped are found from the journal instead of a full walk.
-  - `[VERIFY]` Reading the journal needs a volume handle, and the virtual account isn't an administrator. Spike first. If it needs `SeManageVolumePrivilege` or admin rights, either grant the privilege to the service SID or drop this task and keep the size/mtime short-circuit scan.
-  - [Partial privilege spike](docs/spikes/P5.4-usn-privilege.md): an elevated development token queries the journal, but the actual virtual service account has not been tested. Keep the optimization disabled until that access and cursor/recovery design are proven.
+- [x] **P5.4 Faster start-up with the USN journal — dropped after privilege spike**
+  - The planned shortcut would find changes made while the service was stopped from the journal instead of a full walk.
+  - The [service-account privilege spike](docs/spikes/P5.4-usn-privilege.md) ran inside the actual NT SERVICE\PeerSync SCM process on installed Server 2025: generic-read and file-data-read volume opens both failed with access denied; a zero-access handle could not query the journal. Granting new broad volume access is not justified for this optional optimization.
+  - Use the explicitly permitted fallback: retain the full walk with size/mtime short-circuiting, native path guards and apply-intent recovery. P5.3's separate million-file performance and new-peer sync targets remain mandatory.
 - [ ] **P5.5 Archive restore UI** [WIP @Codex 2026-10-22]
   - Done when: the Archive tab lists versions by path and date, and supports restore and restore-as-copy.
   - Archive tab and verified control-client calls are implemented; model coverage passed locally. Rendered and installed UI validation remain open; see [P5 initial local verification](docs/verification/P5-initial-local-2026-10-22.md).
