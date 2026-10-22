@@ -4,6 +4,13 @@ P3 installers are development builds until the clean-VM and two-PC gate in
 `plan.md` passes. Build on Windows with .NET 10, the Windows SDK Signing Tools,
 and Inno Setup 7.1. The build script publishes self-contained ReadyToRun
 service, app, and CLI payloads into `publish/<arch>/`, then invokes ISCC.
+It downloads the Microsoft-signed Visual C++ v14 Redistributable for the
+selected architecture from Microsoft's documented permalink, verifies its
+Authenticode publisher, and bundles it. Setup installs that prerequisite
+before replacing service files; a required reboot stops Setup before the
+upgrade and must be followed by a rerun. The manifest records its SHA-256.
+The [Server 2025 clean-VM smoke](verification/P3-server2025-installer-smoke-2026-10-22.md)
+records the missing-runtime reproduction and the successful bundled fix.
 
 ```powershell
 $thumbprint = 'YOUR_LOCALMACHINE_CODE_SIGNING_CERTIFICATE_THUMBPRINT'
@@ -44,6 +51,10 @@ sc.exe query PeerSync
 & "$env:ProgramFiles\PeerSync\cli\psp.exe" status --json
 & "$env:ProgramFiles\PeerSync\app\PeerSync.exe"
 ```
+
+For scripted installs, use `Start-Process -Wait -PassThru -WindowStyle Hidden`
+to capture Setup's exit code. A bare PowerShell invocation of a GUI setup can
+return before installation finishes in remote sessions.
 
 The default service account is `NT SERVICE\PeerSync`. The installer switch
 `/SERVICEACCOUNT=LocalSystem` is a fallback when a folder's ACL cannot be

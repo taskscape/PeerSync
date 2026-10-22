@@ -41,6 +41,19 @@ if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force
 }
 New-Item -ItemType Directory -Path $stage, $output -Force | Out-Null
+$redistCache = Join-Path $root "artifacts/tools/vc_redist.$Arch.exe"
+$redistStage = Join-Path $stage 'redist/vc_redist.exe'
+$redistUri = "https://aka.ms/vc14/vc_redist.$Arch.exe"
+New-Item -ItemType Directory -Path (Split-Path $redistCache -Parent), (Split-Path $redistStage -Parent) -Force | Out-Null
+if (-not (Test-Path -LiteralPath $redistCache -PathType Leaf)) {
+    Invoke-WebRequest -Uri $redistUri -OutFile $redistCache
+}
+$redistSignature = Get-AuthenticodeSignature -LiteralPath $redistCache
+if ($redistSignature.Status -ne 'Valid' -or
+    $redistSignature.SignerCertificate.Subject -notmatch '^CN=Microsoft Corporation,') {
+    throw "Microsoft Visual C++ Redistributable signature is invalid: $redistCache"
+}
+Copy-Item -LiteralPath $redistCache -Destination $redistStage
 
 $projects = @(
     @{ Name = 'service'; Project = 'src/PeerSync.Service/PeerSync.Service.csproj'; Executable = 'PeerSync.Service.exe' },
@@ -104,6 +117,8 @@ try {
         developmentCertificateSha256 = if ($DevelopmentSigning) {
             (Get-FileHash -LiteralPath "$setup.cer" -Algorithm SHA256).Hash
         } else { $null }
+        vcRedistributableSha256 = (Get-FileHash -LiteralPath $redistStage -Algorithm SHA256).Hash
+        vcRedistributableSigner = $redistSignature.SignerCertificate.Subject
         publishedUtc = [DateTime]::UtcNow.ToString('O')
         installerSha256 = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash
     }

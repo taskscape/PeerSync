@@ -52,6 +52,9 @@ Name: autostart; Description: "Start PeerSync when I sign in"
 Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 
 [Files]
+; NSec's libsodium DLL needs the Microsoft Visual C++ v14 runtime on clean PCs.
+; Extract before installation so a reboot requirement leaves the old service intact.
+Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\service\*.exe"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
 Source: "{#StageRoot}\service\*.dll"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
@@ -164,9 +167,23 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Tries: Integer;
+  Tries, RedistCode: Integer;
 begin
   Result := '';
+  ExtractTemporaryFile('vc_redist.exe');
+  RedistCode := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
+  if RedistCode = 3010 then
+  begin
+    NeedsRestart := True;
+    Result := 'The Microsoft Visual C++ runtime requires a restart. Restart Windows and run PeerSync Setup again.';
+    Exit;
+  end;
+  if (RedistCode <> 0) and (RedistCode <> 1638) then
+  begin
+    Result := 'The Microsoft Visual C++ runtime could not be installed (exit code ' +
+      IntToStr(RedistCode) + '). See the setup log.';
+    Exit;
+  end;
   if not ServiceExists then Exit;
   if IsServiceStopped then Exit;
   RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSync');

@@ -55,6 +55,13 @@ try {
             (Get-FileHash -LiteralPath "$setup.cer" -Algorithm SHA256).Hash) {
             throw "Exported public certificate hash does not match the manifest: $arch"
         }
+        $redist = Join-Path $root "publish/$arch/redist/vc_redist.exe"
+        $redistSignature = Get-AuthenticodeSignature -LiteralPath $redist
+        if ($redistSignature.Status -ne 'Valid' -or
+            $redistSignature.SignerCertificate.Subject -notmatch '^CN=Microsoft Corporation,' -or
+            $manifest.vcRedistributableSha256 -ne (Get-FileHash -LiteralPath $redist -Algorithm SHA256).Hash) {
+            throw "Bundled Visual C++ runtime verification failed: $arch"
+        }
         foreach ($component in @(
             @{ Directory = 'service'; Exe = 'PeerSync.Service.exe' },
             @{ Directory = 'app'; Exe = 'PeerSync.exe' },

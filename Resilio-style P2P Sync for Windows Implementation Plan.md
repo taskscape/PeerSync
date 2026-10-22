@@ -1811,7 +1811,7 @@ One signed Inno Setup 7 installer per architecture (`PeerSync-Setup-<version>-x6
 
 1. **`[Setup]`:** a fixed `AppId` GUID (never changed, so a newer setup upgrades in place), `PrivilegesRequired=admin`, `MinVersion=10.0.20348` (Server 2022; Windows 11 is 10.0.22000, so Windows 10 is refused), `ArchitecturesAllowed` and `ArchitecturesInstallIn64BitMode` set to `x64compatible and not arm64`, or `arm64` for the Arm64 build. `CloseApplications=yes` lets Restart Manager close the tray app.
 2. **`[Files]`:** self-contained, ReadyToRun builds of the service, app and CLI go to their dedicated subdirectories under `{app}` (`%ProgramFiles%\PeerSync\`). Only EXE/DLL payloads use `signonce`; non-PE files are copied without Authenticode signing.
-3. **`PrepareToInstall` (Pascal Script):** if the service exists, run `sc.exe stop` and poll until it reports STOPPED, for up to 30 s. If it won't stop, Setup shows an error instead of replacing files in use.
+3. **`PrepareToInstall` (Pascal Script):** install the bundled Microsoft-signed Visual C++ v14 Redistributable for the target architecture before replacing service files. NSec's native libsodium requires `VCRUNTIME140.dll` on clean Windows. If the prerequisite requests a reboot, stop Setup and rerun it after restart. Then, if the service exists, run `sc.exe stop` and poll until it reports STOPPED, for up to 30 s. If it won't stop, Setup shows an error instead of replacing files in use.
 4. **`[Run]`, in order, hidden:**
    1. `sc.exe create` on first install only: start `auto`, account `NT SERVICE\PeerSync`. The installer switch `/SERVICEACCOUNT=LocalSystem` overrides it through `{param:ServiceAccount|...}`.
    2. `sc.exe failure`: restart after 60 s, 60 s, then 5 min.

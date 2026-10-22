@@ -124,9 +124,10 @@ internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, Con
     public override async Task<Wire.FolderInfo> AddFolder(Wire.AddFolderRequest request, ServerCallContext context)
     {
         Guid session = Guid.NewGuid(); string actorSid = Authorize(context, session);
-        FolderKeys? keys = FolderKeys.CreateNew();
+        FolderKeys? keys = null;
         try
         {
+            keys = FolderKeys.CreateNew();
             var folder = await runtime.RequireFolderHost().AddFolderAsync(keys, request.Path, actorSid, context.CancellationToken).ConfigureAwait(false);
             keys = null; // Ownership transfers to the folder runtime.
             diagnostics?.TryWrite(new("control.folder_added", "control") { SessionId = session, ItemsChanged = 1 });
