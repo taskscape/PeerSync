@@ -45,8 +45,12 @@ with the approved release publisher. The .cer file contains no private key.
 Get-ScheduledTask -TaskName PeerSyncUpdateInstall | Select-Object TaskName, State, @{n='User';e={$_.Principal.UserId}}
 ~~~
 
-To stop future checks and scheduled installations, run
-Set-UpdatePolicy.ps1 -Disable from the same installed tools directory.
+To stop future checks and scheduled installations, run:
+
+~~~powershell
+& 'C:\Program Files\PeerSync\tools\Set-UpdatePolicy.ps1' -Disable
+~~~
+
 A task already installing a package must finish before disable takes effect.
 The signed offer expires after at most 30 days; stale or modified packages
 are rejected and retained for diagnosis.

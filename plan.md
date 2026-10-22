@@ -2606,9 +2606,9 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [x] **P5.7 Signed auto-update** (`PeerSync.Service/Update/`) [implemented @Codex 2026-10-23]
   - Done when: the service checks a signed manifest daily and downloads the new setup. A short-lived helper process verifies the Authenticode signature and runs `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`, because Setup stops the service. Updates can be turned off.
   - [Implementation design](docs/proposals/P5-signed-auto-update-implementation.md) separates the service-writable pending package from an administrator-owned publisher pin and SYSTEM helper. Service polling, bounded signed download, manifest generation, administrator policy and installer/task integration are implemented. [Disposable VM evidence](docs/verification/P5-signed-update-vm-2026-10-23.md) covers installed localhost HTTPS download, scheduled signed upgrades through 1.0.11, tamper rejection, current-version no-op, disablement and ACLs. A public feed, release signer, rotation/revocation checks and the P5 release/soak gate remain open.
-- [ ] **P5.8 Documentation** [WIP @Codex 2026-10-22]
-  - Done when: user guide, admin guide (service account, ACLs, ports, logs, `--init`, `--remove-data`) and rendezvous operations guide are written.
-  - Drafted the user/admin guides alongside the existing rendezvous operations guide; verify commands against the final installer before closing this task.
+- [x] **P5.8 Documentation** [implemented @Codex 2026-10-23]
+  - The [user guide](docs/user-guide.md), [admin guide](docs/admin-guide.md) and [rendezvous operations guide](docs/rendezvous-operations.md) cover enrollment, service account and ACLs, ports, logs, `--init`, `--remove-data`, upgrades, signed updates and central-server operation.
+  - Client installer commands and update policy/task paths were exercised in the disposable Server 2025 VM; relative Markdown links in all three guides resolve locally. The physical deployment runbooks and release-gate qualifications remain explicit.
 
 ### Gate P5 (v1.0 release)
 
