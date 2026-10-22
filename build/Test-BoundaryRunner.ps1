@@ -45,6 +45,15 @@ try {
     if ($workers.workers.Count -ne 5 -or @($workers.workers | Where-Object { -not $_.exited }).Count -ne 0 -or $workers.cleanupErrors.Count -ne 0) { throw 'Owned workers were not all stopped' }
     if ($sentinel.HasExited) { throw 'Supervisor stopped an unrelated process' }
     if (@($workers.workers | Where-Object { $_.name -eq 'fuzz' -and $_.exitCode -ne 0 }).Count -ne 1) { throw 'Control did not stop the running owned fuzz worker' }
+    $rejected=$false
+    try { & "$fixture/build/Run-BoundarySimulation.ps1" -NoBuild -Cohort retained-3 -VerificationBudgetSeconds 30 *> "$fixture/shard-failure.log" }
+    catch { $rejected=$_.Exception.Message -like '*Boundary worker retained-3 failed*' }
+    if (-not $rejected) { throw 'Failed retained shard was accepted' }
+    $shardWorkers=Get-Content "$fixture/artifacts/fuzz/workers.json" -Raw | ConvertFrom-Json
+    if ($shardWorkers.workers.Count -ne 1 -or $shardWorkers.workers[0].name -ne 'retained-3' -or
+        -not $shardWorkers.workers[0].exited -or $shardWorkers.cleanupErrors.Count -ne 0) {
+        throw 'Retained shard did not own and stop exactly its one worker'
+    }
 }
 finally {
     $env:PATH=$oldPath
@@ -53,4 +62,4 @@ finally {
         finally { $sentinel.Dispose() }
     }
 }
-@{status='passed';controls=2;prestartBudget=$true;ownedFailureCleanup=$true;unrelatedProcessPreserved=$true;fixture=$fixture} | ConvertTo-Json
+@{status='passed';controls=3;prestartBudget=$true;ownedFailureCleanup=$true;retainedShardCleanup=$true;unrelatedProcessPreserved=$true;fixture=$fixture} | ConvertTo-Json

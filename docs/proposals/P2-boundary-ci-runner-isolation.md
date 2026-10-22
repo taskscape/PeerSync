@@ -8,6 +8,10 @@ Two other retained processes were stopped by the supervisor, and only five of
 eight required retained result files exist. No failed product assertion is
 recorded. The baseline alone took 42m26s while four Simulation workers shared
 one hosted machine. This is a resource-contention result, not a complete gate.
+The same two retained-3 methods and their evidence package passed on the
+current local source in 83.465 seconds without the other Simulation workers;
+the hosted result took 24m53s under shared-runner contention. Machine speeds
+are not equivalent, so the local timing is diagnostic only.
 
 The earlier [bounded-cohort decision](P1-bounded-ci-simulation-cohorts.md)
 explicitly forbids adding jobs. Its single-runner two-cohort layout and the
@@ -31,6 +35,9 @@ seed, healing round, oracle, native check or security job is removed.
 Implement local positive/negative controls for shard ownership, manifest
 identity, missing/duplicate/failed results, and aggregate coverage before a
 single hosted rerun. Preserve the three incomplete PR runs as failed evidence.
+The draft controls currently pass 23 exact-scope checks, eleven aggregate
+artifact checks and three supervisor/owned-cleanup checks; the real local
+retained-3 shard passes both methods and writes a complete package.
 Do not mark Gate P2 or begin P3 until the P2 service repair and the new
 current-head CI pass, PR #44 is merged, and main CI is green. Physical P2
 validation remains unchecked under the separately approved phasing decision.

@@ -4,6 +4,7 @@ param(
     [ValidateRange(1,10000)][int]$Cases = 8,
     [ValidateRange(1,10000)][int]$HierarchicalCases = 4,
     [ValidateRange(1,2700)][int]$VerificationBudgetSeconds = 2700,
+    [ValidateSet('all','baseline','retained-1','retained-2','retained-3')][string]$Cohort = 'all',
     [switch]$NoBuild
 )
 $ErrorActionPreference = 'Stop'
@@ -85,22 +86,24 @@ try {
     for ($index = 0; $index -lt $seeds.Count; $index++) {
         $retainedGroups[$index % $retainedGroups.Count].Add([int]$seeds[$index])
     }
-    $simulationCohorts = @('baseline','retained-1','retained-2','retained-3')
-    Start-Worker -Name fuzz -Executable (Join-Path $root 'tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Fuzz.exe') -Arguments @('--seconds',"$FuzzSeconds")
-    foreach ($cohort in $simulationCohorts) {
-        $arguments = @('test','--project','tests/PeerSync.Simulation','-c','Release','--no-build','--report-trx','--results-directory',(Join-Path $results $cohort))
-        if ($cohort -eq 'baseline') {
+    $simulationCohorts = if ($Cohort -eq 'all') { @('baseline','retained-1','retained-2','retained-3') } else { @($Cohort) }
+    if ($Cohort -in @('all','baseline')) {
+        Start-Worker -Name fuzz -Executable (Join-Path $root 'tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Fuzz.exe') -Arguments @('--seconds',"$FuzzSeconds")
+    }
+    foreach ($selectedCohort in $simulationCohorts) {
+        $arguments = @('test','--project','tests/PeerSync.Simulation','-c','Release','--no-build','--report-trx','--results-directory',(Join-Path $results $selectedCohort))
+        if ($selectedCohort -eq 'baseline') {
             $arguments += @('--filter-not-method','*RetainedHierarchicalRegressions*')
         }
         else {
-            $group = $retainedGroups[[int]$cohort.Substring('retained-'.Length) - 1]
+            $group = $retainedGroups[[int]$selectedCohort.Substring('retained-'.Length) - 1]
             foreach ($seed in $group) {
                 # Repeated display-name filters are ORed by xUnit. Each exact
                 # seed appears once across the three independently owned jobs.
                 $arguments += @('--filter-display-name',"*RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(seed: $seed)")
             }
         }
-        Start-Worker -Name $cohort -Executable dotnet -Arguments $arguments -Simulation
+        Start-Worker -Name $selectedCohort -Executable dotnet -Arguments $arguments -Simulation
     }
     $nextProgress = 0
     while ($true) {
@@ -117,37 +120,78 @@ try {
         Start-Sleep -Milliseconds 250
     }
     $trx = @()
-    foreach ($cohort in $simulationCohorts) {
-        $files = @(Get-ChildItem -LiteralPath (Join-Path $results $cohort) -Filter '*.trx' -File)
-        if ($files.Count -ne 1) { throw "Cannot identify the fresh $cohort Simulation TRX" }
+    foreach ($selectedCohort in $simulationCohorts) {
+        $files = @(Get-ChildItem -LiteralPath (Join-Path $results $selectedCohort) -Filter '*.trx' -File)
+        if ($files.Count -ne 1) { throw "Cannot identify the fresh $selectedCohort Simulation TRX" }
         $trx += $files[0].FullName
     }
-    $scope = & "$PSScriptRoot/Read-SimulationScope.ps1" -Path $trx
-    foreach ($item in @(@('summary.json',$Cases),@('hierarchical-summary.json',$HierarchicalCases))) {
-        $summary = Read-Json (Join-Path $evidence $item[0])
-        if ($summary.status -ne 'passed' -or $summary.completed -ne $item[1]) { throw "Incomplete generated Simulation evidence: $($item[0])" }
+    $scope = & "$PSScriptRoot/Read-SimulationScope.ps1" -Path $trx -Cohort $Cohort
+    if ($Cohort -in @('all','baseline')) {
+        foreach ($item in @(@('summary.json',$Cases),@('hierarchical-summary.json',$HierarchicalCases))) {
+            $summary = Read-Json (Join-Path $evidence $item[0])
+            if ($summary.status -ne 'passed' -or $summary.completed -ne $item[1]) { throw "Incomplete generated Simulation evidence: $($item[0])" }
+        }
+        foreach ($item in @(@('cases.jsonl',$Cases),@('hierarchical-cases.jsonl',$HierarchicalCases))) {
+            $casesRead = @(Get-Content -LiteralPath (Join-Path $evidence $item[0]) | ForEach-Object { $_ | ConvertFrom-Json })
+            if ($casesRead.Count -ne $item[1] -or @($casesRead.Seed | Sort-Object -Unique).Count -ne $item[1] -or @($casesRead | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw "Incomplete generated Simulation case list: $($item[0])" }
+        }
+        $maintenance = Read-Json (Join-Path $evidence connected-maintenance.json)
+        if ($maintenance.status -ne 'passed' -or -not $maintenance.sourceInformationalVersion.EndsWith("+$source") -or $maintenance.retiredArchives -ne 2 -or $maintenance.deletedBlocks -ne 2 -or $maintenance.publishedVersions -ne 2) { throw 'Incomplete connected maintenance evidence' }
     }
-    foreach ($item in @(@('cases.jsonl',$Cases),@('hierarchical-cases.jsonl',$HierarchicalCases))) {
-        $casesRead = @(Get-Content -LiteralPath (Join-Path $evidence $item[0]) | ForEach-Object { $_ | ConvertFrom-Json })
-        if ($casesRead.Count -ne $item[1] -or @($casesRead.Seed | Sort-Object -Unique).Count -ne $item[1] -or @($casesRead | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw "Incomplete generated Simulation case list: $($item[0])" }
+    $expectedRetained = if ($Cohort -eq 'all') { @($seeds) }
+        elseif ($Cohort -eq 'baseline') { @() }
+        else { @($retainedGroups[[int]$Cohort.Substring('retained-'.Length) - 1]) }
+    $retained = @(Get-ChildItem -LiteralPath (Join-Path $evidence regressions) -Filter result.json -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Read-Json $_.FullName })
+    if ($retained.Count -ne $expectedRetained.Count -or @(Compare-Object @($expectedRetained | Sort-Object) @($retained.Seed | Sort-Object)).Count -ne 0 -or
+        @($retained | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 -or $_.Nodes -lt 3 -or $_.Nodes -gt 7 -or $_.Versions -le 0 }).Count -ne 0) {
+        throw 'Incomplete retained Simulation evidence'
     }
-    $retained = @(Get-ChildItem -LiteralPath (Join-Path $evidence regressions) -Filter result.json -Recurse -File | ForEach-Object { Read-Json $_.FullName })
-    if ($retained.Count -ne $registry.retainedSeeds.Count -or @(Compare-Object @($registry.retainedSeeds | Sort-Object) @($retained.Seed | Sort-Object)).Count -ne 0 -or @($retained | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw 'Incomplete retained Simulation evidence' }
-    $maintenance = Read-Json (Join-Path $evidence connected-maintenance.json)
-    if ($maintenance.status -ne 'passed' -or -not $maintenance.sourceInformationalVersion.EndsWith("+$source") -or $maintenance.retiredArchives -ne 2 -or $maintenance.deletedBlocks -ne 2 -or $maintenance.publishedVersions -ne 2) { throw 'Incomplete connected maintenance evidence' }
-    $result = ($workers | Where-Object name -EQ fuzz).stdout.GetAwaiter().GetResult() | ConvertFrom-Json
-    if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec' -or $result.seconds -lt $FuzzSeconds -or $result.crashes -ne 0 -or $result.seeds -le 0) { throw 'Boundary fuzz result does not prove the requested duration and targets' }
+    $result = $null
+    if ($Cohort -in @('all','baseline')) {
+        $result = ($workers | Where-Object name -EQ fuzz).stdout.GetAwaiter().GetResult() | ConvertFrom-Json
+        if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec' -or $result.seconds -lt $FuzzSeconds -or $result.crashes -ne 0 -or $result.seeds -le 0) { throw 'Boundary fuzz result does not prove the requested duration and targets' }
+    }
     foreach ($file in $hashes) {
         if ((Get-FileHash -LiteralPath $file.path -Algorithm SHA256).Hash -ne $file.sha256) { throw 'A worker build output changed during verification' }
     }
     Assert-Budget
-    @{status='passed';requestedSeconds=$FuzzSeconds;seconds=$result.seconds;target=$result.target;seeds=$result.seeds;gateP0Passed=$false} |
-        ConvertTo-Json | Set-Content artifacts/fuzz/verification.json
-    @{status='passed';sourceRevision=$source;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;retainedRegressionCases=$scope.retainedRegressionCases;maintenanceCases=$scope.maintenanceCases;executedMethods=$scope.executedMethods;actualFuzzSeconds=$result.seconds;parallel=$true;simulationCohorts=$simulationCohorts.Count;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;binaryHashes=$hashes;binaryOutputsUnchanged=$true;simulationEvidence=$evidence;trx=$trx;gateP1Passed=$false} |
+    if ($null -ne $result) {
+        @{status='passed';requestedSeconds=$FuzzSeconds;seconds=$result.seconds;target=$result.target;seeds=$result.seeds;gateP0Passed=$false} |
+            ConvertTo-Json | Set-Content artifacts/fuzz/verification.json
+    }
+    $simulationHash=(Get-FileHash -LiteralPath (Join-Path $root 'tests/PeerSync.Simulation/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Simulation.dll') -Algorithm SHA256).Hash
+    if ($Cohort -ne 'all') {
+        $package=Join-Path $root "artifacts/boundary-shards/$Cohort"
+        if (Test-Path -LiteralPath $package) { throw "Boundary shard package already exists: $Cohort" }
+        New-Item -ItemType Directory -Path $package | Out-Null
+        Copy-Item -LiteralPath $trx[0] -Destination (Join-Path $package scope.trx)
+        if ($Cohort -eq 'baseline') {
+            foreach ($name in @('summary.json','hierarchical-summary.json','cases.jsonl','hierarchical-cases.jsonl','connected-maintenance.json')) {
+                Copy-Item -LiteralPath (Join-Path $evidence $name) -Destination (Join-Path $package $name)
+            }
+            Copy-Item -LiteralPath artifacts/fuzz/verification.json -Destination (Join-Path $package fuzz-verification.json)
+        }
+        else {
+            New-Item -ItemType Directory -Path (Join-Path $package regressions) | Out-Null
+            foreach ($seed in $expectedRetained) {
+                Copy-Item -LiteralPath (Join-Path $evidence "regressions/$seed/result.json") -Destination (Join-Path $package "regressions/$seed.json")
+            }
+        }
+        @{schema='peersync-boundary-shard-v1';status='passed';sourceRevision=$source;
+          ciRunId=$env:GITHUB_RUN_ID;ciRunAttempt=$env:GITHUB_RUN_ATTEMPT;cohort=$Cohort;
+          simulationSha256=$simulationHash;executedMethods=$scope.executedMethods;
+          retainedRegressionCases=$scope.retainedRegressionCases;maintenanceCases=$scope.maintenanceCases;
+          retainedSeeds=@($expectedRetained);simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;
+          fuzzSeconds=$(if($result){$result.seconds}else{0});fuzzSeeds=$(if($result){$result.seeds}else{0});
+          fuzzCrashes=$(if($result){$result.crashes}else{0});
+          seconds=$clock.Elapsed.TotalSeconds;binaryOutputsUnchanged=$true} |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package manifest.json)
+    }
+    @{status='passed';sourceRevision=$source;ciRunId=$env:GITHUB_RUN_ID;ciRunAttempt=$env:GITHUB_RUN_ATTEMPT;cohort=$Cohort;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;retainedRegressionCases=$scope.retainedRegressionCases;maintenanceCases=$scope.maintenanceCases;executedMethods=$scope.executedMethods;actualFuzzSeconds=$(if($result){$result.seconds}else{0});parallel=$Cohort -eq 'all';simulationCohorts=$simulationCohorts.Count;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;simulationSha256=$simulationHash;binaryHashes=$hashes;binaryOutputsUnchanged=$true;simulationEvidence=$evidence;trx=$trx;gateP1Passed=$false} |
         ConvertTo-Json -Depth 6 | Set-Content artifacts/fuzz/boundary-simulation.json
 }
 catch {
-    @{status='failed';sourceRevision=$source;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;parallel=$true;simulationCohorts=4;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;error=$_.Exception.Message;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult;workers=@($workers | Select-Object name,pid,startedUtc);gateP1Passed=$false} |
+    @{status='failed';sourceRevision=$source;ciRunId=$env:GITHUB_RUN_ID;ciRunAttempt=$env:GITHUB_RUN_ATTEMPT;cohort=$Cohort;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;parallel=$Cohort -eq 'all';simulationCohorts=$(if($Cohort -eq 'all'){4}else{1});verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;error=$_.Exception.Message;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult;workers=@($workers | Select-Object name,pid,startedUtc);gateP1Passed=$false} |
         ConvertTo-Json -Depth 5 | Set-Content artifacts/fuzz/boundary-simulation.json
     throw
 }

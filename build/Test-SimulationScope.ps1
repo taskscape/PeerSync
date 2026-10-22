@@ -36,6 +36,18 @@ foreach ($reports in @(@{paths=@($full)},@{paths=@($a,$b)},@{paths=@($a)+$split}
     if ($scope.executedMethods -ne 15 -or $scope.retainedRegressionCases -ne 8 -or $scope.maintenanceCases -ne 1) { throw 'Complete Simulation scope rejected' }
     $passed++
 }
+foreach ($item in @(@('baseline',$a),@('retained-1',$split[0]),@('retained-2',$split[1]),@('retained-3',$split[2]))) {
+    $scope=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $item[1] -Cohort $item[0]
+    if ($scope.executedMethods -ne $(if($item[0] -eq 'baseline'){7}elseif($item[0] -eq 'retained-3'){2}else{3})) { throw "Named Simulation cohort rejected: $($item[0])" }
+    $passed++
+}
+foreach ($item in @(@('baseline',$split[0]),@('retained-1',$split[1]),@('retained-2',$split[2]),@('retained-3',$a))) {
+    $rejected=$false
+    try { & "$PSScriptRoot/Read-SimulationScope.ps1" -Path $item[1] -Cohort $item[0] | Out-Null }
+    catch { $rejected=$true }
+    if (-not $rejected) { throw "Wrong named Simulation cohort accepted: $($item[0])" }
+    $passed++
+}
 Expect-Rejected missing @($a)
 Expect-Rejected duplicate @($a,$a)
 Expect-Rejected omitted-seed @($a,(Write-Trx omitted $retained[0..6]))
