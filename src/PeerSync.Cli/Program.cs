@@ -13,10 +13,12 @@ if (args.Length == 0 || args is ["--help"] or ["-h"])
     Console.WriteLine("  psp peers <folder> [--json]");
     Console.WriteLine("  psp dump-index <folder> [--json]");
     Console.WriteLine("  psp diagnostics [--logs <directory>] [--output <new-zip>] [--include-network-addresses]");
+    Console.WriteLine("  psp probe <host:port>");
     return args.Length == 0 ? 2 : 0;
 }
 
 if (args[0] == "diagnostics") return DiagnosticsCommand.Run(args[1..]);
+if (args[0] == "probe") return await ProbeCommand.RunAsync(args[1..]);
 if (args[0] == "status") return await StatusCommand.RunAsync(args[1..]);
 if (args[0] is "add" or "join" or "hosts" or "share" or "peers" or "dump-index")
     return await FolderCommand.RunAsync(args[0], args[1..]);

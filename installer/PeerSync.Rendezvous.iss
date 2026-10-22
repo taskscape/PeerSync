@@ -1,0 +1,193 @@
+#define StageRoot AddBackslash(SourcePath) + "..\publish\rendezvous\x64"
+#define ServiceExe StageRoot + "\PeerSync.Rendezvous.exe"
+#define NewVersionPacked 0
+#define AppVer GetPackedVersion(ServiceExe, NewVersionPacked)
+#if AppVer == ""
+  #error Publish PeerSync.Rendezvous.exe before compiling the installer
+#endif
+
+[Setup]
+AppId={{347EEC9C-2B64-4B93-889A-6F57142E1F76}
+AppName=PeerSync Rendezvous
+AppVersion={#AppVer}
+AppPublisher=taskscape
+DefaultDirName={autopf}\PeerSync Rendezvous
+DefaultGroupName=PeerSync Rendezvous
+PrivilegesRequired=admin
+MinVersion=10.0.20348
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+RestartApplications=no
+OutputDir=..\artifacts\installer
+OutputBaseFilename=PeerSync-Rendezvous-Setup-{#AppVer}-x64
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+UninstallDisplayIcon={app}\PeerSync.Rendezvous.exe
+#ifndef UnsignedDevelopment
+SignTool=peersync
+SignedUninstaller=yes
+#else
+SignedUninstaller=no
+#endif
+
+[Dirs]
+Name: "{commonappdata}\PeerSync.Rendezvous"; Flags: uninsneveruninstall
+Name: "{commonappdata}\PeerSync.Rendezvous\logs"; Flags: uninsneveruninstall
+
+[Files]
+Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
+Source: "Grant-RendezvousCertificate.ps1"; Flags: dontcopy noencryption
+Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
+Source: "After-RendezvousRenewal.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
+#ifndef UnsignedDevelopment
+Source: "{#StageRoot}\*.exe"; DestDir: "{app}"; Flags: ignoreversion signonce
+Source: "{#StageRoot}\*.dll"; DestDir: "{app}"; Flags: ignoreversion signonce
+#endif
+Source: "{#StageRoot}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+Source: "{#StageRoot}\*"; DestDir: "{app}"; Excludes: "*.exe,*.dll,*.pdb,appsettings.json,redist\*"; Flags: recursesubdirs ignoreversion
+#ifdef UnsignedDevelopment
+Source: "{#StageRoot}\*.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageRoot}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
+#endif
+
+[UninstallRun]
+Filename: "{sys}\sc.exe"; Parameters: "delete PeerSyncRendezvous"; Flags: runhidden; RunOnceId: "DeleteService"; Check: ServiceExists
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync Rendezvous TCP 99"""; Flags: runhidden; RunOnceId: "DeleteTcpRule"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync Rendezvous UDP 99"""; Flags: runhidden; RunOnceId: "DeleteUdpRule"
+
+[Registry]
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\PeerSyncRendezvous"; ValueType: expandsz; ValueName: "EventMessageFile"; ValueData: "{win}\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\PeerSyncRendezvous"; ValueType: dword; ValueName: "TypesSupported"; ValueData: "7"; Flags: uninsdeletekey
+
+[Code]
+function ServiceExists: Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PeerSyncRendezvous');
+end;
+
+function RunCommand(const FileName, Parameters: String): Integer;
+var Code: Integer;
+begin
+  Log('Rendezvous installer: ' + ExtractFileName(FileName) + ' ' + Parameters);
+  if not ExecAndLogOutput(FileName, Parameters, '', SW_HIDE, ewWaitUntilTerminated, Code, nil) then
+    RaiseException('Could not start ' + ExtractFileName(FileName) + ': ' + SysErrorMessage(Code));
+  Result := Code;
+  Log('Rendezvous installer command exit: ' + IntToStr(Code));
+end;
+
+procedure RequireSuccess(const FileName, Parameters: String);
+var Code: Integer;
+begin
+  Code := RunCommand(FileName, Parameters);
+  if Code <> 0 then RaiseException(ExtractFileName(FileName) + ' failed with exit code ' + IntToStr(Code) + '. See setup log.');
+end;
+
+function IsServiceStopped: Boolean;
+begin
+  Result := RunCommand(ExpandConstant('{cmd}'), '/c sc query PeerSyncRendezvous | find "STOPPED"') = 0;
+end;
+
+function InitializeSetup: Boolean;
+var PreviousDir: String;
+    InstalledVersion, NewVersion: Int64;
+begin
+  Result := False;
+  if ServiceExists then
+  begin
+    if not RegQueryStringValue(HKLM64,
+      'Software\Microsoft\Windows\CurrentVersion\Uninstall\{347EEC9C-2B64-4B93-889A-6F57142E1F76}_is1',
+      'InstallLocation', PreviousDir) then PreviousDir := ExpandConstant('{autopf}\PeerSync Rendezvous');
+    if not GetPackedVersion(AddBackslash(PreviousDir) + 'PeerSync.Rendezvous.exe', InstalledVersion) then
+    begin
+      MsgBox('The installed rendezvous service has no readable version. Repair it before upgrading.', mbError, MB_OK);
+      Exit;
+    end;
+    NewVersion := {#NewVersionPacked};
+    if ComparePackedVersion(NewVersion, InstalledVersion) < 0 then
+    begin
+      MsgBox('PeerSync Rendezvous cannot be downgraded.', mbError, MB_OK);
+      Exit;
+    end;
+  end;
+  Result := True;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var Tries, Code: Integer;
+begin
+  Result := '';
+  ExtractTemporaryFile('vc_redist.exe');
+  Code := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
+  if Code = 3010 then
+  begin
+    NeedsRestart := True;
+    Result := 'The Visual C++ runtime requires a restart. Restart Windows and run setup again.';
+    Exit;
+  end;
+  if (Code <> 0) and (Code <> 1638) then
+  begin
+    Result := 'The Visual C++ runtime failed (exit code ' + IntToStr(Code) + ').';
+    Exit;
+  end;
+  ExtractTemporaryFile('Grant-RendezvousCertificate.ps1');
+  Code := RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\Grant-RendezvousCertificate.ps1') + '" -CheckOnly');
+  if Code <> 0 then
+  begin
+    Result := 'A current sync.taskscape.com certificate with a machine private key is required. See setup log.';
+    Exit;
+  end;
+  if not ServiceExists or IsServiceStopped then Exit;
+  RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSyncRendezvous');
+  for Tries := 1 to 30 do
+  begin
+    if IsServiceStopped then Exit;
+    Sleep(1000);
+  end;
+  Result := 'The PeerSyncRendezvous service did not stop within 30 seconds.';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep <> ssPostInstall then Exit;
+  if not ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'),
+      'create PeerSyncRendezvous binPath= "' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
+      '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"')
+  else
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'),
+      'config PeerSyncRendezvous binPath= "' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
+      '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"');
+  RequireSuccess(ExpandConstant('{sys}\sc.exe'),
+    'failure PeerSyncRendezvous reset= 86400 actions= restart/60000/restart/60000/restart/300000');
+  RequireSuccess(ExpandConstant('{sys}\icacls.exe'),
+    '"' + ExpandConstant('{commonappdata}\PeerSync.Rendezvous') + '" /grant "NT SERVICE\PeerSyncRendezvous:(OI)(CI)M"');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Grant-RendezvousCertificate.ps1') + '"');
+  RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous TCP 99"');
+  RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous UDP 99"');
+  RequireSuccess(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="PeerSync Rendezvous TCP 99" dir=in action=allow protocol=TCP localport=99');
+  RequireSuccess(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="PeerSync Rendezvous UDP 99" dir=in action=allow protocol=UDP localport=99');
+  RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'start PeerSyncRendezvous');
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var Tries: Integer;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  if ServiceExists and not IsServiceStopped then
+  begin
+    RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSyncRendezvous');
+    for Tries := 1 to 30 do
+    begin
+      if IsServiceStopped then Break;
+      Sleep(1000);
+    end;
+    if not IsServiceStopped then RaiseException('PeerSyncRendezvous did not stop before uninstall.');
+  end;
+end;

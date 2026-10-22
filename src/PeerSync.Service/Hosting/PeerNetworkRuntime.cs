@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Quic;
 using System.Net.Sockets;
 using System.Runtime.ExceptionServices;
@@ -13,12 +14,17 @@ using PeerSync.Engine.Sync;
 using PeerSync.Net.Connections;
 using PeerSync.Net.Discovery;
 using PeerSync.Net.Quic;
+using PeerSync.Net.Rendezvous;
+using PeerSync.Net.Relay;
+using PeerSync.Net.Nat;
 using PeerSync.Net.Security;
 using PeerSync.Net.Tcp;
 using PeerSync.Protocol.Handshake;
 using PeerSync.Protocol.Wire;
 using PeerSync.Service.Control;
 using PeerSync.Storage.FolderDb;
+using PeerSync.Rendezvous.Contracts.V1;
+using RendezvousEndpoint = PeerSync.Rendezvous.Contracts.V1.Endpoint;
 
 namespace PeerSync.Service.Hosting;
 
@@ -40,6 +46,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private readonly PeerEndpointCatalog endpoints;
     private readonly ConcurrentDictionary<string, Task> maintainers = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, Task> sessionWorkers = new();
+    private readonly ConcurrentDictionary<Guid, Task> relayAcceptWorkers = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<RelayOffer>> pendingRelayOffers = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (byte[] FolderId, DateTimeOffset SeenUtc)> relayFolders = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, IAsyncDisposable> sessions = new();
     private readonly object networkRecoveryGate = new();
     private readonly object maintainerGate = new();
@@ -51,6 +60,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private TcpPeerListener? tcpListener;
     private LanDiscovery? discovery;
     private PredefinedHosts? predefinedHosts;
+    private readonly List<TrackerClient> trackers = [];
+    private bool useRelay;
+    private PortMapper? portMapper;
     private Task? acceptTask;
     private int disposed;
 
@@ -96,6 +108,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         Action<byte[], byte[]> recordPending, DiagnosticJournal? diagnostics, CancellationToken cancellationToken, TimeProvider? timeProvider = null)
     {
         var runtime = new PeerNetworkRuntime(certificate, deviceId, getFolders, status, recordPending, diagnostics, timeProvider);
+        runtime.useRelay = deviceSettings.UseRelay;
         try
         {
             if (!QuicListener.IsSupported)
@@ -135,6 +148,34 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             runtime.predefinedHosts = new PredefinedHosts(() => getFolders().SelectMany(folder => folder.Settings.PredefinedHosts)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), runtime.DialPredefinedHostAsync, diagnostics);
             runtime.predefinedHosts.Start();
+            if (deviceSettings.UsePortMapping)
+            {
+                runtime.portMapper = new PortMapper(deviceSettings.ListenPort, diagnostics);
+                runtime.portMapper.MappingsChanged += runtime.RefreshTrackerAnnouncements;
+                runtime.portMapper.Start();
+            }
+            foreach (string serverText in deviceSettings.RendezvousServers.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!Uri.TryCreate(serverText, UriKind.Absolute, out Uri? server))
+                {
+                    diagnostics?.TryWrite(new("tracker.server_invalid", "rendezvous")
+                    { Level = DiagnosticLevel.Warning, ErrorCode = "invalid_uri" });
+                    continue;
+                }
+                try
+                {
+                    var tracker = new TrackerClient(server, certificate,
+                        () => runtime.CreateAnnouncement(deviceSettings.ListenPort),
+                        (message, token) => runtime.OnTrackerMessageFromServerAsync(server, message, token), diagnostics);
+                    runtime.trackers.Add(tracker);
+                    tracker.Start();
+                }
+                catch (ArgumentException error)
+                {
+                    diagnostics?.TryWrite(new("tracker.server_invalid", "rendezvous")
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name });
+                }
+            }
             return runtime;
         }
         catch
@@ -265,6 +306,166 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         EnsureMaintainer(id, peer.DeviceId);
     }
 
+    private Announce CreateAnnouncement(int port)
+    {
+        var announce = new Announce { ListenPort = (uint)port };
+        foreach (InstalledFolderHost.FolderRuntime folder in getFolders().Where(item => item.Settings.UseTracker).Take(500))
+            announce.FolderIds.Add(ByteString.CopyFrom(folder.Keys.FolderId()));
+        try
+        {
+            foreach (IPAddress address in NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
+                .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
+                .Select(unicast => unicast.Address)
+                .Where(address => !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.Any)
+                    && !address.Equals(IPAddress.IPv6Any) && !address.IsIPv6LinkLocal
+                    && !address.IsIPv6SiteLocal && !address.IsIPv6Multicast)
+                .DistinctBy(address => address.ToString()).Take(4))
+                announce.LocalEndpoints.Add(new RendezvousEndpoint { Address = address.ToString(), Port = (uint)port });
+        }
+        catch (NetworkInformationException error)
+        {
+            diagnostics?.TryWrite(new("tracker.local_addresses_unavailable", "rendezvous")
+            { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+        }
+        if (portMapper is not null)
+            foreach (IPEndPoint endpoint in portMapper.PublicEndpoints.Take(4))
+                announce.LocalEndpoints.Add(new RendezvousEndpoint
+                { Address = endpoint.Address.ToString(), Port = (uint)endpoint.Port });
+        return announce;
+    }
+
+    private void RefreshTrackerAnnouncements()
+    {
+        foreach (TrackerClient tracker in trackers) tracker.Refresh();
+    }
+
+    private ValueTask OnTrackerMessageAsync(ServerMessage message, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        switch (message.PayloadCase)
+        {
+            case ServerMessage.PayloadOneofCase.ObservedAddress:
+                diagnostics?.TryWrite(new("tracker.observed_address", "rendezvous")
+                { Transport = DiagnosticTransport.Http2,
+                    SessionId = message.ObservedAddress.SessionId.Length == 16
+                        ? new Guid(message.ObservedAddress.SessionId.Span) : null,
+                    RemoteAddress = IPAddress.TryParse(message.ObservedAddress.Endpoint.Address, out IPAddress? observed)
+                        ? observed : null,
+                    RemotePort = (int)message.ObservedAddress.Endpoint.Port });
+                break;
+            case ServerMessage.PayloadOneofCase.PeerList:
+                if (!getFolders().Any(folder => folder.Settings.UseTracker
+                    && folder.Keys.FolderId().AsSpan().SequenceEqual(message.PeerList.FolderId.Span))) break;
+                foreach (Peer peer in message.PeerList.Peers.Take(1024))
+                {
+                    if (peer.DeviceId.Length != 32 || peer.DeviceId.Span.SequenceEqual(localDeviceId)) continue;
+                    string key = Convert.ToHexString(peer.DeviceId.Span);
+                    int accepted = 0;
+                    foreach (RendezvousEndpoint endpoint in peer.Endpoints.Take(16))
+                    {
+                        if (!IPAddress.TryParse(endpoint.Address, out IPAddress? address)
+                            || endpoint.Port is < 1 or > 65535 || address.Equals(IPAddress.Any)
+                            || address.Equals(IPAddress.IPv6Any) || IPAddress.IsLoopback(address)
+                            || address.IsIPv6Multicast) continue;
+                        RememberEndpoint(key, new IPEndPoint(address, (int)endpoint.Port), ConnectionSource.Public);
+                        accepted++;
+                    }
+                    if (getFolders().Any(folder => folder.Settings.UseTracker && folder.Settings.UseRelay
+                        && folder.Keys.FolderId().AsSpan().SequenceEqual(message.PeerList.FolderId.Span)))
+                        relayFolders[key] = (message.PeerList.FolderId.ToByteArray(), timeProvider.GetUtcNow());
+                    if (accepted != 0 || relayFolders.ContainsKey(key))
+                        EnsureMaintainer(key, peer.DeviceId.ToByteArray());
+                }
+                diagnostics?.TryWrite(new("tracker.peer_list_received", "rendezvous")
+                { ItemsVisited = message.PeerList.Peers.Count });
+                break;
+            case ServerMessage.PayloadOneofCase.PunchNow:
+                diagnostics?.TryWrite(new("tracker.punch_introduction_received", "rendezvous")
+                { ItemsVisited = message.PunchNow.Endpoints.Count });
+                break;
+            case ServerMessage.PayloadOneofCase.RelayOffer:
+                diagnostics?.TryWrite(new("tracker.relay_offer_received", "rendezvous")
+                { SessionId = message.RelayOffer.SessionId.Length == 16
+                    ? new Guid(message.RelayOffer.SessionId.Span) : null });
+                break;
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    private ValueTask OnTrackerMessageFromServerAsync(Uri server, ServerMessage message,
+        CancellationToken cancellationToken)
+    {
+        ValueTask result = OnTrackerMessageAsync(message, cancellationToken);
+        if (message.PayloadCase != ServerMessage.PayloadOneofCase.RelayOffer) return result;
+        RelayOffer offer = message.RelayOffer;
+        if (offer.PeerDeviceId.Length != 32 || offer.Token.Length != 32 || offer.SessionId.Length != 16
+            || offer.PeerDeviceId.Span.SequenceEqual(localDeviceId)) return result;
+        string key = RelayOfferKey(server, offer.PeerDeviceId.Span);
+        if (offer.Initiator)
+        {
+            if (pendingRelayOffers.TryGetValue(key, out TaskCompletionSource<RelayOffer>? pending))
+                pending.TrySetResult(offer.Clone());
+            return result;
+        }
+        Guid id = new(offer.SessionId.Span);
+        if (relayAcceptWorkers.Count >= 16 || relayAcceptWorkers.ContainsKey(id)) return result;
+        Task worker = AcceptRelayAsync(server, offer.Clone(), stopping.Token);
+        if (!relayAcceptWorkers.TryAdd(id, worker)) return result;
+        _ = worker.ContinueWith(completed =>
+        {
+            relayAcceptWorkers.TryRemove(new KeyValuePair<Guid, Task>(id, completed));
+            if (completed.IsFaulted)
+                diagnostics?.TryWrite(new("service.relay_accept_failed", "relay")
+                { Level = DiagnosticLevel.Warning, SessionId = id,
+                    ErrorCode = completed.Exception?.GetBaseException().GetType().Name,
+                    HResult = completed.Exception?.GetBaseException().HResult });
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return result;
+    }
+
+    private async Task AcceptRelayAsync(Uri server, RelayOffer offer, CancellationToken cancellationToken)
+    {
+        if (connections.TryGetConnected(offer.PeerDeviceId.Span, out var current) && current is not null) return;
+        RelayTransport transport = await RelayClient.ConnectAsync(server, offer, certificate, IsDevicePinned,
+            cancellationToken).ConfigureAwait(false);
+        RelayPeerProtocolSession session = await RelayPeerProtocolSession.StartAsync(transport, options.CreateHello,
+            options.Folders, diagnostics, options.AddStrike, options.RequestTimeout, cancellationToken)
+            .ConfigureAwait(false);
+        TrackSession(session.SessionId, session, session.Closed);
+        try { await connections.RegisterIncomingAsync(new ManagedPeerConnection(session.SessionId,
+            session.LocalDeviceId, session.RemoteDeviceId, false, session, session.Closed), cancellationToken)
+                .ConfigureAwait(false); }
+        catch { await session.DisposeAsync().ConfigureAwait(false); throw; }
+    }
+
+    private async ValueTask<ManagedPeerConnection> DialRelayAsync(TrackerClient tracker, Uri server,
+        byte[] peerId, byte[] folderId, CancellationToken cancellationToken)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        string key = RelayOfferKey(server, peerId);
+        var completion = new TaskCompletionSource<RelayOffer>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!pendingRelayOffers.TryAdd(key, completion)) throw new IOException("A relay offer is already pending.");
+        try
+        {
+            if (!tracker.RequestRelay(peerId, folderId)) throw new IOException("Tracker is not connected.");
+            RelayOffer offer = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken)
+                .ConfigureAwait(false);
+            RelayTransport transport = await RelayClient.ConnectAsync(server, offer, certificate,
+                IsDevicePinned, cancellationToken).ConfigureAwait(false);
+            RelayPeerProtocolSession session = await RelayPeerProtocolSession.StartAsync(transport,
+                options.CreateHello, options.Folders, diagnostics, options.AddStrike, options.RequestTimeout,
+                cancellationToken).ConfigureAwait(false);
+            TrackSession(session.SessionId, session, session.Closed);
+            return new ManagedPeerConnection(session.SessionId, session.LocalDeviceId, session.RemoteDeviceId,
+                true, session, session.Closed);
+        }
+        finally { pendingRelayOffers.TryRemove(key, out _); }
+    }
+
+    private static string RelayOfferKey(Uri server, ReadOnlySpan<byte> peerId)
+        => server.AbsoluteUri + "|" + Convert.ToHexString(peerId);
+
     private void EnsureMaintainer(string key, byte[] deviceId)
     {
         Task task;
@@ -274,9 +475,18 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             task = connections.MaintainConnectionAsync(deviceId, token =>
             {
                 token.ThrowIfCancellationRequested();
-                IReadOnlyList<ConnectionCandidate> candidates = endpoints.Snapshot(key)
-                    .SelectMany(CreateTransportCandidates).ToArray();
-                return ValueTask.FromResult(candidates);
+                var candidates = endpoints.Snapshot(key).SelectMany(CreateTransportCandidates).ToList();
+                if (useRelay && relayFolders.TryGetValue(key, out var relayFolder)
+                    && timeProvider.GetUtcNow() - relayFolder.SeenUtc < TimeSpan.FromMinutes(15)
+                    && getFolders().Any(folder => folder.Settings.UseTracker && folder.Settings.UseRelay
+                        && folder.Keys.FolderId().AsSpan().SequenceEqual(relayFolder.FolderId)))
+                    foreach (TrackerClient tracker in trackers.Where(item => item.IsConnected))
+                    {
+                        Uri server = tracker.Server;
+                        candidates.Add(new ConnectionCandidate(ConnectionSource.Relay,
+                            token => DialRelayAsync(tracker, server, deviceId, relayFolder.FolderId, token)));
+                    }
+                return ValueTask.FromResult<IReadOnlyList<ConnectionCandidate>>(candidates);
             }, stopping.Token);
             maintainers[key] = task;
         }
@@ -312,6 +522,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
 
     internal async Task RefreshFolderMembershipAsync(CancellationToken cancellationToken)
     {
+        foreach (TrackerClient tracker in trackers) tracker.Refresh();
         foreach (var session in sessions.ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -531,6 +742,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         {
             QuicPeerSession session => (session.AuthenticatedFolders, DiagnosticTransport.Quic),
             TcpPeerProtocolSession session => (session.AuthenticatedFolders, DiagnosticTransport.Tcp),
+            RelayPeerProtocolSession session => (session.AuthenticatedFolders, DiagnosticTransport.Relay),
             _ => throw new InvalidOperationException("Unsupported authenticated peer session type."),
         };
         Task worker = SuperviseSessionAsync(connection, folders, transport, stopping.Token);
@@ -583,6 +795,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             if (folderConnections.Count == 0)
                 diagnostics?.TryWrite(new("service.peer_no_common_approved_folders", "peer_network")
                     { Level = DiagnosticLevel.Information, SessionId = managed.SessionId, Transport = transport });
+            else status.SetPeerTransport(managed.SessionId, managed.RemoteDeviceId, transport);
             await managed.Closed.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
@@ -600,6 +813,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             foreach (PeerFolderConnection connection in folderConnections)
                 try { await connection.DisposeAsync().ConfigureAwait(false); } catch { }
             if (folderConnections.Count != 0) status.SetPeerSessionActive(managed.SessionId, false);
+            status.ClearPeerTransport(managed.SessionId);
         }
     }
 
@@ -641,6 +855,12 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         if (recovery is not null)
             try { await recovery.ConfigureAwait(false); } catch { }
         if (predefinedHosts is not null) await predefinedHosts.DisposeAsync().ConfigureAwait(false);
+        foreach (TrackerClient tracker in trackers) await tracker.DisposeAsync().ConfigureAwait(false);
+        if (portMapper is not null)
+        {
+            portMapper.MappingsChanged -= RefreshTrackerAnnouncements;
+            await portMapper.DisposeAsync().ConfigureAwait(false);
+        }
         if (discovery is not null)
         {
             discovery.PeerDiscovered -= OnLanPeerDiscovered;
@@ -655,7 +875,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             catch (ObjectDisposedException) { }
             catch (Exception error) { acceptFailure = error; }
         await connections.DisposeAsync().ConfigureAwait(false);
-        Task[] workers = sessionWorkers.Values.Concat(maintainers.Values).ToArray();
+        Task[] workers = sessionWorkers.Values.Concat(maintainers.Values).Concat(relayAcceptWorkers.Values).ToArray();
         try { await Task.WhenAll(workers).ConfigureAwait(false); } catch (OperationCanceledException) { } catch { }
         foreach (IAsyncDisposable session in sessions.Values)
             try { await session.DisposeAsync().ConfigureAwait(false); } catch { }

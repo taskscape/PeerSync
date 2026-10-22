@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <Protobuf Include="rendezvous.proto" GrpcServices="Both" />
+  </ItemGroup>
+</Project>

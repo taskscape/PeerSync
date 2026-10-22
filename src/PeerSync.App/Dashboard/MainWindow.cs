@@ -136,6 +136,7 @@ internal sealed class MainWindow : Window, IDisposable
         grid.Columns.Add(new DataGridTextColumn { Header = "Name", Binding = new Binding(nameof(PeerItem.Name)), Width = new(1, DataGridLengthUnitType.Star) });
         grid.Columns.Add(new DataGridTextColumn { Header = "Device fingerprint", Binding = new Binding(nameof(PeerItem.Fingerprint)), Width = 165 });
         grid.Columns.Add(new DataGridTextColumn { Header = "Approval", Binding = new Binding(nameof(PeerItem.Approval)), Width = 100 });
+        grid.Columns.Add(new DataGridTextColumn { Header = "Route", Binding = new Binding(nameof(PeerItem.Route)), Width = 110 });
         return grid;
     }
 

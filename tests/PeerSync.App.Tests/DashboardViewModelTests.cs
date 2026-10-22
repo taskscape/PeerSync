@@ -79,6 +79,31 @@ public sealed class DashboardViewModelTests
         model.TransferRates.ShouldContain("Queue 3");
     }
 
+    [Fact]
+    public void PeerRouteReflectsTransportFromControlSnapshot()
+    {
+        var model = new DashboardViewModel();
+        ControlEvent relay = Snapshot();
+        relay.Peers.Add(new FolderPeerInfo
+        {
+            FolderId = new string('A', 64),
+            Peer = new PeerInfo { DeviceId = new string('B', 64), Name = "Second PC",
+                Approval = "Approved", Transport = "Relay" },
+        });
+        model.Apply(relay);
+        model.Peers.Single().Route.ShouldBe("via relay");
+
+        ControlEvent direct = Snapshot();
+        direct.Peers.Add(new FolderPeerInfo
+        {
+            FolderId = new string('A', 64),
+            Peer = new PeerInfo { DeviceId = new string('B', 64), Name = "Second PC",
+                Approval = "Approved", Transport = "Quic" },
+        });
+        model.Apply(direct);
+        model.Peers.Single().Route.ShouldBe("direct QUIC");
+    }
+
     private static ControlEvent Snapshot() => new()
     { FullSnapshot = true, Status = new ServiceStatus { InstanceId = Guid.NewGuid().ToString("N"), Sequence = 1 } };
 }

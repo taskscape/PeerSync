@@ -75,7 +75,26 @@ try {
             }
         }
     }
-    Write-Output 'Signed development x64 and Arm64 installers built and verified.'
+    & (Join-Path $PSScriptRoot 'Build-RendezvousInstaller.ps1') -Version 1.0.0 `
+        -IsccPath $iscc -CertificateThumbprint $certificate.Thumbprint -DevelopmentSigning
+    if ($LASTEXITCODE -ne 0) { throw 'Rendezvous installer build failed' }
+    $serverSetup = Join-Path $root 'artifacts/installer/PeerSync-Rendezvous-Setup-1.0.0.0-x64.exe'
+    $serverSignature = Get-AuthenticodeSignature -LiteralPath $serverSetup
+    if ($serverSignature.Status -ne 'Valid' -or
+        $serverSignature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or
+        $null -eq $serverSignature.TimeStamperCertificate) {
+        throw 'Rendezvous installer signature verification failed'
+    }
+    foreach ($component in @('PeerSync.Rendezvous.exe', 'PeerSync.Rendezvous.dll')) {
+        $payload = Join-Path $root "publish/rendezvous/x64/$component"
+        $payloadSignature = Get-AuthenticodeSignature -LiteralPath $payload
+        if ($payloadSignature.Status -ne 'Valid' -or
+            $payloadSignature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or
+            $null -eq $payloadSignature.TimeStamperCertificate) {
+            throw "Rendezvous payload signature verification failed: $component"
+        }
+    }
+    Write-Output 'Signed development x64, Arm64 and Rendezvous installers built and verified.'
 }
 finally {
     if ($certificate) {
