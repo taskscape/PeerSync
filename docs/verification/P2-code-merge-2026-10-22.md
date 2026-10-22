@@ -76,6 +76,20 @@ TCP bind on the UDP-probed port after 256 attempts. The local host reports
 multiple excluded TCP port ranges; no transport-code change is attributed
 to that environment failure. Current-head hosted CI remains required.
 
+The next [PR #45 run](https://github.com/taskscape/PeerSync/actions/runs/39793408220)
+passed x64 Net 51/51 and App 14/14, including the reviewed cancellation
+case. Its Server 2022 job failed in the P0 IPv6 QUIC probe: the client
+reported a verified 1 GiB digest and exited zero, but the server had received
+all bytes and then raised `QuicException.StreamAborted` at `digest.ack`.
+`QuicBasics` read exactly 32 digest bytes and disposed its QUIC stream
+without reading the server's FIN. [.NET QUIC guidance](https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/quic/quic-overview)
+states that disposal aborts an unread read side. The client now requires an
+EOF after the digest before closing. A rebuilt local `Run-P0.ps1 -SkipWatcher`
+passed both IPv4 and IPv6 1 GiB mutual-certificate transfers, the pipe and
+rendezvous probes; its `artifacts/p0/summary.json` still correctly leaves
+the physical P0 gate false. The hosted Server 2022 failure is retained, and
+the full amended-head matrix remains required.
+
 The local x64 package
 `artifacts/deploy/PeerSync-win-x64-20261022T125442Z-c194ea93.zip` has SHA-256
 `BEE324C1F32F416556558B0923B6C029E520A7363B558437EDBCCC0B53543D50`.
