@@ -36,6 +36,16 @@ passed again after upgrading with the final locally signed x64 setup, whose
 manifest hash and guest Authenticode signature were verified before install.
 
 The VM's setup logs are under `C:\Temp\PeerSync\` in the local test guest.
+After PR #47's source was merged, a further check on the same guest registered
+`C:\PeerSync-P3-RemoveData-Probe` through the installed CLI and placed a sentinel
+file inside it. The installed `PeerSync.Service.exe --remove-data` exited 0,
+stopped the service, removed `C:\ProgramData\PeerSync` and its device certificate,
+and left the registered folder's sentinel intact. The signed silent uninstaller
+then exited 0 and removed the service and installed files. The sentinel remained.
+This direct command check did not exercise the interactive uninstall prompt.
+The reinstalled guest also exchanged files over authenticated QUIC with the
+host's earlier P2 service; see [virtual two-machine sync](P3-virtual-two-pc-sync-2026-10-22.md).
+
 This smoke did not exercise the rendered WPF authorization flow, interactive
 remove-data prompt, Windows 11, Server 2022, Arm64 execution, or two-PC sync;
 their plan gates stay open.
