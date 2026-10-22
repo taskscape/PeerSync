@@ -20,7 +20,6 @@ public sealed class ConnectionManagerTests
         await using var manager = new ConnectionManager(local);
         var candidates = new[]
         {
-            new ConnectionCandidate(ConnectionSource.Relay, _ => ValueTask.FromResult<ManagedPeerConnection>(Session(local, remote, true))),
             new ConnectionCandidate(ConnectionSource.Public, _ =>
             {
                 attempted.Enqueue(ConnectionSource.Public);
@@ -139,6 +138,54 @@ public sealed class ConnectionManagerTests
     }
 
     [Fact]
+    public async Task AuthenticatedWinnerClosingDuringLoserDrainStillIdentifiesPeerForReconnect()
+    {
+        byte[] local = Id(1), remote = Id(2);
+        var winner = Session(local, remote, initiator: true);
+        var loserStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var manager = new ConnectionManager(local, diagnostics: null, (_, _) => Task.CompletedTask);
+
+        ManagedPeerConnection selected = await manager.ConnectAnyAsync(
+        [new(ConnectionSource.Public, _ => ValueTask.FromResult(winner)),
+         new(ConnectionSource.Public, async token =>
+         {
+             loserStarted.TrySetResult();
+             try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+             catch (OperationCanceledException)
+             {
+                 await winner.DisposeAsync(); // Remote resolved the transport duplicate.
+                 throw;
+             }
+             throw new InvalidOperationException("Losing candidate unexpectedly continued.");
+         })], TestContext.Current.CancellationToken);
+
+        await loserStarted.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        selected.ShouldBe(winner);
+        selected.RemoteDeviceId.ShouldBe(remote);
+        selected.Closed.IsCompleted.ShouldBeTrue();
+        manager.TryGetConnected(remote, out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ClosedAuthenticatedCandidateFallsThroughToLiveTransport()
+    {
+        byte[] local = Id(1), remote = Id(2);
+        var closed = Session(local, remote, initiator: true);
+        await closed.DisposeAsync();
+        var live = Session(local, remote, initiator: true);
+        await using var manager = new ConnectionManager(local, diagnostics: null, (_, _) => Task.CompletedTask);
+
+        ManagedPeerConnection selected = await manager.ConnectAnyAsync(
+        [new(ConnectionSource.Public, _ => ValueTask.FromResult(closed)),
+         new(ConnectionSource.Public, _ => ValueTask.FromResult(live))],
+            TestContext.Current.CancellationToken);
+
+        selected.ShouldBe(live);
+        manager.TryGetConnected(remote, out var current).ShouldBeTrue();
+        current.ShouldBe(live);
+    }
+
+    [Fact]
     public async Task CallerCancellationWhileLosingAttemptDrainsDisposesAuthenticatedWinner()
     {
         byte[] local = Id(1), remote = Id(2);
@@ -169,6 +216,26 @@ public sealed class ConnectionManagerTests
 
         winner.Closed.IsCompleted.ShouldBeTrue();
         loser.Closed.IsCompleted.ShouldBeTrue();
+        manager.TryGetConnected(remote, out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task CandidateDisposalFailureDoesNotMaskCallerCancellation()
+    {
+        byte[] local = Id(1), remote = Id(2);
+        var owner = new FaultingDisposalSession();
+        var candidate = new ManagedPeerConnection(Guid.NewGuid(), local, remote, true, owner, owner.Closed.Task);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        await using var manager = new ConnectionManager(local);
+
+        await Should.ThrowAsync<OperationCanceledException>(() => manager.ConnectAnyAsync(
+            [new(ConnectionSource.Lan, _ =>
+            {
+                stop.Cancel();
+                return ValueTask.FromResult(candidate);
+            })], stop.Token).AsTask());
+
+        owner.Disposed.ShouldBeTrue();
         manager.TryGetConnected(remote, out _).ShouldBeFalse();
     }
 
@@ -320,6 +387,18 @@ public sealed class ConnectionManagerTests
         {
             Closed.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class FaultingDisposalSession : IAsyncDisposable
+    {
+        public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Disposed { get; private set; }
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            Closed.TrySetResult();
+            throw new IOException("Simulated transport disposal failure.");
         }
     }
 }

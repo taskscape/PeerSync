@@ -62,7 +62,7 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
 | P1 Local sync engine | 4-8 | Accepted with the explicit CI timing exception: all correctness, two actual campaign dates and the repaired 100000-file corpus are accepted. PR #42 is merged; hosted timeout/incomplete scope stays visible and full current-source verification remains required before release. Installed-service/production clock integration remains mandatory at P2.5.7/Gate P2. | 2026-10-21, qualified timing exception |
-| P2 LAN sync as a service | 9-13 | In progress: the latest broad canonical verifier passed all 1,719 tests, native P0 probes, QUIC diagnostics, six spike publishes and 600 seconds of fuzz across 191,167 seeds with zero crashes. The self-contained package runs under local SCM; its verified client observed an authenticated ephemeral peer, clock-skew block/recovery, SHA-256-verified transfer and disconnect through the production listener. The actual WPF clock controls rendered those fixed-service states in an active desktop, and sanitized diagnostic collection passes. The second installed PC, authenticated external session, physical LAN corpus/throughput, recovery soak and remaining P2 gate evidence remain open. | - |
+| P2 LAN sync as a service | 9-13 | Code merged in PR #44 after all nine PR jobs passed. The first main x64 run exposed a connection-race failure in the installed-host WPF clock test; follow-up PR #45 passed the full local verifier before a test-only fixture correction and awaits current-head CI ([merge audit](docs/verification/P2-code-merge-2026-10-22.md)). The self-contained package runs under local SCM; its verified client observed authenticated skew/recovery and a SHA-256-verified transfer. The second installed PC, authenticated external session, physical LAN corpus/throughput, recovery soak and remaining P2 gate evidence remain open. | - |
 | P3 WPF app and installer | 14-17 | Not started | - |
 | P4 Internet sync | 18-22 | Not started | - |
 | P5 Hardening and v1.0 | 23-26 | Not started | - |
@@ -70,8 +70,8 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 The 2026-10-22 implementation-order exception allows later phase code to
 proceed while physical gates remain open, but it does not change these gate
-statuses or permit a beta/release claim. P3 has not started while the current
-P2 draft PR and required CI are unresolved.
+statuses or permit a beta/release claim. P3 has not started while the P2
+main-run connection-race follow-up and required current-head CI are unresolved.
 
 ---
 

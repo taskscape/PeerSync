@@ -118,6 +118,11 @@ try
         byte[] digest = new byte[32];
         await stream.ReadExactlyAsync(digest, timeout.Token);
         if (!CryptographicOperations.FixedTimeEquals(digest, hash.GetHashAndReset())) throw new InvalidDataException("Hash mismatch.");
+        // Consume the peer's FIN before disposal. Disposing with an unread
+        // read side aborts it, even after the complete digest was received.
+        stage = "digest.eof";
+        if (await stream.ReadAsync(buffer.AsMemory(0, 1), timeout.Token) != 0)
+            throw new InvalidDataException("Trailing data after digest.");
     }
     clock.Stop();
     log.Write(new("transfer.completed", "transfer") { SessionId = session, Bytes = transferred,
