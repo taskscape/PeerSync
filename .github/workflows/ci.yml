@@ -57,7 +57,7 @@ jobs:
           retention-days: 7
   fuzz-smoke:
     runs-on: windows-latest
-    # Two bounded cohorts retain all thirteen Simulation methods and overlap
+    # Two bounded cohorts retain all fifteen Simulation methods and overlap
     # independent IO with the required ten-minute CPU boundary fuzz.
     timeout-minutes: 50
     steps:

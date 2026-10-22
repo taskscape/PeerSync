@@ -36,7 +36,7 @@ full P2 gate.
 | Engine / Storage | 1013 / 300 passed |
 | Control.Contracts / Service / App | 39 / 8 / 13 passed |
 | Total canonical unit results | 1612 passed, no skipped/failed results |
-| Real-engine Simulation | 13 methods, 6 retained regressions, maintenance |
+| Real-engine Simulation | 15 methods, 8 retained regressions, maintenance (current P2 scope; accepted P1 campaign had 13/6) |
 | Generated smoke | 8 flat / 4 hierarchy cases |
 | Five-target fuzz | 214811 seeds, 600.0052941 s, zero crashes |
 | Native diagnostics/probes and win-x64 probe publishing | Pass |

@@ -92,7 +92,7 @@ public sealed class InstalledFolderHostTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DeleteTemporaryRootAsync(root);
         }
     }
 
@@ -142,7 +142,7 @@ public sealed class InstalledFolderHostTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DeleteTemporaryRootAsync(root);
         }
     }
 
@@ -191,7 +191,7 @@ public sealed class InstalledFolderHostTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DeleteTemporaryRootAsync(root);
         }
     }
 
@@ -337,7 +337,7 @@ public sealed class InstalledFolderHostTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DeleteTemporaryRootAsync(root);
         }
     }
 
@@ -380,7 +380,27 @@ public sealed class InstalledFolderHostTests
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            await DeleteTemporaryRootAsync(root);
+        }
+    }
+
+    private static async Task DeleteTemporaryRootAsync(string root)
+    {
+        string full = Path.GetFullPath(root);
+        string temporary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        string name = Path.GetFileName(full);
+        if (!string.Equals(Path.GetDirectoryName(full), temporary, StringComparison.OrdinalIgnoreCase) ||
+            !name.StartsWith("PeerSync-Service", StringComparison.Ordinal) ||
+            !Guid.TryParseExact(name[(name.LastIndexOf('-') + 1)..], "N", out _))
+            throw new IOException("Unexpected service-test fixture root.");
+
+        // SQLite pools are cleared by host disposal; Windows can briefly keep
+        // the closed file handle busy while its filesystem filters release it.
+        for (int attempt = 0; attempt < 30; attempt++)
+        {
+            if (!Directory.Exists(full)) return;
+            try { Directory.Delete(full, recursive: true); return; }
+            catch (IOException) when (attempt < 29) { await Task.Delay(100); }
         }
     }
 
