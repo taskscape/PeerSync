@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -24,7 +23,7 @@ public sealed class RendezvousHostTests
         using X509Certificate2 serverCertificate = ServerCertificate(serverKey);
         using ECDsa deviceKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using X509Certificate2 deviceCertificate = DeviceCertificate(deviceKey);
-        int port = AvailablePort();
+        int port = RendezvousTestPort.Allocate();
         string origin = $"https://127.0.0.1:{port}";
         string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-host"));
         await using WebApplication app = RendezvousHost.Build(
@@ -98,15 +97,6 @@ public sealed class RendezvousHostTests
         };
         if (device is not null) handler.SslOptions.ClientCertificates = new X509CertificateCollection { device };
         return handler;
-    }
-
-    private static int AvailablePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     private static X509Certificate2 ServerCertificate(RSA key)

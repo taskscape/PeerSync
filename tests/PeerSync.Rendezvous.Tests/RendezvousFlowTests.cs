@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Channels;
@@ -33,7 +32,7 @@ public sealed class RendezvousFlowTests
         using X509Certificate2 charlie = Certificate(server: false);
         byte[] shared = RandomNumberGenerator.GetBytes(32);
         byte[] separate = RandomNumberGenerator.GetBytes(32);
-        int port = FreePort();
+        int port = RendezvousTestPort.Allocate();
         var origin = new Uri($"https://127.0.0.1:{port}");
         string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-flow"));
         await using WebApplication app = RendezvousHost.Build(
@@ -135,15 +134,6 @@ public sealed class RendezvousFlowTests
         await foreach (ServerMessage message in messages.ReadAllAsync(cancellationToken))
             if (match(message)) return message;
         throw new EndOfStreamException("Tracker session closed before the expected message.");
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     private static X509Certificate2 Certificate(bool server)

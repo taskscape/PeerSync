@@ -39,6 +39,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private readonly ControlStatusRuntime status;
     private readonly TimeProvider timeProvider;
     private readonly QuicPeerOptions options;
+    private readonly RegistrationList relayRegistrations;
     private readonly TcpPeerProtocolOptions tcpProtocolOptions;
     private readonly TcpPeerOptions tcpOptions;
     private readonly ConnectionManager connections;
@@ -88,6 +89,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             Diagnostics = diagnostics,
             DeviceName = Environment.MachineName,
         };
+        relayRegistrations = new RegistrationList(
+            () => getFolders().Where(folder => folder.Settings.UseTracker && folder.Settings.UseRelay).ToArray(),
+            recordPending);
         tcpProtocolOptions = new TcpPeerProtocolOptions
         {
             CreateHello = options.CreateHello, Folders = options.Folders, Diagnostics = diagnostics,
@@ -397,7 +401,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         ValueTask result = OnTrackerMessageAsync(message, cancellationToken);
-        if (message.PayloadCase != ServerMessage.PayloadOneofCase.RelayOffer) return result;
+        if (message.PayloadCase != ServerMessage.PayloadOneofCase.RelayOffer
+            || !useRelay || relayRegistrations.Count == 0) return result;
         RelayOffer offer = message.RelayOffer;
         if (offer.PeerDeviceId.Length != 32 || offer.Token.Length != 32 || offer.SessionId.Length != 16
             || offer.PeerDeviceId.Span.SequenceEqual(localDeviceId)) return result;
@@ -426,11 +431,12 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
 
     private async Task AcceptRelayAsync(Uri server, RelayOffer offer, CancellationToken cancellationToken)
     {
+        if (!useRelay || relayRegistrations.Count == 0) return;
         if (connections.TryGetConnected(offer.PeerDeviceId.Span, out var current) && current is not null) return;
         RelayTransport transport = await RelayClient.ConnectAsync(server, offer, certificate, IsDevicePinned,
             cancellationToken).ConfigureAwait(false);
         RelayPeerProtocolSession session = await RelayPeerProtocolSession.StartAsync(transport, options.CreateHello,
-            options.Folders, diagnostics, options.AddStrike, options.RequestTimeout, cancellationToken)
+            relayRegistrations, diagnostics, options.AddStrike, options.RequestTimeout, cancellationToken)
             .ConfigureAwait(false);
         TrackSession(session.SessionId, session, session.Closed);
         try { await connections.RegisterIncomingAsync(new ManagedPeerConnection(session.SessionId,
@@ -454,7 +460,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             RelayTransport transport = await RelayClient.ConnectAsync(server, offer, certificate,
                 IsDevicePinned, cancellationToken).ConfigureAwait(false);
             RelayPeerProtocolSession session = await RelayPeerProtocolSession.StartAsync(transport,
-                options.CreateHello, options.Folders, diagnostics, options.AddStrike, options.RequestTimeout,
+                options.CreateHello, relayRegistrations, diagnostics, options.AddStrike, options.RequestTimeout,
                 cancellationToken).ConfigureAwait(false);
             TrackSession(session.SessionId, session, session.Closed);
             return new ManagedPeerConnection(session.SessionId, session.LocalDeviceId, session.RemoteDeviceId,

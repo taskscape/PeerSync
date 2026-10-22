@@ -39,11 +39,18 @@ Inside that VM, the installed CLI's `psp probe sync.taskscape.com:99` used a
 test-only hosts entry to reach its own listener. It returned exit 0,
 `tcp.reachable=true` at HTTP/2, `udp.reachable=true` at HTTP/3, and observed
 address `127.0.0.1`. The server journal recorded startup plus separate HTTP/2
-and HTTP/3 probe events. `PeerSync.Rendezvous.exe diagnostics --output` created
-a sanitized ZIP with four recent events and an environment manifest; its
-default excluded network addresses. A service-start information event was
-present in Application Event Log. Application warning/error emission remains
-to be checked with a rejected remote gRPC request.
+and HTTP/3 probe events. From the Hyper-V host, an anonymous HTTP/2 gRPC
+session request to the guest was rejected. The server logged
+`rendezvous.auth_rejected` and its installed Application Event Log source
+emitted warning event 1001 with the same safe code. The host request used
+test-only certificate validation because the guest's self-signed server
+certificate was not trusted on the host; this does not prove public CA
+validation.
+
+`PeerSync.Rendezvous.exe diagnostics --output` created a sanitized ZIP with
+five recent events and an environment manifest. The bundle contained the
+authentication rejection but no `remoteAddress` or `folderId` fields. A
+service-start information event was also present in Application Event Log.
 
 The current physical requirements remain open: public certificate via
 win-acme, outside-network TCP and UDP 99 probes, two real PCs on different
