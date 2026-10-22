@@ -15,7 +15,8 @@ internal static class UpdateManifestVerifier
     internal const long MaximumSetupBytes = 1024L * 1024 * 1024;
 
     internal static VerifiedUpdate Verify(ReadOnlySpan<byte> envelopeBytes, X509Certificate2 publisher,
-        ReadOnlySpan<byte> pinnedCertificateSha256, Version installedVersion, DateTimeOffset now)
+        ReadOnlySpan<byte> pinnedCertificateSha256, Version installedVersion, DateTimeOffset now,
+        bool allowCurrentVersion = false)
     {
         ArgumentNullException.ThrowIfNull(publisher);
         ArgumentNullException.ThrowIfNull(installedVersion);
@@ -47,7 +48,8 @@ internal static class UpdateManifestVerifier
             RequireFields(root, "version", "url", "sha256", "size", "expiresUtcTicks");
             string versionText = RequiredString(root, "version");
             if (!Version.TryParse(versionText, out Version? version) || version.Build < 0
-                || version <= installedVersion || versionText.Length > 32)
+                || version < installedVersion || (!allowCurrentVersion && version == installedVersion)
+                || versionText.Length > 32)
                 throw new InvalidDataException("Update version is invalid or not newer.");
             string urlText = RequiredString(root, "url");
             if (urlText.Length > 2048 || !Uri.TryCreate(urlText, UriKind.Absolute, out Uri? url)

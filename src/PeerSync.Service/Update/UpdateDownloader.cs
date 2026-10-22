@@ -20,7 +20,8 @@ internal sealed class UpdateDownloader(HttpClient client, string updatesRoot, Ve
         byte[] envelope = await ReadBoundedAsync(policy.ManifestUrl, 32 * 1024, cancellationToken).ConfigureAwait(false);
         using var publisher = policy.OpenPublisher();
         VerifiedUpdate offer = UpdateManifestVerifier.Verify(envelope, publisher,
-            policy.PublisherCertificateSha256, installedVersion, clock.GetUtcNow());
+            policy.PublisherCertificateSha256, installedVersion, clock.GetUtcNow(), allowCurrentVersion: true);
+        if (offer.Version == installedVersion) return false;
         string id = Guid.NewGuid().ToString("N");
         string stage = Path.Combine(root, id + ".staging");
         string ready = Path.Combine(root, id + ".ready");

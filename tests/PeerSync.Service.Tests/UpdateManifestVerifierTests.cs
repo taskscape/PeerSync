@@ -151,6 +151,29 @@ public sealed class UpdateManifestVerifierTests
     }
 
     [Fact]
+    public async Task CurrentSignedOfferIsAQuietNoopAfterUpgrade()
+    {
+        using var signer = Signer(); byte[] cert = signer.Export(X509ContentType.Cert);
+        var manifestUrl = new Uri("https://updates.example.test/manifest.json");
+        var setupUrl = new Uri("https://updates.example.test/setup.exe");
+        byte[] setup = "already installed"u8.ToArray();
+        byte[] envelope = Offer(signer, "1.0.10.0", setupUrl.AbsoluteUri,
+            Convert.ToHexString(SHA256.HashData(setup)), setup.Length, Now.AddDays(2).UtcTicks);
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-updates-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var responses = new FixedResponses(manifestUrl, envelope, setupUrl, setup);
+            using var client = new HttpClient(responses);
+            var policy = new UpdatePolicy(true, manifestUrl, cert, SHA256.HashData(cert));
+            var downloader = new UpdateDownloader(client, root, new Version(1, 0, 10, 0), new FixedClock(Now));
+            (await downloader.CheckOnceAsync(policy, TestContext.Current.CancellationToken)).ShouldBeFalse();
+            responses.Calls.ShouldBe(1);
+            Directory.GetDirectories(root).ShouldBeEmpty();
+        }
+        finally { DeleteOwnedFixture(root); }
+    }
+
+    [Fact]
     public void ShortLivedPreflightReverifiesStagedBytesAndEnabledPolicy()
     {
         using var signer = Signer(); byte[] cert = signer.Export(X509ContentType.Cert);
@@ -195,8 +218,12 @@ public sealed class UpdateManifestVerifierTests
 
     private sealed class FixedResponses(Uri manifestUrl, byte[] manifest, Uri setupUrl, byte[] setup) : HttpMessageHandler
     {
+        private int calls;
+        internal int Calls => Volatile.Read(ref calls);
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref calls);
             byte[] bytes = request.RequestUri == manifestUrl ? manifest
                 : request.RequestUri == setupUrl ? setup : throw new IOException("Unexpected update URL.");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

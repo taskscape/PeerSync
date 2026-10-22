@@ -50,14 +50,45 @@ post-install version/task checks. From installed 1.0.8.0, the scheduled
 SYSTEM task installed the signed 1.0.9.0 offer, returned 0, left PeerSync
 Running, removed the verified ready slot, and retained its SYSTEM principal.
 The installed helper SHA-256 matched the final source file.
-The Release Service test project passed 54/54 tests after rebuilding, including
-manifest, policy, downloader and preflight cases. This does not replace the
-installed HTTPS-feed test listed below.
+The Release Service test project passed 54/54 tests after rebuilding,
+including manifest, policy, downloader and preflight cases. The installed
+HTTPS-feed test follows below.
+
+## Installed HTTPS feed
+
+The VM hosted an HTTPS feed bound only to localhost:9443 using a short-lived
+test TLS certificate trusted by the guest. The reproducible server script is
+[ServeUpdateFeed.ps1](../../spikes/ServeUpdateFeed.ps1). It served the exact
+development-signed 1.0.10.0 setup and its RSA-PSS manifest. After PeerSync restarted,
+the installed service requested the manifest and setup, staged one .ready
+directory, and emitted a downloaded setup whose SHA-256 matched the signed
+source. The installed --verify-update preflight returned 0. The existing
+SYSTEM task then returned 0, installed service version 1.0.10.0, left the
+service Running, and removed both the ready and trusted-copy directories.
+This tests the real service HTTP handler and updater, not a fake response.
+
+After that upgrade, the feed still advertised the now-current version.
+The downloader was changed to treat an authenticated current-version offer
+as a quiet no-op before downloading the setup. Downgrades remain invalid;
+the rebuilt Release Service suite passed 55/55 with a one-request assertion
+for this case. A development-signed 1.0.11.0 package was then offered through
+the same installed HTTPS path. The service staged it, and the SYSTEM helper
+installed it with task result 0, leaving PeerSync Running and no pending
+ready slot. A service restart with that unchanged feed produced exactly one
+new GET for /manifest.json, no setup GET, no ready slot and an informational
+service.update_no_new_offer event.
+
+After validation, the administrative update policy was disabled, the
+temporary feed process stopped, both localhost:9443 TLS bindings removed,
+and the test TLS certificate removed from the guest Root and My stores.
+PeerSync remained Running at 1.0.11.0. The publisher's public development
+certificate remained in the separate update policy and development trust
+stores used for Authenticode validation.
 
 ## Still open
 
-- A complete installed service fetch from a live HTTPS feed, with a real
-  release signer and URL, has not been run.
+- A public distribution URL and release signer have not been provisioned;
+  the completed installed HTTPS test used localhost and development trust.
 - The negative nonzero-exit path was checked with an isolated Inno Setup
   probe, not by deliberately breaking the final signed installer in the VM.
 - A revoked certificate, unrelated trusted signer and certificate rotation
