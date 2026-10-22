@@ -79,7 +79,13 @@ public sealed class ConnectionManager : IAsyncDisposable
                 if (candidate is null) continue;
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    await candidate.DisposeAsync().ConfigureAwait(false);
+                    try { await candidate.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception error)
+                    {
+                        diagnostics?.TryWrite(new("connection.cancelled_candidate_dispose_failed", "connection_manager")
+                        { Level = DiagnosticLevel.Warning, SessionId = candidate.SessionId,
+                            ErrorCode = SafeError(error), HResult = error.HResult });
+                    }
                     cancellationToken.ThrowIfCancellationRequested();
                 }
                 try

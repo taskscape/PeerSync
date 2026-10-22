@@ -220,6 +220,26 @@ public sealed class ConnectionManagerTests
     }
 
     [Fact]
+    public async Task CandidateDisposalFailureDoesNotMaskCallerCancellation()
+    {
+        byte[] local = Id(1), remote = Id(2);
+        var owner = new FaultingDisposalSession();
+        var candidate = new ManagedPeerConnection(Guid.NewGuid(), local, remote, true, owner, owner.Closed.Task);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        await using var manager = new ConnectionManager(local);
+
+        await Should.ThrowAsync<OperationCanceledException>(() => manager.ConnectAnyAsync(
+            [new(ConnectionSource.Lan, _ =>
+            {
+                stop.Cancel();
+                return ValueTask.FromResult(candidate);
+            })], stop.Token).AsTask());
+
+        owner.Disposed.ShouldBeTrue();
+        manager.TryGetConnected(remote, out _).ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task CandidateDiagnosticsIdentifySourceTransportAndOptInEndpoint()
     {
         byte[] local = Id(1), remote = Id(2);
@@ -367,6 +387,18 @@ public sealed class ConnectionManagerTests
         {
             Closed.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class FaultingDisposalSession : IAsyncDisposable
+    {
+        public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Disposed { get; private set; }
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            Closed.TrySetResult();
+            throw new IOException("Simulated transport disposal failure.");
         }
     }
 }

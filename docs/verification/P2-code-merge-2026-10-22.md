@@ -65,6 +65,17 @@ The first PR #45 run's other eight jobs passed, including both Server jobs,
 Arm64, fuzz, all retained shards and the strict boundary aggregate. Its
 failure inventory contains this one Net assertion.
 
+Copilot review of PR #45 found a separate cancellation cleanup issue in the
+new manager path: if disposal of a just-authenticated candidate throws after
+the caller cancels, that error would mask cancellation. The follow-up now
+logs the disposal error and propagates the caller's cancellation, with a
+deterministic throwing-disposal test. All 14 ConnectionManager tests pass
+locally. A full local Net run of this revision had 50/51 passes; the sole
+failure was `TcpFallbackCanListenOnTheQuicUdpPort`, where Windows refused the
+TCP bind on the UDP-probed port after 256 attempts. The local host reports
+multiple excluded TCP port ranges; no transport-code change is attributed
+to that environment failure. Current-head hosted CI remains required.
+
 The local x64 package
 `artifacts/deploy/PeerSync-win-x64-20261022T125442Z-c194ea93.zip` has SHA-256
 `BEE324C1F32F416556558B0923B6C029E520A7363B558437EDBCCC0B53543D50`.
