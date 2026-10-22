@@ -41,6 +41,7 @@ internal sealed class MainWindow : Window, IDisposable
     private readonly ListBox folders = new();
     private readonly ListBox pending = new();
     private readonly ListBox overwrites = new();
+    private readonly DataGrid archives = new();
     private readonly TextBox ignoreRules = new() { AcceptsReturn = true, Height = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly TextBox predefinedHosts = new() { AcceptsReturn = true, Height = 72, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly TextBox archiveDays = new() { Width = 90 };
@@ -115,6 +116,7 @@ internal sealed class MainWindow : Window, IDisposable
                 model.SelectedFolderId = item.Id;
                 peerView.Refresh(); overwriteView.Refresh();
                 _ = ExecuteAsync(LoadFolderSettingsAsync);
+                _ = ExecuteAsync(LoadArchiveAsync);
             }
         };
         AutomationProperties.SetAutomationId(folders, "FoldersList");
@@ -125,7 +127,14 @@ internal sealed class MainWindow : Window, IDisposable
         right.Items.Add(new TabItem { Header = "Peers", Content = PeerList() });
         right.Items.Add(new TabItem { Header = "Activity", Content = BoundText(nameof(model.FolderActivity), "FolderActivity", 14) });
         right.Items.Add(new TabItem { Header = "Overwritten", Content = BuildOverwritePage() });
+        var archiveTab = new TabItem { Header = "Archive", Content = BuildArchivePage() };
+        right.Items.Add(archiveTab);
         right.Items.Add(new TabItem { Header = "Settings", Content = BuildFolderSettingsPage() });
+        right.SelectionChanged += (_, change) =>
+        {
+            if (ReferenceEquals(change.Source, right) && ReferenceEquals(right.SelectedItem, archiveTab))
+                _ = ExecuteAsync(LoadArchiveAsync);
+        };
         return layout;
     }
 
@@ -149,6 +158,28 @@ internal sealed class MainWindow : Window, IDisposable
         bar.Children.Add(ActionButton("Restore as copy", () => RestoreSelectedAsync(copy: true)));
         overwrites.ItemsSource = overwriteView; AutomationProperties.SetAutomationId(overwrites, "OverwrittenVersions");
         panel.Children.Add(overwrites); return panel;
+    }
+
+    private DockPanel BuildArchivePage()
+    {
+        var panel = new DockPanel();
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+        DockPanel.SetDock(bar, Dock.Top); panel.Children.Add(bar);
+        bar.Children.Add(ActionButton("Refresh", LoadArchiveAsync));
+        bar.Children.Add(ActionButton("Restore", () => RestoreArchiveSelectedAsync(copy: false)));
+        bar.Children.Add(ActionButton("Restore as copy", () => RestoreArchiveSelectedAsync(copy: true)));
+        var status = BoundText(nameof(model.ArchiveStatus), "ArchiveStatus", 12);
+        DockPanel.SetDock(status, Dock.Bottom); panel.Children.Add(status);
+        archives.IsReadOnly = true; archives.AutoGenerateColumns = false;
+        archives.CanUserAddRows = false; archives.CanUserDeleteRows = false;
+        archives.ItemsSource = model.ArchiveVersions;
+        archives.Columns.Add(new DataGridTextColumn { Header = "Path", Binding = new Binding(nameof(ArchiveItem.Path)),
+            Width = new(1, DataGridLengthUnitType.Star) });
+        archives.Columns.Add(new DataGridTextColumn { Header = "Archived", Binding = new Binding(nameof(ArchiveItem.ArchivedLocal)), Width = 145 });
+        archives.Columns.Add(new DataGridTextColumn { Header = "Size", Binding = new Binding(nameof(ArchiveItem.SizeDisplay)), Width = 90 });
+        AutomationProperties.SetAutomationId(archives, "ArchivedVersions");
+        panel.Children.Add(archives);
+        return panel;
     }
 
     private ScrollViewer BuildFolderSettingsPage()
@@ -281,6 +312,33 @@ internal sealed class MainWindow : Window, IDisposable
         var result = await client.RestoreArchiveAsync(item.FolderId, item.ArchiveId,
             overwrittenOnly: true, copyPath: destination);
         if (!result.Completed) throw new IOException("The restore could not complete: " + result.Detail);
+    }
+
+    private async Task LoadArchiveAsync()
+    {
+        string folder = model.SelectedFolderId;
+        if (folder.Length == 0 || !model.ServiceAvailable) return;
+        using var client = ControlStatusClient.CreateForInstalledService();
+        var response = await client.ListArchiveAsync(folder);
+        model.ApplyArchive(response);
+    }
+
+    private async Task RestoreArchiveSelectedAsync(bool copy)
+    {
+        if (archives.SelectedItem is not ArchiveItem item) return;
+        string? destination = null;
+        if (copy)
+        {
+            var prompt = new TextPromptWindow("Restore as copy", "Relative destination inside this folder") { Owner = this };
+            if (prompt.ShowDialog() != true) return;
+            destination = prompt.Value;
+        }
+        using var client = ControlStatusClient.CreateForInstalledService();
+        var result = await client.RestoreArchiveAsync(item.FolderId, item.ArchiveId,
+            overwrittenOnly: false, copyPath: destination);
+        if (!result.Completed) throw new IOException("The restore could not complete: " + result.Detail);
+        model.Activity = copy ? "Archived version restored as a copy." : "Archived version restored.";
+        await LoadArchiveAsync();
     }
 
     private async Task DecidePendingAsync(string decision)

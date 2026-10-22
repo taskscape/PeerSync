@@ -70,8 +70,8 @@ foreach ($cohort in $cohorts) {
         $fuzz=Read-Json (Join-Path $folder fuzz-verification.json)
         if ($fuzz.status -ne 'passed' -or $fuzz.requestedSeconds -ne 600 -or $fuzz.seconds -lt 600 -or
             $fuzz.seconds -ne $manifest.fuzzSeconds -or $fuzz.seeds -ne $manifest.fuzzSeeds -or
-            $manifest.fuzzCrashes -ne 0 -or $fuzz.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec') {
-            throw 'Incomplete ten-minute five-target fuzz evidence'
+            $manifest.fuzzCrashes -ne 0 -or $fuzz.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText') {
+            throw 'Incomplete ten-minute seven-target fuzz evidence'
         }
     }
     else {

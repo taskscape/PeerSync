@@ -1,0 +1,77 @@
+# PeerSync administrator guide
+
+This guide covers the installed client service. The central server is
+administered separately in [rendezvous-operations.md](rendezvous-operations.md).
+Keep the installer and device certificate private keys on their intended
+machines. Current physical-network and release gates are listed in
+[plan.md](../plan.md).
+
+## Install and initialize
+
+Run the client setup elevated on each Windows PC. It installs the `PeerSync`
+service under the `NT SERVICE\PeerSync` virtual account, the dashboard and
+`psp.exe` under `C:\Program Files\PeerSync`, and a local `PeerSync Users`
+group for authorized log readers. Setup calls
+`C:\Program Files\PeerSync\service\PeerSync.Service.exe --init` to prepare
+`%ProgramData%\PeerSync`, a per-machine P-256 device certificate with a
+non-exportable private key, a listener port and device settings. Do not reuse
+the certificate across PCs. Setup keeps application data during an ordinary
+upgrade and checks that the service stops before replacing binaries.
+
+The installer supports silent operation with
+`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`; use an elevated process and
+inspect its exit code and service state afterward. For a manually staged
+service, `--init` must run elevated before starting it. Restrict write access
+to `%ProgramData%\PeerSync\config`, `state` and certificate keys to the
+service and administrators. Operators who use the local control pipe must be
+authorized in the device settings; membership in `PeerSync Users` alone is
+for diagnostic-log reading.
+
+## Network and permissions
+
+The service listens on its configured `listenPort` for authenticated QUIC
+(UDP) and TCP/TLS. Allow inbound traffic on that port from intended peers.
+Local discovery uses the LAN and should stay scoped to the local subnet.
+Tracker/relay operation needs outbound TCP 99 to the configured rendezvous
+server; the central server also exposes UDP 99 for HTTP/3 probing. Firewall
+and provider rules both matter. See
+[the two-PC runbook](peersync-service-two-pc-runbook.md) for narrow test
+firewall rules and [rendezvous-operations.md](rendezvous-operations.md) for
+the server's TCP/UDP 99 setup.
+
+Device settings are stored in
+`%ProgramData%\PeerSync\config\settings.json`. A registered folder has
+separate settings including `RequireApproval`, `ArchiveDays`, predefined
+hosts, tracker and relay switches. Make a backup before changing settings,
+validate JSON and restart the service if the dashboard reports that a change
+requires restart. Folder keys must never be placed in this file, logs or
+support bundles. Use the authenticated local control API or dashboard for
+normal folder changes.
+
+## Health, logs and recovery
+
+```powershell
+Get-Service PeerSync
+& 'C:\Program Files\PeerSync\cli\psp.exe' status --json
+& 'C:\Program Files\PeerSync\cli\psp.exe' probe sync.taskscape.com:99
+& 'C:\Program Files\PeerSync\cli\psp.exe' diagnostics --output 'C:\Temp\peersync-client.zip'
+```
+
+Structured logs are under `%ProgramData%\PeerSync\logs\service`; warning
+and error summaries also reach the Windows Application Event Log. The
+diagnostic command makes a new ZIP with bounded logs and environment
+metadata. Compare session IDs and UTC times across peers. If the service
+fails during startup, inspect its Application event and the latest startup
+journal. `PeerSync.Service.exe` can run in the foreground after stopping the
+Windows service; never run both against the same database and listener.
+Detailed event names, privacy rules and failure classification are in
+[diagnostics.md](diagnostics.md).
+
+For an uninstall that preserves synchronized files, use the client
+uninstaller without data removal. `PeerSync.Service.exe --remove-data` is an
+explicit destructive administration command: it removes PeerSync application
+data and its device identity, so old device approval and local state will not
+survive reinitialization. Export needed diagnostics and verify the intended
+machine before invoking it. The
+[two-PC runbook](peersync-service-two-pc-runbook.md) contains the full test
+deployment and teardown sequence.

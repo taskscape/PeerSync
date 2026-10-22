@@ -31,7 +31,7 @@ foreach ($cohort in $cohorts) {
         1..8 | ForEach-Object { @{Seed=$_;Rounds=1} | ConvertTo-Json -Compress } | Set-Content (Join-Path $folder cases.jsonl)
         11..14 | ForEach-Object { @{Seed=$_;Rounds=1} | ConvertTo-Json -Compress } | Set-Content (Join-Path $folder hierarchical-cases.jsonl)
         Write-Json (Join-Path $folder connected-maintenance.json) @{status='passed';sourceInformationalVersion="1.0+$source";retiredArchives=2;deletedBlocks=2;publishedVersions=2}
-        Write-Json (Join-Path $folder fuzz-verification.json) @{status='passed';requestedSeconds=600;seconds=600.1;seeds=100;target='FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec'}
+        Write-Json (Join-Path $folder fuzz-verification.json) @{status='passed';requestedSeconds=600;seconds=600.1;seeds=100;target='FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText'}
     }
     else {
         $index=[int]$cohort.Substring('retained-'.Length)-1

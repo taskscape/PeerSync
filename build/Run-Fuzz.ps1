@@ -17,7 +17,7 @@ try {
     & $exe --seconds $Seconds 2> artifacts/fuzz/stderr.log | Tee-Object -FilePath artifacts/fuzz/summary.log
     if ($LASTEXITCODE -ne 0) { throw 'Fuzz failed; inspect artifacts/fuzz' }
     $result = Get-Content artifacts/fuzz/summary.log | ConvertFrom-Json
-    if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec' -or $result.seconds -lt $Seconds -or $result.crashes -ne 0 -or $result.seeds -le 0) {
+    if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText' -or $result.seconds -lt $Seconds -or $result.crashes -ne 0 -or $result.seeds -le 0) {
         throw 'Fuzz result does not prove the requested duration and target'
     }
     $clock.Stop()

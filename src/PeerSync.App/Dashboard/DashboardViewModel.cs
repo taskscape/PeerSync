@@ -15,10 +15,12 @@ internal sealed partial class DashboardViewModel : ObservableObject
     [ObservableProperty] private bool needsAuthorization;
     [ObservableProperty] private string selectedFolderId = "";
     [ObservableProperty] private string transferRates = "Transfer rates unavailable";
+    [ObservableProperty] private string archiveStatus = "Select a folder to list archived versions.";
 
     public ObservableCollection<FolderItem> Folders { get; } = [];
     public ObservableCollection<PeerItem> Peers { get; } = [];
     public ObservableCollection<OverwriteItem> Overwrites { get; } = [];
+    public ObservableCollection<ArchiveItem> ArchiveVersions { get; } = [];
     public ObservableCollection<PendingDeviceItem> PendingDevices { get; } = [];
     private readonly HashSet<string> seenOverwrites = new(StringComparer.Ordinal);
     private readonly HashSet<string> seenPending = new(StringComparer.Ordinal);
@@ -37,7 +39,8 @@ internal sealed partial class DashboardViewModel : ObservableObject
             : "Service not running — retrying automatically…";
         Activity = "No current service snapshot.";
         FolderActivity = "Select a folder to see its activity.";
-        Folders.Clear(); Peers.Clear(); Overwrites.Clear(); PendingDevices.Clear();
+        Folders.Clear(); Peers.Clear(); Overwrites.Clear(); ArchiveVersions.Clear(); PendingDevices.Clear();
+        ArchiveStatus = "Select a folder to list archived versions.";
         hasSnapshot = false; seenOverwrites.Clear(); seenPending.Clear(); seenErrors.Clear();
         progressByFolder.Clear();
         TransferRates = "Transfer rates unavailable";
@@ -99,7 +102,25 @@ internal sealed partial class DashboardViewModel : ObservableObject
         hasSnapshot = true;
     }
 
-    partial void OnSelectedFolderIdChanged(string value) => UpdateFolderActivity();
+    partial void OnSelectedFolderIdChanged(string value)
+    {
+        ArchiveVersions.Clear();
+        ArchiveStatus = value.Length == 0 ? "Select a folder to list archived versions."
+            : "Open Archive or choose Refresh to load versions.";
+        UpdateFolderActivity();
+    }
+
+    internal void ApplyArchive(ListArchiveResponse response)
+    {
+        if (response.FolderId != SelectedFolderId) return;
+        ReplaceIfChanged(ArchiveVersions, response.Versions.Select(item => new ArchiveItem(
+            item.FolderId, item.Id, item.OriginalPath,
+            new DateTime(item.ArchivedUtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("g", CultureInfo.CurrentCulture),
+            item.Size, item.Overwritten)).ToArray());
+        ArchiveStatus = response.Truncated
+            ? $"Showing the newest {ArchiveVersions.Count} versions; more versions exist."
+            : $"{ArchiveVersions.Count} archived versions.";
+    }
 
     private void UpdateFolderActivity()
     {
@@ -146,6 +167,11 @@ internal sealed record PeerItem(string FolderId, string DeviceId, string Name, s
     };
 }
 internal sealed record OverwriteItem(string FolderId, long ArchiveId, string Path, string ArchivedLocal);
+internal sealed record ArchiveItem(string FolderId, long ArchiveId, string Path,
+    string ArchivedLocal, long Size, bool Overwritten)
+{
+    public string SizeDisplay => $"{Size / 1024d / 1024d:0.0} MiB";
+}
 internal sealed record PendingDeviceItem(string FolderId, string DeviceId, string Name, string RequestedLocal)
 {
     public string Fingerprint => DeviceId.Length > 16 ? DeviceId[..16] : DeviceId;

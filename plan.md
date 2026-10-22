@@ -64,15 +64,17 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | P1 Local sync engine | 4-8 | Accepted with the explicit CI timing exception: all correctness, two actual campaign dates and the repaired 100000-file corpus are accepted. PR #42 is merged; hosted timeout/incomplete scope stays visible and full current-source verification remains required before release. Installed-service/production clock integration remains mandatory at P2.5.7/Gate P2. | 2026-10-21, qualified timing exception |
 | P2 LAN sync as a service | 9-13 | Merged code and current-head nine-job main CI passed [run 39812526107](https://github.com/taskscape/PeerSync/actions/runs/39812526107), permitting P3 implementation under the approved phasing. The [merge audit](docs/verification/P2-code-merge-2026-10-22.md) retains earlier failed seeds and their repairs. The self-contained package runs under local SCM; its verified client observed authenticated skew/recovery and a SHA-256-verified transfer. The second installed PC, authenticated external session, physical LAN corpus/throughput, recovery soak and remaining P2 gate evidence remain open. | - |
 | P3 WPF app and installer | 14-17 | Code merged in PR #47; all ten PR jobs passed [run 39832543696](https://github.com/taskscape/PeerSync/actions/runs/39832543696), and all ten main jobs passed [run 39835422181 attempt 2](https://github.com/taskscape/PeerSync/actions/runs/39835422181). Focused local checks and a [supplemental clean Server 2025 installer/standard-user smoke](docs/verification/P3-server2025-installer-smoke-2026-10-22.md) pass. The [merge CI audit](docs/verification/P3-main-ci-2026-10-22.md) retains the failed first attempt. Required clean Windows 11/Server 2022 and physical two-PC gates remain open. P4 implementation is permitted under the approved phasing. | - |
-| P4 Internet sync | 18-22 | Implementation starting after green P3 main CI; deployment and physical WAN/NAT gates remain open. | - |
-| P5 Hardening and v1.0 | 23-26 | Not started | - |
+| P4 Internet sync | 18-22 | Code merged in PR #48. Nine hosted test/build/installer jobs passed [run 39852983196](https://github.com/taskscape/PeerSync/actions/runs/39852983196); GitHub denied the strict aggregate job before it started because the Actions budget was exhausted. The unchanged aggregate verifier passed locally over the four same-run hosted artifacts and exact PR merge revision. This is a user-directed local fallback, not a green GitHub workflow. Physical NAT/WAN, production certificate and 72-hour soak gates remain open. | - |
+| P5 Hardening and v1.0 | 23-26 | Implementation in progress: archive UI, approval end-to-end test, expanded fuzz harness and user/admin guides are on the P5 branch. Twenty-four-hour fuzz, scale/USN/update work, external review and all physical release gates remain open. | - |
 | P6 After v1.0 (optional) | 2-8 per feature | Not started | - |
 
 The 2026-10-22 implementation-order exception allows later phase code to
 proceed while physical gates remain open, but it does not change these gate
 statuses or permit a beta/release claim. P2 current-head CI passed on main
-before P3 began; P3 code and required PR/main CI now pass, permitting P4
-implementation. The physical P2 and P3 gates remain open.
+before P3 began; P3 code and required PR/main CI passed. P4 code is merged;
+the budget-denied aggregator was reproduced from hosted artifacts locally per
+the user's fallback instruction, permitting P5 implementation while the
+overall hosted workflow stays failed. Physical P2/P3/P4 gates remain open.
 
 ---
 
@@ -82,6 +84,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-22 | Continue P5 implementation after P4 PR #48 merged. In run 39852983196, all nine hosted producer jobs passed, but GitHub refused to start only `boundary-aggregate` for exhausted Actions budget. Run the unchanged strict aggregate verifier locally over the four same-run/attempt artifacts, with exact PR merge SHA `c49efd8286d4a0cb056791bd857868bdf5925c9c`; it passes. Preserve the failed workflow and require normal CI when budget resumes. This applies the user's instruction to use local validation when Actions credits run out; it does not accept any physical P4 or release gate. | Testing strategy; P4 code/CI audit |
 | 2026-10-22 | PR #47 run 39829416494 passed Server 2025 native/account checks and 1,034 Engine cases but one directory-rebase test assumed metadata never hit its 10-second source deadline under hosted load. Keep the production deadline and recovery path; the test now advances an injected clock through bounded persisted retries and still requires the complete signed graph. Server 2022 independently exhausted its existing 840-second script budget while Engine cases were passing; retain its approved cap and require complete current-head CI. All 192 local DirectorySnapshotCapture and 1,036 Engine cases pass. | Testing strategy; docs/verification/P3-pr47-ci-repair-2026-10-22.md |
 | 2026-10-22 | A clean Server 2025 standard-account check found that recycling the in-process Windows service host after `AuthorizeUser` ended the service before the new SID could connect. The elevated app helper now restarts the service through SCM after durable authorization and waits for RUNNING; the service no longer attempts in-process pipe-host recycling for this RPC. Verify unauthorized denial and same-logon authorization on the guest. | Local control API; P3 authorize account |
 | 2026-10-22 | A fresh Server 2025 VM showed that self-contained .NET payloads do not supply `VCRUNTIME140.dll` for NSec's native libsodium. Bundle the Microsoft-signed Visual C++ v14 Redistributable in each installer, verify its publisher/hash in the build and install it before replacing service files. A required reboot stops setup before upgrade; retain clean Windows 11/Server 2022 and two-PC gate checks. | Packaging and deployment; P3 installer |
@@ -2583,8 +2586,9 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 
 ## 11. Phase 5: Hardening and v1.0 (weeks 23-26)
 
-- [ ] **P5.1 Fuzzing** (`tests/PeerSync.Fuzz`)
+- [ ] **P5.1 Fuzzing** (`tests/PeerSync.Fuzz`) [WIP @Codex 2026-10-22]
   - Done when: frame decoder, message validation, path rules, ignore parser and key text parser each run for 24 hours with no crash. Corpus and crashes are saved.
+  - Added arbitrary and valid PSP/1 message validation plus arbitrary, valid and mutated key text to the existing deterministic harness. A local 600.0018644-second run passed 218,082 seeds with zero crashes; see [P5 initial local verification](docs/verification/P5-initial-local-2026-10-22.md). The 24-hour campaign remains open.
 - [ ] **P5.2 Security review**
   - Done when: an external or peer review covers the threats table in the design doc. Findings are fixed or logged with a rationale. Keys are absent from logs, crash dumps and the control API (except `GetFolderKeys`).
 - [ ] **P5.3 Scale: 1M files**
@@ -2592,14 +2596,18 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [ ] **P5.4 Faster start-up with the USN journal** (`PeerSync.Engine/Scanning/UsnJournal.cs`)
   - Done when: changes made while the service was stopped are found from the journal instead of a full walk.
   - `[VERIFY]` Reading the journal needs a volume handle, and the virtual account isn't an administrator. Spike first. If it needs `SeManageVolumePrivilege` or admin rights, either grant the privilege to the service SID or drop this task and keep the size/mtime short-circuit scan.
-- [ ] **P5.5 Archive restore UI**
+  - [Partial privilege spike](docs/spikes/P5.4-usn-privilege.md): an elevated development token queries the journal, but the actual virtual service account has not been tested. Keep the optimization disabled until that access and cursor/recovery design are proven.
+- [ ] **P5.5 Archive restore UI** [WIP @Codex 2026-10-22]
   - Done when: the Archive tab lists versions by path and date, and supports restore and restore-as-copy.
-- [ ] **P5.6 Device approval end to end**
+  - Archive tab and verified control-client calls are implemented; model coverage passed locally. Rendered and installed UI validation remain open; see [P5 initial local verification](docs/verification/P5-initial-local-2026-10-22.md).
+- [ ] **P5.6 Device approval end to end** [WIP @Codex 2026-10-22]
   - Done when: with "Require approval" on, unknown devices wait in Pending until approved, and blocked devices can't reconnect.
+  - Added an installed-host production transport test for pending, approval transfer and blocked reconnect; the focused and full Service suites passed. Physical two-PC validation remains open; see [P5 initial local verification](docs/verification/P5-initial-local-2026-10-22.md).
 - [ ] **P5.7 Signed auto-update** (`PeerSync.Service/Update/`)
   - Done when: the service checks a signed manifest daily and downloads the new setup. A short-lived helper process verifies the Authenticode signature and runs `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`, because Setup stops the service. Updates can be turned off.
-- [ ] **P5.8 Documentation**
+- [ ] **P5.8 Documentation** [WIP @Codex 2026-10-22]
   - Done when: user guide, admin guide (service account, ACLs, ports, logs, `--init`, `--remove-data`) and rendezvous operations guide are written.
+  - Drafted the user/admin guides alongside the existing rendezvous operations guide; verify commands against the final installer before closing this task.
 
 ### Gate P5 (v1.0 release)
 
