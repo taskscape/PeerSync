@@ -57,6 +57,50 @@ public sealed class PresenceRegistryTests
     }
 
     [Fact]
+    public void UnannouncedAndExpiredSessionsCancelTheirStreams()
+    {
+        var clock = new ManualClock();
+        var registry = new PresenceRegistry(clock);
+        PresenceSession idle = registry.Open(Id(1), Remote("203.0.113.1"));
+        PresenceSession active = registry.Open(Id(2), Remote("203.0.113.2"));
+        registry.Announce(active, Announcement(Id(10), 41002));
+        clock.Advance(TimeSpan.FromSeconds(31));
+        registry.Expire().ShouldBe(1);
+        idle.Lifetime.IsCancellationRequested.ShouldBeTrue();
+        active.Lifetime.IsCancellationRequested.ShouldBeFalse();
+        PresenceSession replacement = registry.Open(Id(2), Remote("203.0.113.2"));
+        active.Lifetime.IsCancellationRequested.ShouldBeTrue();
+        registry.Close(replacement);
+        replacement.Lifetime.IsCancellationRequested.ShouldBeTrue();
+        PresenceSession shutdown = registry.Open(Id(3), Remote("203.0.113.3"));
+        registry.CloseAll();
+        shutdown.Lifetime.IsCancellationRequested.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void FolderLimitKeepsPeerListsWithinGrpcMessageBudget()
+    {
+        var registry = new PresenceRegistry();
+        byte[] folder = Id(10);
+        PresenceSession? last = null;
+        for (byte marker = 1; marker <= PresenceRegistry.MaximumPeersPerFolder; marker++)
+        {
+            PresenceSession session = registry.Open(Id(marker), Remote("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff"));
+            Announce announce = Announcement(folder, 41001);
+            for (int endpoint = 0; endpoint < 8; endpoint++)
+                announce.LocalEndpoints.Add(new Endpoint
+                { Address = "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", Port = (uint)(41002 + endpoint) });
+            registry.Announce(session, announce);
+            last = session;
+        }
+        PeerList list = LastList(last!);
+        list.Peers.Count.ShouldBe(PresenceRegistry.MaximumPeersPerFolder - 1);
+        new ServerMessage { PeerList = list }.CalculateSize().ShouldBeLessThan(256 * 1024);
+        PresenceSession overflow = registry.Open(Id(65), Remote("203.0.113.65"));
+        Should.Throw<ArgumentException>(() => registry.Announce(overflow, Announcement(folder, 41065)));
+    }
+
+    [Fact]
     public void DeviceRequestLimitSurvivesSessionReplacement()
     {
         var clock = new ManualClock();

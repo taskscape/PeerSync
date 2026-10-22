@@ -41,10 +41,14 @@ publicly trusted code-signing identity.
 Copy the resulting `artifacts\installer\PeerSync-Rendezvous-Setup-*.exe` to the
 server and run it elevated. The setup checks the server certificate before
 stopping an existing service. It installs under `NT SERVICE\PeerSyncRendezvous`,
-grants that identity private-key and data-directory access, creates its
+grants that identity private-key access and Modify permission only on the
+`%ProgramData%\PeerSync.Rendezvous\logs` directory, creates its
 Application Event Log source, and adds inbound TCP/UDP 99 firewall rules.
 It preserves the installed `appsettings.json` on upgrade. Run the newer setup
 over the old version to upgrade; do not delete the data directory to upgrade.
+The service identity must not be able to edit the administrator-run renewal
+scripts in the parent data directory. Setup removes that inherited grant when
+upgrading an earlier development installation.
 
 ```powershell
 Get-Service PeerSyncRendezvous

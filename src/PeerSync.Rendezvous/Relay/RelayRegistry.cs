@@ -145,6 +145,15 @@ internal sealed class RelayRegistry : IDisposable
         lock (gate) return ExpireLocked();
     }
 
+    internal void AbortAll()
+    {
+        lock (gate)
+        {
+            foreach (Ticket ticket in tickets.Values) ticket.Abort();
+            tickets.Clear();
+        }
+    }
+
     private int ExpireLocked()
     {
         Ticket[] expired = tickets.Values.Where(item =>
@@ -169,7 +178,7 @@ internal sealed class RelayRegistry : IDisposable
 
     private static TokenBucketRateLimiter CreateLimiter(int bytesPerSecond) => new(new TokenBucketRateLimiterOptions
     {
-        TokenLimit = bytesPerSecond,
+        TokenLimit = Math.Max(bytesPerSecond, 64 * 1024),
         TokensPerPeriod = bytesPerSecond,
         ReplenishmentPeriod = TimeSpan.FromSeconds(1),
         AutoReplenishment = true,

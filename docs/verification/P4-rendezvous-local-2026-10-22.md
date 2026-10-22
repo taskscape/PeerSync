@@ -9,11 +9,16 @@ cross-network relay, load caps at scale, or Gate P4.
 ## Code and test checks
 
 - Locked solution restore and Release build passed with zero warnings/errors.
-- `PeerSync.Rendezvous.Tests`: 9/9 passed, including HTTP/2 and HTTP/3,
+- `PeerSync.Rendezvous.Tests`: 13/13 passed, including HTTP/2 and HTTP/3,
   anonymous gRPC rejection, certificate-bound tracker access, presence folder
   isolation and 15-minute expiry, 500 ms punch introductions, relay token
   binding/caps, and an end-to-end TLS-over-relay protocol exchange.
-- `PeerSync.Net.Tests`: 51/51 passed; `PeerSync.Service.Tests`: 37/37 passed.
+- `PeerSync.Net.Tests`: 51/51 passed; `PeerSync.Service.Tests`: 38/38 passed.
+- Additional regressions cover relay transport after the connection-attempt
+  token is canceled, 64 KiB chunks at the minimum configured rate, tracker
+  expiry and folder peer-list bounds, custom central log locations, and
+  server-specific relay presence. A Server 2025 service stop with a connected
+  client now completes in 0.29 seconds with no new .NET Runtime crash.
 - `PeerSync.App.Tests` excluding the three desktop-render methods: 15/15
   passed, including control-snapshot mapping of Relay to `via relay` and QUIC
   to `direct QUIC`.
@@ -51,6 +56,25 @@ validation.
 five recent events and an environment manifest. The bundle contained the
 authentication rejection but no `remoteAddress` or `folderId` fields. A
 service-start information event was also present in Application Event Log.
+
+The signed development 1.0.6.0 setup then upgraded the running 1.0.3.0
+installation on that same VM: setup exit 0, service Running, installed version
+1.0.6.0. Two intermediate development upgrades were aborted by Restart Manager
+because 1.0.3.0 reported STOPPED but crashed during shutdown and left its
+image in use. The final setup can close that stale image; the new server
+explicitly ends tracker and relay streams during shutdown. Its ProgramData
+root and administrator-run renewal script have no service-account write ACE;
+only the logs directory grants `NT SERVICE\PeerSyncRendezvous` Modify. A
+post-upgrade installed probe again returned HTTP/2 and HTTP/3 reachable with
+exit 0. This is a VM upgrade and local listener check, not a public deployment.
+
+The signed development client 1.0.6.0 setup also upgraded the Server 2025
+guest's test client in place: setup exit 0, both Windows services Running.
+After the upgrade, the central journal recorded a new `session_opened` and
+`announced` event; the client recorded `tracker.session_connected`,
+`tracker.observed_address`, and `tracker.peer_list_received` for the same UTC
+window. This checks current client/server tracker compatibility on one VM.
+It does not represent two distinct device identities or a WAN relay transfer.
 
 The current physical requirements remain open: public certificate via
 win-acme, outside-network TCP and UDP 99 probes, two real PCs on different

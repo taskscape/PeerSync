@@ -41,12 +41,36 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                 SessionId = ByteString.CopyFrom(session.SessionId.ToByteArray()),
             },
         });
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken,
+            session.Lifetime.Token);
         Task writer = WriteLoopAsync(session.Outgoing.Reader, responses, linked.Token);
         try
         {
-            while (await requests.MoveNext(linked.Token).ConfigureAwait(false))
+            bool first = true;
+            while (true)
             {
+                bool hasMessage;
+                if (first)
+                {
+                    try
+                    {
+                        hasMessage = await requests.MoveNext(linked.Token)
+                            .WaitAsync(PresenceRegistry.InitialAnnouncementLifetime, linked.Token)
+                            .ConfigureAwait(false);
+                    }
+                    catch (TimeoutException)
+                    {
+                        throw new RpcException(new Status(StatusCode.DeadlineExceeded,
+                            "Initial announcement was not received."));
+                    }
+                    first = false;
+                }
+                else hasMessage = await requests.MoveNext(linked.Token).ConfigureAwait(false);
+                if (!hasMessage) break;
+                if (session.LastAnnouncedUtc is null
+                    && requests.Current.PayloadCase != ClientMessage.PayloadOneofCase.Announce)
+                    throw new RpcException(new Status(StatusCode.InvalidArgument,
+                        "The first tracker message must be an announcement."));
                 if (!presence.TryTakeRequest(session))
                 {
                     RendezvousMetrics.RequestsRateLimited.Add(1);
@@ -84,7 +108,7 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                 }
             }
         }
-        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
         finally
         {
             RendezvousMetrics.ActiveTrackerSessions.Add(-1);
@@ -92,6 +116,7 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
             await linked.CancelAsync().ConfigureAwait(false);
             try { await writer.ConfigureAwait(false); }
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            session.Lifetime.Dispose();
             diagnostics.TryWrite(new("rendezvous.session_closed", "tracker") { SessionId = session.SessionId });
         }
     }

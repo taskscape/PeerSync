@@ -9,6 +9,8 @@ namespace PeerSync.Rendezvous.Tracker;
 internal sealed class PresenceRegistry(TimeProvider? clock = null)
 {
     internal static readonly TimeSpan PresenceLifetime = TimeSpan.FromMinutes(15);
+    internal static readonly TimeSpan InitialAnnouncementLifetime = TimeSpan.FromSeconds(30);
+    internal const int MaximumPeersPerFolder = 64;
     private readonly TimeProvider time = clock ?? TimeProvider.System;
     private readonly object gate = new();
     private readonly Dictionary<string, PresenceSession> sessions = new(StringComparer.Ordinal);
@@ -18,13 +20,13 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
     {
         if (deviceId.Length != 32) throw new ArgumentException("Device identity must contain 32 bytes.", nameof(deviceId));
         ArgumentNullException.ThrowIfNull(observed);
-        var session = new PresenceSession(deviceId.ToArray(), observed);
+        var session = new PresenceSession(deviceId.ToArray(), observed) { CreatedUtc = time.GetUtcNow() };
         lock (gate)
         {
             string key = Convert.ToHexString(deviceId);
             if (sessions.Remove(key, out PresenceSession? replaced))
             {
-                replaced.Outgoing.Writer.TryComplete();
+                replaced.End();
                 BroadcastLocked(replaced.FolderKeys);
             }
             sessions.Add(key, session);
@@ -62,6 +64,10 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
         lock (gate)
         {
             RequireCurrentLocked(session);
+            foreach (string folderKey in folderKeys)
+                if (sessions.Values.Count(peer => !ReferenceEquals(peer, session)
+                    && IsLiveLocked(peer) && peer.FolderKeys.Contains(folderKey)) >= MaximumPeersPerFolder)
+                    throw new ArgumentException("Folder peer limit exceeded.", nameof(announcement));
             string[] affected = session.FolderKeys.Union(folderKeys, StringComparer.Ordinal).ToArray();
             session.FolderKeys = folderKeys;
             session.Endpoints = endpoints;
@@ -124,11 +130,13 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
         lock (gate)
         {
             PresenceSession[] expired = sessions.Values.Where(item =>
-                item.LastAnnouncedUtc is { } last && time.GetUtcNow() - last >= PresenceLifetime).ToArray();
+                item.LastAnnouncedUtc is { } last
+                    ? time.GetUtcNow() - last >= PresenceLifetime
+                    : time.GetUtcNow() - item.CreatedUtc >= InitialAnnouncementLifetime).ToArray();
             foreach (PresenceSession session in expired)
             {
                 sessions.Remove(session.Key);
-                session.Outgoing.Writer.TryComplete();
+                session.End();
             }
             BroadcastLocked(expired.SelectMany(item => item.FolderKeys).Distinct(StringComparer.Ordinal));
             foreach (string key in requestTimes.Keys.ToArray())
@@ -148,8 +156,17 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
         {
             if (!IsCurrentLocked(session)) return;
             sessions.Remove(session.Key);
-            session.Outgoing.Writer.TryComplete();
+            session.End();
             BroadcastLocked(session.FolderKeys);
+        }
+    }
+
+    internal void CloseAll()
+    {
+        lock (gate)
+        {
+            foreach (PresenceSession session in sessions.Values) session.End();
+            sessions.Clear();
         }
     }
 
@@ -207,8 +224,15 @@ internal sealed class PresenceSession
     internal string Key => Convert.ToHexString(DeviceId);
     internal IPEndPoint Observed { get; }
     internal Channel<ServerMessage> Outgoing { get; }
+    internal CancellationTokenSource Lifetime { get; } = new();
+    internal DateTimeOffset CreatedUtc { get; init; }
     internal HashSet<string> FolderKeys { get; set; } = new(StringComparer.Ordinal);
     internal List<Endpoint> Endpoints { get; set; } = [];
     internal DateTimeOffset? LastAnnouncedUtc { get; set; }
+    internal void End()
+    {
+        Lifetime.Cancel();
+        Outgoing.Writer.TryComplete();
+    }
 
 }

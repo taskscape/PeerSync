@@ -49,7 +49,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, Task> sessionWorkers = new();
     private readonly ConcurrentDictionary<Guid, Task> relayAcceptWorkers = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<RelayOffer>> pendingRelayOffers = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, (byte[] FolderId, DateTimeOffset SeenUtc)> relayFolders = new(StringComparer.Ordinal);
+    private readonly RelayPresenceCatalog relayPresence = new();
     private readonly ConcurrentDictionary<Guid, IAsyncDisposable> sessions = new();
     private readonly object networkRecoveryGate = new();
     private readonly object maintainerGate = new();
@@ -344,7 +344,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         foreach (TrackerClient tracker in trackers) tracker.Refresh();
     }
 
-    private ValueTask OnTrackerMessageAsync(ServerMessage message, CancellationToken cancellationToken)
+    private ValueTask OnTrackerMessageAsync(Uri server, ServerMessage message, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         switch (message.PayloadCase)
@@ -361,10 +361,16 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             case ServerMessage.PayloadOneofCase.PeerList:
                 if (!getFolders().Any(folder => folder.Settings.UseTracker
                     && folder.Keys.FolderId().AsSpan().SequenceEqual(message.PeerList.FolderId.Span))) break;
+                bool relayEnabled = useRelay && getFolders().Any(folder => folder.Settings.UseTracker
+                    && folder.Settings.UseRelay
+                    && folder.Keys.FolderId().AsSpan().SequenceEqual(message.PeerList.FolderId.Span));
+                var present = new HashSet<string>(StringComparer.Ordinal);
+                var discovered = new List<(string Key, byte[] DeviceId, bool HasDirectEndpoint)>();
                 foreach (Peer peer in message.PeerList.Peers.Take(1024))
                 {
                     if (peer.DeviceId.Length != 32 || peer.DeviceId.Span.SequenceEqual(localDeviceId)) continue;
                     string key = Convert.ToHexString(peer.DeviceId.Span);
+                    present.Add(key);
                     int accepted = 0;
                     foreach (RendezvousEndpoint endpoint in peer.Endpoints.Take(16))
                     {
@@ -375,12 +381,13 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                         RememberEndpoint(key, new IPEndPoint(address, (int)endpoint.Port), ConnectionSource.Public);
                         accepted++;
                     }
-                    if (getFolders().Any(folder => folder.Settings.UseTracker && folder.Settings.UseRelay
-                        && folder.Keys.FolderId().AsSpan().SequenceEqual(message.PeerList.FolderId.Span)))
-                        relayFolders[key] = (message.PeerList.FolderId.ToByteArray(), timeProvider.GetUtcNow());
-                    if (accepted != 0 || relayFolders.ContainsKey(key))
-                        EnsureMaintainer(key, peer.DeviceId.ToByteArray());
+                    discovered.Add((key, peer.DeviceId.ToByteArray(), accepted != 0));
                 }
+                relayPresence.Update(server, message.PeerList.FolderId.Span, present,
+                    relayEnabled, timeProvider.GetUtcNow());
+                foreach (var peer in discovered)
+                    if (peer.HasDirectEndpoint || relayEnabled)
+                        EnsureMaintainer(peer.Key, peer.DeviceId);
                 diagnostics?.TryWrite(new("tracker.peer_list_received", "rendezvous")
                 { ItemsVisited = message.PeerList.Peers.Count });
                 break;
@@ -400,7 +407,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private ValueTask OnTrackerMessageFromServerAsync(Uri server, ServerMessage message,
         CancellationToken cancellationToken)
     {
-        ValueTask result = OnTrackerMessageAsync(message, cancellationToken);
+        ValueTask result = OnTrackerMessageAsync(server, message, cancellationToken);
         if (message.PayloadCase != ServerMessage.PayloadOneofCase.RelayOffer
             || !useRelay || relayRegistrations.Count == 0) return result;
         RelayOffer offer = message.RelayOffer;
@@ -482,15 +489,18 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             {
                 token.ThrowIfCancellationRequested();
                 var candidates = endpoints.Snapshot(key).SelectMany(CreateTransportCandidates).ToList();
-                if (useRelay && relayFolders.TryGetValue(key, out var relayFolder)
-                    && timeProvider.GetUtcNow() - relayFolder.SeenUtc < TimeSpan.FromMinutes(15)
-                    && getFolders().Any(folder => folder.Settings.UseTracker && folder.Settings.UseRelay
-                        && folder.Keys.FolderId().AsSpan().SequenceEqual(relayFolder.FolderId)))
+                if (useRelay)
                     foreach (TrackerClient tracker in trackers.Where(item => item.IsConnected))
                     {
                         Uri server = tracker.Server;
-                        candidates.Add(new ConnectionCandidate(ConnectionSource.Relay,
-                            token => DialRelayAsync(tracker, server, deviceId, relayFolder.FolderId, token)));
+                        if (relayPresence.TryGetFolder(server, key, folderKey =>
+                            getFolders().Any(folder => folder.Settings.UseTracker && folder.Settings.UseRelay
+                                && Convert.ToHexString(folder.Keys.FolderId()) == folderKey),
+                            timeProvider.GetUtcNow(), out byte[]? folderId))
+                        {
+                            candidates.Add(new ConnectionCandidate(ConnectionSource.Relay,
+                                token => DialRelayAsync(tracker, server, deviceId, folderId!, token)));
+                        }
                     }
                 return ValueTask.FromResult<IReadOnlyList<ConnectionCandidate>>(candidates);
             }, stopping.Token);

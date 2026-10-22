@@ -75,6 +75,10 @@ failure:
   --output C:\Temp\PeerSync-rendezvous-diagnostics.zip
 ```
 
+If `Rendezvous:LogDirectory` is customized in the server configuration, pass
+that absolute directory with `--logs`; the default command reads the standard
+ProgramData journal directory.
+
 On both PCs run `psp diagnostics --logs <service-log-directory> --output
 <new-zip>`. Collect all three bundles after a forced relay attempt and compare
 UTC timestamps and session IDs: `tracker.session_connected`,

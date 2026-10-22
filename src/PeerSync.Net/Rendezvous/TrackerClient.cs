@@ -106,6 +106,9 @@ internal sealed class TrackerClient : IAsyncDisposable
             HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact });
         using var call = new TrackerRpc.RendezvousClient(channel).Session(cancellationToken: cancellationToken);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // The preceding stream's writer is finished before reconnect starts.
+        // Its queued requests refer to an old presence snapshot or relay offer.
+        while (outgoing.Reader.TryRead(out _)) { }
         await call.RequestStream.WriteAsync(new ClientMessage { Announce = announcement() }, linked.Token)
             .ConfigureAwait(false);
         Volatile.Write(ref connected, 1);

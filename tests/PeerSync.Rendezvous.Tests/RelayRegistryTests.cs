@@ -59,6 +59,23 @@ public sealed class RelayRegistryTests
         registry.TryOffer(first, third).ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task LowConfiguredRateStillAcceptsOneMaximumSizedChunk()
+    {
+        using var registry = new RelayRegistry(new RendezvousOptions
+        { RelayPerDeviceBytesPerSecond = 1024, RelayTotalBytesPerSecond = 1024 });
+        PresenceSession first = Session(1), second = Session(2);
+        registry.TryOffer(first, second).ShouldBeTrue();
+        RelayOffer offer = Offer(first);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<RelayRegistry.RelayJoin> joining = registry.JoinAsync(offer.Token.Memory,
+            first.DeviceId, new TestWriter(), timeout.Token).AsTask();
+        RelayRegistry.RelayJoin secondJoin = await registry.JoinAsync(offer.Token.Memory,
+            second.DeviceId, new TestWriter(), timeout.Token);
+        await registry.ThrottleAsync(await joining, 64 * 1024, timeout.Token);
+        registry.Leave(secondJoin);
+    }
+
     private static PresenceSession Session(byte marker)
         => new(Id(marker), new IPEndPoint(IPAddress.Parse("203.0.113.1"), 52000));
 

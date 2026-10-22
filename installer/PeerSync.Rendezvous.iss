@@ -17,7 +17,9 @@ PrivilegesRequired=admin
 MinVersion=10.0.20348
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-CloseApplications=yes
+; An earlier service build may report STOPPED while its process remains in
+; Windows Error Reporting. Restart Manager must release those old image files.
+CloseApplications=force
 RestartApplications=no
 OutputDir=..\artifacts\installer
 OutputBaseFilename=PeerSync-Rendezvous-Setup-{#AppVer}-x64
@@ -163,8 +165,13 @@ begin
       '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSyncRendezvous reset= 86400 actions= restart/60000/restart/60000/restart/300000');
+  { Remove the broad inheritable grant from earlier development builds before
+    granting write access only to the journal directory. Renewal scripts in
+    the parent are executed as administrator and must stay service-read-only. }
   RequireSuccess(ExpandConstant('{sys}\icacls.exe'),
-    '"' + ExpandConstant('{commonappdata}\PeerSync.Rendezvous') + '" /grant "NT SERVICE\PeerSyncRendezvous:(OI)(CI)M"');
+    '"' + ExpandConstant('{commonappdata}\PeerSync.Rendezvous') + '" /remove:g "NT SERVICE\PeerSyncRendezvous"');
+  RequireSuccess(ExpandConstant('{sys}\icacls.exe'),
+    '"' + ExpandConstant('{commonappdata}\PeerSync.Rendezvous\logs') + '" /grant "NT SERVICE\PeerSyncRendezvous:(OI)(CI)M"');
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Grant-RendezvousCertificate.ps1') + '"');
   RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous TCP 99"');

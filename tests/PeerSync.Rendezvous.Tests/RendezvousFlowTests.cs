@@ -68,13 +68,15 @@ public sealed class RendezvousFlowTests
         bobOffer.Initiator.ShouldBeFalse();
         aliceOffer.Token.ShouldBe(bobOffer.Token);
 
+        using var connectionAttempt = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
         Task<RelayTransport> dial = RelayClient.ConnectAsync(origin, aliceOffer, alice,
-            peer => peer.AsSpan().SequenceEqual(bobId), timeout.Token, server).AsTask();
+            peer => peer.AsSpan().SequenceEqual(bobId), connectionAttempt.Token, server).AsTask();
         Task<RelayTransport> accept = RelayClient.ConnectAsync(origin, bobOffer, bob,
-            peer => peer.AsSpan().SequenceEqual(aliceId), timeout.Token, server).AsTask();
+            peer => peer.AsSpan().SequenceEqual(aliceId), connectionAttempt.Token, server).AsTask();
         await Task.WhenAll(dial, accept);
         await using RelayTransport left = await dial;
         await using RelayTransport right = await accept;
+        connectionAttempt.Cancel();
         byte[] payload = "end-to-end relay proof"u8.ToArray();
         await left.Stream.WriteAsync(payload, timeout.Token);
         byte[] received = new byte[payload.Length];

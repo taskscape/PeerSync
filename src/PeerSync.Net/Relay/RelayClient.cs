@@ -39,7 +39,10 @@ internal static class RelayClient
         SslStream? tls = null;
         try
         {
-            call = new RelayRpc.RelayClient(channel).Pipe(headers: metadata, cancellationToken: cancellationToken);
+            // The candidate token is canceled after this connection wins the
+            // race. Only establishment uses it; disposing the transport owns
+            // the lifetime of the established duplex RPC.
+            call = new RelayRpc.RelayClient(channel).Pipe(headers: metadata);
             pipe = new GrpcDuplexStream(call);
             tls = new SslStream(pipe, leaveInnerStreamOpen: false);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

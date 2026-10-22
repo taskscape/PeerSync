@@ -38,6 +38,7 @@ if (Test-Path -LiteralPath $stage) {
 New-Item -ItemType Directory -Path $stage, $output -Force | Out-Null
 $redistCache = Join-Path $root 'artifacts/tools/vc_redist.x64.exe'
 $redistStage = Join-Path $stage 'redist/vc_redist.exe'
+New-Item -ItemType Directory -Path (Split-Path $redistCache -Parent) -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $redistStage -Parent) -Force | Out-Null
 if (-not (Test-Path -LiteralPath $redistCache -PathType Leaf)) {
     Invoke-WebRequest -Uri 'https://aka.ms/vc14/vc_redist.x64.exe' -OutFile $redistCache

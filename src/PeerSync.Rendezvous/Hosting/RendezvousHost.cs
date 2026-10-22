@@ -156,7 +156,12 @@ internal static class RendezvousHost
             app.Services.GetRequiredService<DiagnosticJournal>().TryWrite(new("rendezvous.started", "host")
             { ItemsChanged = options.Port }));
         app.Lifetime.ApplicationStopping.Register(() =>
-            app.Services.GetRequiredService<DiagnosticJournal>().TryWrite(new("rendezvous.stopping", "host")));
+        {
+            app.Services.GetRequiredService<DiagnosticJournal>().TryWrite(new("rendezvous.stopping", "host"));
+            // End long-lived gRPC streams before Kestrel's shutdown grace period.
+            app.Services.GetRequiredService<PresenceRegistry>().CloseAll();
+            app.Services.GetRequiredService<RelayRegistry>().AbortAll();
+        });
         return app;
     }
 
