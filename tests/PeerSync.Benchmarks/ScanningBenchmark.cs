@@ -28,13 +28,27 @@ internal static class ScanningBenchmark
                 FileMode.CreateNew, FileAccess.Write, FileShare.None);
             // Small nonempty files exercise real hashing and chunk indexing in the initial scan.
             file.WriteByte((byte)(i % 251));
+            if (count == 1_000_000 && i > 0 && i % 100_000 == 0)
+                Console.WriteLine(JsonSerializer.Serialize(new
+                { stage = "generate", files = i, seconds = creation.Elapsed.TotalSeconds }));
         }
         creation.Stop();
         using var keys = FolderKeys.CreateNew();
         string database = reuseCorpus ? "index-" + Guid.NewGuid().ToString("N") + ".db" : "index.db";
+        var firstIndex = Stopwatch.StartNew();
         await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, database));
         using var scanner = new Scanner(root, index, keys, new byte[32]);
+        long hashedProgress = 0;
+        if (count == 1_000_000)
+            scanner.BytesHashed += _ =>
+            {
+                long completed = Interlocked.Increment(ref hashedProgress);
+                if (completed % 100_000 == 0)
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    { stage = "first-index", hashed = completed, seconds = firstIndex.Elapsed.TotalSeconds }));
+            };
         var initial = await scanner.ScanAsync();
+        firstIndex.Stop();
         // ReadIndexBatch(0) is capped at 1000: use the persisted high-water metadata.
         long sequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
         var unchanged = await scanner.ScanAsync();
@@ -42,14 +56,38 @@ internal static class ScanningBenchmark
         long rows = index.LocalFiles.Count();
         bool correct = initial.Hashed == count && initial.Problems.Count == 0 && unchanged.Problems.Count == 0
             && unchanged.Hashed == 0 && unchanged.Updated == 0 && unchanged.Unchanged == rows && sequence == finalSequence;
-        bool targetMet = correct && unchanged.Elapsed.TotalSeconds < 10;
+        double? idleCpuPercent = null;
+        long? idleWorkingSetBytes = null, idlePrivateBytes = null;
+        if (count == 1_000_000)
+        {
+            using Process process = Process.GetCurrentProcess();
+            process.Refresh();
+            TimeSpan cpuBefore = process.TotalProcessorTime;
+            var idle = Stopwatch.StartNew();
+            await Task.Delay(TimeSpan.FromSeconds(30));
+            idle.Stop();
+            process.Refresh();
+            idleCpuPercent = (process.TotalProcessorTime - cpuBefore).TotalSeconds /
+                idle.Elapsed.TotalSeconds / Environment.ProcessorCount * 100;
+            idleWorkingSetBytes = process.WorkingSet64;
+            idlePrivateBytes = process.PrivateMemorySize64;
+        }
+        const long memoryLimit = 300L * 1024 * 1024;
+        bool targetMet = count == 1_000_000
+            ? correct && firstIndex.Elapsed.TotalSeconds < 1200 && idleCpuPercent < 1
+                && idleWorkingSetBytes < memoryLimit && idlePrivateBytes < memoryLimit
+            : correct && unchanged.Elapsed.TotalSeconds < 10;
         Console.WriteLine(JsonSerializer.Serialize(new
         {
-            target = "Scanner", files = count, rows, reuseCorpus, database, creationSeconds = creation.Elapsed.TotalSeconds,
+            target = count == 1_000_000 ? "P5 million-file scanner" : "Scanner",
+            files = count, rows, reuseCorpus, database, creationSeconds = creation.Elapsed.TotalSeconds,
+            firstIndexSeconds = firstIndex.Elapsed.TotalSeconds,
             initialSeconds = initial.Elapsed.TotalSeconds, initialHashed = initial.Hashed,
             unchangedSeconds = unchanged.Elapsed.TotalSeconds, unchanged.Hashed, unchanged.Updated,
-            unchanged.Unchanged, sequencePreserved = sequence == finalSequence, targetSeconds = 10, correct, targetMet,
-            scope = "real one-byte files in 1000-file directories, warm local SSD; initial full hashing/signing/indexing then unchanged full walk",
+            unchanged.Unchanged, sequencePreserved = sequence == finalSequence,
+            idleCpuPercent, idleWorkingSetBytes, idlePrivateBytes,
+            targetSeconds = count == 1_000_000 ? 1200 : 10, correct, targetMet,
+            scope = "real one-byte files in 1000-file directories, local SSD; first index includes database open and full hashing/signing/indexing, followed by unchanged walk",
         }));
         if (measureReferences)
         {
