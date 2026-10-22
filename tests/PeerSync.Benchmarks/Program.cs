@@ -29,6 +29,9 @@ if (args is ["--scan", var corpusPath, "--files", var fileCount])
     return await PeerSync.Benchmarks.ScanningBenchmark.RunAsync(corpusPath, int.Parse(fileCount, CultureInfo.InvariantCulture));
 if (args is ["--scan-existing", var existingCorpus, "--files", var existingCount])
     return await PeerSync.Benchmarks.ScanningBenchmark.RunAsync(existingCorpus, int.Parse(existingCount, CultureInfo.InvariantCulture), reuseCorpus: true);
+if (args is ["--scan-peer-existing", var peerCorpus, "--files", var peerCount])
+    return await PeerSync.Benchmarks.ScanningBenchmark.RunAsync(peerCorpus, int.Parse(peerCount, CultureInfo.InvariantCulture),
+        reuseCorpus: true, syncFreshPeer: true);
 if (args is ["--references-existing", var referenceCorpus, "--files", var referenceCount])
     return await PeerSync.Benchmarks.ScanningBenchmark.RunAsync(referenceCorpus, int.Parse(referenceCount, CultureInfo.InvariantCulture), reuseCorpus: true, measureReferences: true);
 if (args.Length < 1)

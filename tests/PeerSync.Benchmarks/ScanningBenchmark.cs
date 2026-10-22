@@ -2,6 +2,7 @@ extern alias native;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
 using PeerSync.Engine.Scanning;
 using PeerSync.Engine.Hashing;
@@ -11,7 +12,8 @@ namespace PeerSync.Benchmarks;
 
 internal static class ScanningBenchmark
 {
-    public static async Task<int> RunAsync(string fixture, int count, bool reuseCorpus = false, bool measureReferences = false)
+    public static async Task<int> RunAsync(string fixture, int count, bool reuseCorpus = false,
+        bool measureReferences = false, bool syncFreshPeer = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         fixture = Path.GetFullPath(fixture);
@@ -37,7 +39,10 @@ internal static class ScanningBenchmark
         string database = reuseCorpus ? "index-" + Guid.NewGuid().ToString("N") + ".db" : "index.db";
         var firstIndex = Stopwatch.StartNew();
         await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, database));
-        using var scanner = new Scanner(root, index, keys, new byte[32]);
+        string? diagnosticPath = count == 1_000_000
+            ? Path.Combine(fixture, "logs-" + Guid.NewGuid().ToString("N")) : null;
+        using var journal = diagnosticPath is null ? null : new DiagnosticJournal(diagnosticPath, "scale", debugEnabled: true);
+        using var scanner = new Scanner(root, index, keys, new byte[32], journal: journal);
         long hashedProgress = 0;
         if (count == 1_000_000)
             scanner.BytesHashed += _ =>
@@ -58,6 +63,8 @@ internal static class ScanningBenchmark
             && unchanged.Hashed == 0 && unchanged.Updated == 0 && unchanged.Unchanged == rows && sequence == finalSequence;
         double? idleCpuPercent = null;
         long? idleWorkingSetBytes = null, idlePrivateBytes = null;
+        long? peakWorkingSetBytes = null, managedIdleBytes = null;
+        long? gcCommittedIdleBytes = null, sqliteMemoryIdleBytes = null;
         if (count == 1_000_000)
         {
             using Process process = Process.GetCurrentProcess();
@@ -71,6 +78,10 @@ internal static class ScanningBenchmark
                 idle.Elapsed.TotalSeconds / Environment.ProcessorCount * 100;
             idleWorkingSetBytes = process.WorkingSet64;
             idlePrivateBytes = process.PrivateMemorySize64;
+            peakWorkingSetBytes = process.PeakWorkingSet64;
+            managedIdleBytes = GC.GetTotalMemory(forceFullCollection: false);
+            gcCommittedIdleBytes = GC.GetGCMemoryInfo().TotalCommittedBytes;
+            sqliteMemoryIdleBytes = SQLitePCL.raw.sqlite3_memory_used();
         }
         const long memoryLimit = 300L * 1024 * 1024;
         bool targetMet = count == 1_000_000
@@ -80,12 +91,14 @@ internal static class ScanningBenchmark
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             target = count == 1_000_000 ? "P5 million-file scanner" : "Scanner",
-            files = count, rows, reuseCorpus, database, creationSeconds = creation.Elapsed.TotalSeconds,
+            files = count, rows, reuseCorpus, database, diagnosticPath,
+            creationSeconds = creation.Elapsed.TotalSeconds,
             firstIndexSeconds = firstIndex.Elapsed.TotalSeconds,
             initialSeconds = initial.Elapsed.TotalSeconds, initialHashed = initial.Hashed,
             unchangedSeconds = unchanged.Elapsed.TotalSeconds, unchanged.Hashed, unchanged.Updated,
             unchanged.Unchanged, sequencePreserved = sequence == finalSequence,
             idleCpuPercent, idleWorkingSetBytes, idlePrivateBytes,
+            peakWorkingSetBytes, managedIdleBytes, gcCommittedIdleBytes, sqliteMemoryIdleBytes,
             targetSeconds = count == 1_000_000 ? 1200 : 10, correct, targetMet,
             scope = "real one-byte files in 1000-file directories, local SSD; first index includes database open and full hashing/signing/indexing, followed by unchanged walk",
         }));
@@ -102,6 +115,8 @@ internal static class ScanningBenchmark
                 seconds = clock.Elapsed.TotalSeconds, correct = referencesCorrect, scope = "authenticated production snapshot over the real scanner index; 251 distinct one-byte values" }));
             correct &= referencesCorrect;
         }
+        if (syncFreshPeer && targetMet && correct)
+            correct = await MillionPeerBenchmark.SyncAsync(fixture, root, index, keys, count);
         // Preserve the corpus and database for inspection; never delete a caller's directory.
         return targetMet && correct ? 0 : 1;
     }

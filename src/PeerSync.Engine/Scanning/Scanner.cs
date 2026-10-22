@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime;
 using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
@@ -25,6 +26,7 @@ public sealed record ScanProblem(string RelativePath, string Code, int? NativeEr
 public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int Renamed, int Updated,
     int Deleted, int Ignored, int Unsyncable, TimeSpan Elapsed, IReadOnlyList<ScanProblem> Problems)
 {
+    internal Guid SessionId { get; init; }
     public bool RequiresFollowupScan { get; init; }
     internal IReadOnlyList<string> ChangedPaths { get; init; } = [];
     internal bool RequiresNeededRebuild { get; init; }
@@ -35,6 +37,10 @@ public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int R
 public sealed partial class Scanner : IDisposable
 {
     private const string RootIdentityKey = "_root-identity";
+    private const int LargeScanEntryThreshold = 100_000;
+    private const long LargeScanPrivateThresholdBytes = 300L * 1024 * 1024;
+    private static readonly TimeSpan LargeScanReclaimDelay = TimeSpan.FromSeconds(10);
+    private static long reclaimGeneration;
     private static readonly IReadOnlyDictionary<ulong, ulong> EmptyVector = new Dictionary<ulong, ulong>();
     private readonly string rootPath;
     private readonly FolderIndex index;
@@ -79,6 +85,74 @@ public sealed partial class Scanner : IDisposable
     public async Task<ScanResult> ScanAsync(CancellationToken cancellationToken = default)
     {
         await scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ScanResult result = await ScanCoreAsync(cancellationToken).ConfigureAwait(false);
+            if (result.Enumerated >= LargeScanEntryThreshold) ScheduleLargeScanReclaim(result);
+            return result;
+        }
+        finally { scanGate.Release(); }
+    }
+
+    private void ScheduleLargeScanReclaim(ScanResult result)
+    {
+        // The completed async scan still roots its large temporary maps here.
+        // Coalesce consecutive walks and collect only after their tasks unwind.
+        long generation = Interlocked.Increment(ref reclaimGeneration);
+        WeakReference<DiagnosticJournal>? log = journal is null ? null : new(journal);
+        journal?.TryWrite(new("scan.large_reclaim_scheduled", "scan")
+        { SessionId = result.SessionId, ItemsVisited = result.Enumerated });
+        _ = ReclaimAfterIdleAsync(generation, log, result.SessionId, result.Enumerated);
+    }
+
+    private static async Task ReclaimAfterIdleAsync(long generation, WeakReference<DiagnosticJournal>? log,
+        Guid session, int visited)
+    {
+        await Task.Delay(LargeScanReclaimDelay).ConfigureAwait(false);
+        if (Volatile.Read(ref reclaimGeneration) != generation)
+        {
+            if (log is not null && log.TryGetTarget(out DiagnosticJournal? supersededJournal))
+                supersededJournal.TryWrite(new("scan.large_reclaim_skipped", "scan")
+                { SessionId = session, ItemsVisited = visited, ErrorCode = "superseded" });
+            return;
+        }
+        try
+        {
+            using Process process = Process.GetCurrentProcess();
+            process.Refresh();
+            if (process.PrivateMemorySize64 < LargeScanPrivateThresholdBytes)
+            {
+                if (log is not null && log.TryGetTarget(out DiagnosticJournal? smallJournal))
+                    smallJournal.TryWrite(new("scan.large_reclaim_skipped", "scan")
+                    { SessionId = session, ItemsVisited = visited, ErrorCode = "below-private-limit" });
+                return;
+            }
+            long before = GC.GetGCMemoryInfo().TotalCommittedBytes;
+            var elapsed = Stopwatch.StartNew();
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            elapsed.Stop();
+            if (log is not null && log.TryGetTarget(out DiagnosticJournal? completeJournal))
+                completeJournal.TryWrite(new("scan.large_reclaim", "scan")
+                {
+                    SessionId = session, ItemsVisited = visited,
+                    ElapsedMilliseconds = elapsed.ElapsedMilliseconds,
+                    Bytes = Math.Max(0, before - GC.GetGCMemoryInfo().TotalCommittedBytes),
+                });
+        }
+        catch (Exception error)
+        {
+            if (log is not null && log.TryGetTarget(out DiagnosticJournal? failureJournal))
+                failureJournal.TryWrite(new("scan.large_reclaim_failed", "scan")
+                { SessionId = session, Level = DiagnosticLevel.Warning, HResult = error.HResult });
+        }
+    }
+
+    private async Task<ScanResult> ScanCoreAsync(CancellationToken cancellationToken)
+    {
         var stopwatch = Stopwatch.StartNew();
         Guid session = Guid.NewGuid();
         try
@@ -345,7 +419,7 @@ public sealed partial class Scanner : IDisposable
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
+                { SessionId = session, RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
                     RequiresNeededRebuild = ordered.Any(row => row.Deleted && previous.TryGetValue(row.Path.ToUpperInvariant(), out var old)
                         && old is { Type: 0, Deleted: false, Record: not null }) };
 
@@ -365,7 +439,6 @@ public sealed partial class Scanner : IDisposable
                 NativeError = NativeCode(error), ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }
-        finally { scanGate.Release(); }
     }
 
     private LocalFileRow CreateVersion(WalkEntry entry, LocalFileRow? old, FileHash? hash,
