@@ -35,7 +35,7 @@ foreach ($cohort in $cohorts) {
     }
     else {
         $index=[int]$cohort.Substring('retained-'.Length)-1
-        $seeds=@(for ($i=$index; $i -lt 8; $i+=3) { [int]$registry.retainedSeeds[$i] })
+        $seeds=@(for ($i=$index; $i -lt 10; $i+=3) { [int]$registry.retainedSeeds[$i] })
         $methods=@($seeds | ForEach-Object { $registry.prefix+"RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(seed: $_)" })
         New-Item -ItemType Directory -Path (Join-Path $folder regressions) | Out-Null
         foreach ($seed in $seeds) { Write-Json (Join-Path $folder "regressions/$seed.json") @{Seed=$seed;Rounds=$(if ($seed -eq 1390180802) { 28 } else { 1 });Nodes=3;Versions=1} }
@@ -47,7 +47,7 @@ foreach ($cohort in $cohorts) {
     Write-Json (Join-Path $folder manifest.json) @{schema='peersync-boundary-shard-v1';status='passed';sourceRevision=$source;ciRunId=$run;ciRunAttempt=$attempt;cohort=$cohort;simulationSha256=$hash;executedMethods=$count;retainedRegressionCases=$seeds.Count;maintenanceCases=$(if($cohort -eq 'baseline'){1}else{0});retainedSeeds=@($seeds);simulationCases=8;hierarchicalCases=4;fuzzSeconds=$(if($cohort -eq 'baseline'){600.1}else{0});fuzzSeeds=$(if($cohort -eq 'baseline'){100}else{0});fuzzCrashes=0;binaryOutputsUnchanged=$true}
 }
 $aggregate=Read-Aggregate
-if ($aggregate.status -ne 'passed' -or $aggregate.executedMethods -ne 15 -or $aggregate.retainedRegressionCases -ne 8) { throw 'Complete boundary artifacts rejected' }
+if ($aggregate.status -ne 'passed' -or $aggregate.executedMethods -ne 17 -or $aggregate.retainedRegressionCases -ne 10) { throw 'Complete boundary artifacts rejected' }
 $passed++
 Assert-Rejected wrong-attempt { & "$PSScriptRoot/Read-BoundaryCiArtifacts.ps1" -Path $fixture -RunId $run -RunAttempt 3 -SourceRevision $source }
 Assert-Rejected wrong-source { & "$PSScriptRoot/Read-BoundaryCiArtifacts.ps1" -Path $fixture -RunId $run -RunAttempt $attempt -SourceRevision ('f'*40) }
@@ -77,7 +77,7 @@ try { Set-Content -LiteralPath $extraPath -Value '<TestRun />'; Assert-Rejected 
 finally { Remove-Item -LiteralPath $extraPath }
 $trxPath=Join-Path $retainedFolder scope.trx
 $trxOriginal=Get-Content -LiteralPath $trxPath -Raw
-try { Set-Content -LiteralPath $trxPath -Value ($trxOriginal.Replace('passed="3"','passed="2"')); Assert-Rejected incomplete-trx { Read-Aggregate } }
+try { Set-Content -LiteralPath $trxPath -Value ($trxOriginal.Replace('passed="4"','passed="3"')); Assert-Rejected incomplete-trx { Read-Aggregate } }
 finally { Set-Content -LiteralPath $trxPath -Value $trxOriginal }
 $fuzzPath=Join-Path $fixture "boundary-baseline-attempt-$attempt/fuzz-verification.json"
 $fuzzOriginal=Get-Content -LiteralPath $fuzzPath -Raw

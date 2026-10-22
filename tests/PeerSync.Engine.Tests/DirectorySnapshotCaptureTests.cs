@@ -59,6 +59,111 @@ public sealed partial class DirectorySnapshotCaptureTests : IDisposable
         File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")).ShouldContain("publication-pending");
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task DominatingDescendantTombstonePassesOnlyAnAncestorPublication(bool directory, bool interrupted)
+    {
+        string childPath = directory ? "topic/nested" : "topic/a";
+        if (directory) Directory.CreateDirectory(Path.Combine(Root, "topic", "nested"));
+        else WriteFiles("a");
+        await using var index = await Open();
+        var parent = index.LocalFiles.Find("topic")!;
+        var child = index.LocalFiles.Find(childPath)!;
+        long now = DateTime.UtcNow.Ticks;
+        var parentQueue = new DirectoryPublication(Guid.NewGuid(), "topic", index.Meta.Find("_root-identity")!.Value!,
+            parent.FileId!, parent.LocalSequence, parent.Attributes, parent.Record!, new byte[32], 1, now, now);
+        await index.StageDirectoryPublicationAsync(parentQueue, Token);
+
+        SignedRecordFactory.TryOpen(child.Record!, keys, out var body).ShouldBeTrue();
+        byte[] remote = [2, .. new byte[31]];
+        body.Deleted = true; body.Size = 0; body.FileHash = ByteString.Empty; body.Chunks.Clear();
+        body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0;
+        body.ModifiedBy = ByteString.CopyFrom(remote); body.ChangedTicks = now + 1;
+        body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        var needed = new NeededSet(index, keys, device);
+        await needed.ApplyIndexUpdateAsync(remote, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        await needed.AnnounceIndexRangeAsync(remote, 1, Token);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "ancestor-tombstone", debugEnabled: true);
+
+        if (directory)
+        {
+            var applier = new DirectoryApplier(Root, index, keys, device, journal: journal);
+            if (interrupted) applier.Checkpoint = stage => { if (stage == "prepared") throw new IOException("injected"); };
+            if (interrupted)
+            {
+                await Should.ThrowAsync<IOException>(() => applier.ApplyScheduledAsync(childPath, Token));
+                (await new FileApplier(Root, index, keys, device).RecoverAsync(Token)).ShouldBe(1);
+            }
+            else (await applier.ApplyScheduledAsync(childPath, Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        }
+        else
+        {
+            var applier = new FileApplier(Root, index, keys, device, journal: journal);
+            if (interrupted) applier.Checkpoint = stage => { if (stage == "prepared") throw new IOException("injected"); };
+            if (interrupted)
+            {
+                await Should.ThrowAsync<IOException>(() => applier.ApplyScheduledAsync(childPath,
+                    (_, _, _, _) => throw new InvalidOperationException("Tombstone must not fetch bytes."), Token));
+                (await new FileApplier(Root, index, keys, device).RecoverAsync(Token)).ShouldBe(1);
+            }
+            else (await applier.ApplyScheduledAsync(childPath,
+                (_, _, _, _) => throw new InvalidOperationException("Tombstone must not fetch bytes."), Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
+        }
+        Directory.Exists(Path.Combine(Root, "topic")).ShouldBeTrue();
+        (directory ? Directory.Exists(Path.Combine(Root, "topic", "nested")) : File.Exists(Path.Combine(Root, "topic", "a"))).ShouldBeFalse();
+        index.LocalFiles.Find(childPath)!.Deleted.ShouldBeTrue();
+        index.ReadDirectoryPublication("topic")!.Version.ShouldBe(parentQueue.Version);
+        File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")).ShouldContain("ancestor-publication-bypassed");
+    }
+
+    [Fact]
+    public async Task ConcurrentDescendantTombstoneStillWaitsBehindAncestorPublication()
+    {
+        WriteFiles("a"); await using var index = await Open();
+        var parent = index.LocalFiles.Find("topic")!;
+        var child = index.LocalFiles.Find("topic/a")!;
+        long now = DateTime.UtcNow.Ticks;
+        await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), "topic", index.Meta.Find("_root-identity")!.Value!,
+            parent.FileId!, parent.LocalSequence, parent.Attributes, parent.Record!, new byte[32], 1, now, now), Token);
+        SignedRecordFactory.TryOpen(child.Record!, keys, out var body).ShouldBeTrue();
+        byte[] remote = [2, .. new byte[31]];
+        body.Deleted = true; body.Size = 0; body.FileHash = ByteString.Empty; body.Chunks.Clear();
+        body.ModifiedBy = ByteString.CopyFrom(remote); body.ChangedTicks = now + TimeSpan.TicksPerMinute;
+        body.Vv.Clear(); body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        var needed = new NeededSet(index, keys, device);
+        await needed.ApplyIndexUpdateAsync(remote, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        await needed.AnnounceIndexRangeAsync(remote, 1, Token);
+        var decision = needed.Decide(new("TOPIC/A", child, index.RemotesForPath("topic/a").ToArray()));
+        decision.Winner!.Deleted.ShouldBeTrue();
+        VersionVector.Compare(decision.Winner.Vector, child.Vector).ShouldBe(VvOrder.Concurrent);
+        (await new FileApplier(Root, index, keys, device).ApplyScheduledAsync("topic/a",
+            (_, _, _, _) => throw new InvalidOperationException("Blocked work must not fetch bytes."), Token)).Outcome.ShouldBe(FileApplyOutcome.Blocked);
+        File.Exists(Path.Combine(Root, "topic", "a")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task DominatingDirectoryTombstoneCannotPassItsOwnOrdinaryPublication()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "topic", "nested"));
+        await using var index = await Open(); var child = index.LocalFiles.Find("topic/nested")!;
+        long now = DateTime.UtcNow.Ticks;
+        await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), child.Path, index.Meta.Find("_root-identity")!.Value!,
+            child.FileId!, child.LocalSequence, child.Attributes, child.Record!, new byte[32], 0, now, now), Token);
+        SignedRecordFactory.TryOpen(child.Record!, keys, out var body).ShouldBeTrue();
+        byte[] remote = [2, .. new byte[31]];
+        body.Deleted = true; body.DirectorySnapshotHash = ByteString.Empty; body.DirectorySnapshotLength = 0;
+        body.ModifiedBy = ByteString.CopyFrom(remote); body.ChangedTicks = now + 1;
+        body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        var needed = new NeededSet(index, keys, device);
+        await needed.ApplyIndexUpdateAsync(remote, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        await needed.AnnounceIndexRangeAsync(remote, 1, Token);
+        (await new DirectoryApplier(Root, index, keys, device).ApplyScheduledAsync(child.Path, Token)).Outcome.ShouldBe(FileApplyOutcome.Blocked);
+        Directory.Exists(Path.Combine(Root, "topic", "nested")).ShouldBeTrue();
+    }
+
     [Fact]
     public async Task IndexedCaptureResumesAfterRestartWithoutRevalidatingUnchangedFullInput()
     {
