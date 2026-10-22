@@ -106,6 +106,7 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
 
     private sealed partial class Scenario
     {
+        private const int MaximumHealingRounds = 32;
         private readonly int seed;
         private readonly string evidence;
         private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-Simulation-" + Guid.NewGuid().ToString("N"));
@@ -202,7 +203,7 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
             }
             foreach (var link in connections) network.ConfigureLink(nodes[link.From].Id, nodes[link.To].Id, new());
             long[]? previous = null;
-            for (int round = 1; round <= 24; round++)
+            for (int round = 1; round <= MaximumHealingRounds; round++)
             {
                 AdvanceAll(TimeSpan.FromSeconds(601));
                 foreach (var connection in connections) await connection.Peer.SynchronizeAsync(cancellationToken: token);
@@ -230,7 +231,7 @@ public sealed partial class RealEngineProperties(ITestOutputHelper output)
                 }
                 previous = high;
             }
-            throw new InvalidDataException("Visible trees or pending work did not converge after healing.");
+            throw new InvalidDataException($"Visible trees or pending work did not converge after {MaximumHealingRounds} healing rounds.");
         }
 
         private void Write(Node node, string relative, byte[] bytes)

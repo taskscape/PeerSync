@@ -6,5 +6,6 @@
     <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
     <Protobuf Include="records.proto" GrpcServices="None" />
     <Protobuf Include="hello.proto" GrpcServices="None" />
+    <Protobuf Include="wire.proto" GrpcServices="None" />
   </ItemGroup>
 </Project>

@@ -1,14 +1,17 @@
 using System.Diagnostics;
+using System.Buffers;
 using System.Globalization;
 using System.Text.Json;
 using PeerSync.Core.Ignore;
 using PeerSync.Core.Paths;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto.Chunking;
+using PeerSync.Protocol;
+using PeerSync.Protocol.Framing;
 
 if (args is not ["--seconds", var duration])
 {
-    Console.Error.WriteLine("--seconds <duration>: FastCDC, path, version-vector and ignore fuzz smoke.");
+    Console.Error.WriteLine("--seconds <duration>: FastCDC, path, version-vector, ignore and frame fuzz smoke.");
     return 2;
 }
 int seconds = int.Parse(duration, CultureInfo.InvariantCulture);
@@ -23,6 +26,22 @@ while (clock.Elapsed < TimeSpan.FromSeconds(seconds))
     random.NextBytes(corpus);
     try
     {
+        var arbitraryFrame = new ReadOnlySequence<byte>(corpus);
+        try
+        {
+            while (true)
+            {
+                long before = arbitraryFrame.Length;
+                if (!FrameCodec.TryRead(ref arbitraryFrame, out _)) break;
+                if (arbitraryFrame.Length >= before) throw new InvalidDataException("Framing parser made no progress.");
+            }
+        }
+        catch (ProtocolException) { /* Malformed untrusted input is an expected rejection. */ }
+        var encoded = new ArrayBufferWriter<byte>(); FrameCodec.Write(encoded, (byte)WireType.Ping, corpus);
+        var validFrame = new ReadOnlySequence<byte>(encoded.WrittenMemory);
+        if (!FrameCodec.TryRead(ref validFrame, out var decoded) || !validFrame.IsEmpty
+            || decoded.Type != (byte)WireType.Ping || !decoded.Body.FirstSpan.SequenceEqual(corpus))
+            throw new InvalidDataException("Framing round trip changed bytes.");
         // Mix arbitrary UTF-16 (including unpaired surrogates) with valid paths
         // and hostile mutations, so this is not only an early-rejection target.
         int charCount = random.Next(0, 4100);
@@ -68,10 +87,10 @@ while (clock.Elapsed < TimeSpan.FromSeconds(seconds))
     {
         Directory.CreateDirectory("artifacts/fuzz/crashes");
         await File.WriteAllBytesAsync($"artifacts/fuzz/crashes/boundary-path-vector-{seed}.bin", corpus);
-        await File.WriteAllTextAsync($"artifacts/fuzz/crashes/seed-{seed}.json", JsonSerializer.Serialize(new { seed, targets = "FastCDC,PathRules,VersionVector,IgnoreMatcher", replay = "System.Random(seed), replay corpus generation before path generation" }));
+        await File.WriteAllTextAsync($"artifacts/fuzz/crashes/seed-{seed}.json", JsonSerializer.Serialize(new { seed, targets = "FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec", replay = "System.Random(seed), replay corpus generation before path generation" }));
         throw;
     }
     seed++;
 }
-Console.WriteLine(JsonSerializer.Serialize(new { target = "FastCDC,PathRules,VersionVector,IgnoreMatcher", seeds = seed, seconds = clock.Elapsed.TotalSeconds, crashes = 0 }));
+Console.WriteLine(JsonSerializer.Serialize(new { target = "FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec", seeds = seed, seconds = clock.Elapsed.TotalSeconds, crashes = 0 }));
 return 0;

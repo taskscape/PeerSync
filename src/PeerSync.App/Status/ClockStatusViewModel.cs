@@ -32,7 +32,7 @@ internal sealed class ClockStatusViewModel : INotifyPropertyChanged
         epoch = snapshot.InstanceId; sequence = snapshot.Sequence;
         Rows = snapshot.Clocks.Select(ClockStatusRow.From).ToArray();
         Connection = "Connected to verified PeerSync service";
-        Availability = snapshot.ProductionSyncAvailable ? "Production sync is available." : "Production sync is not available in this build.";
+        Availability = snapshot.ProductionSyncAvailable ? "Production sync is available." : "Production sync is not available right now.";
         Detail = snapshot.ClockStatusTruncated ? "Showing a limited snapshot (at most 1,000 peer sessions). Additional sessions are omitted."
             : Rows.Count == 0 ? "No peer clock sessions reported." : "Clock offset is peer UTC minus this computer's UTC.";
         Notify(); return true;

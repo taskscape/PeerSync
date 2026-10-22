@@ -1,10 +1,10 @@
-using System.Buffers;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Engine.Native;
 using PeerSync.Engine.Hashing;
+using PeerSync.Net;
 using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Sync;
@@ -15,8 +15,16 @@ internal readonly record struct AssemblyResult(long TemporaryBytes, long LocalBy
 /// The host owns the tree/index/journal and serializes use of the destination.</summary>
 internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, DiagnosticJournal? journal = null)
 {
-    public async Task<AssemblyResult> AssembleAsync(VersionView version, Stream destination,
+    private const int MaximumAssemblyWindowBytes = TransferScheduler.MaximumWindowBytes;
+
+    public Task<AssemblyResult> AssembleAsync(VersionView version, Stream destination,
         Func<ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        CancellationToken cancellationToken = default)
+        => AssembleAsync(version, destination, fetch, fetchBatch: null, cancellationToken);
+
+    internal async Task<AssemblyResult> AssembleAsync(VersionView version, Stream destination,
+        Func<ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        Func<IReadOnlyList<PeerBlockRequest>, bool, CancellationToken, ValueTask<IReadOnlyList<PeerBlockResult>>>? fetchBatch,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(version); ArgumentNullException.ThrowIfNull(destination); ArgumentNullException.ThrowIfNull(fetch);
@@ -24,8 +32,6 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         if (!destination.CanRead || !destination.CanWrite || !destination.CanSeek)
             throw new ArgumentException("The temporary stream must support reading, writing and seeking.", nameof(destination));
         var body = version.ExportBody();
-        int capacity = body.Chunks.Count == 0 ? 1 : checked((int)body.Chunks.Max(c => c.Length));
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
         Guid session = Guid.NewGuid(); var stopwatch = Stopwatch.StartNew();
         long offset = 0, temporaryBytes = 0, localBytes = 0, remoteBytes = 0;
         int verified = 0;
@@ -34,46 +40,102 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         {
             using var whole = Blake3.Hasher.New();
             journal?.TryWrite(new("assembly.started", "assembly") { SessionId = session, Bytes = version.Size, ItemsVisited = body.Chunks.Count });
-            foreach (var chunk in body.Chunks)
+            int chunkIndex = 0;
+            while (chunkIndex < body.Chunks.Count)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                int length = checked((int)chunk.Length);
-                Memory<byte> bytes = buffer.AsMemory(0, length);
-                string origin = "assembly.temporary_reused";
-                bool resumed = destination.Length >= offset + length;
-                if (resumed)
+                var window = new List<ChunkWork>();
+                int windowBytes = 0;
+                long nextOffset = offset;
+                while (chunkIndex < body.Chunks.Count)
                 {
-                    destination.Position = offset;
-                    await destination.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
-                    resumed = Matches(bytes.Span, chunk.Hash.Span);
-                }
-                if (resumed) temporaryBytes += length;
-                else
-                {
-                    bool published = blocks.TryRead(chunk.Hash.Span, bytes.Span, cancellationToken);
-                    if (published || TryLocal(chunk.Hash.ToByteArray(), bytes, cancellationToken))
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var chunk = body.Chunks[chunkIndex++];
+                    int length = checked((int)chunk.Length);
+                    if (window.Count != 0 && windowBytes + length > MaximumAssemblyWindowBytes) { chunkIndex--; break; }
+                    windowBytes += length;
+                    long chunkOffset = nextOffset;
+                    nextOffset = checked(nextOffset + length);
+                    byte[] bytes = new byte[length];
+                    string origin = "assembly.temporary_reused";
+                    bool reused = destination.Length >= chunkOffset + length;
+                    Task<ReadOnlyMemory<byte>>? remote = null;
+                    bool remoteRequested = false;
+                    if (reused)
                     {
-                        localBytes += length; origin = published ? "assembly.published_reused" : "assembly.local_reused";
+                        destination.Position = chunkOffset;
+                        await destination.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+                        reused = Matches(bytes, chunk.Hash.Span);
                     }
+                    if (reused) temporaryBytes += length;
                     else
                     {
-                        ReadOnlyMemory<byte> received = await fetch(chunk.Hash.ToByteArray(), length, cancellationToken).ConfigureAwait(false);
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (received.Length != length) throw new InvalidDataException("Remote chunk length does not match its signed record.");
-                        // Own the bytes before verification; a transport buffer may be reused after the callback.
-                        received.CopyTo(bytes);
-                        if (!Matches(bytes.Span, chunk.Hash.Span)) throw new CryptographicException("Remote chunk hash verification failed.");
-                        remoteBytes += length; origin = "assembly.remote_verified";
+                        bool published = blocks.TryRead(chunk.Hash.Span, bytes, cancellationToken);
+                        if (published || TryLocal(chunk.Hash.ToByteArray(), bytes, cancellationToken))
+                        {
+                            localBytes += length; origin = published ? "assembly.published_reused" : "assembly.local_reused";
+                        }
+                        else
+                        {
+                            origin = "assembly.remote_verified";
+                            remoteRequested = true;
+                            if (fetchBatch is null) remote = FetchSafelyAsync(fetch, chunk.Hash.ToByteArray(), length, cancellationToken);
+                        }
                     }
-                    cancellationToken.ThrowIfCancellationRequested();
-                    destination.Position = offset;
-                    await destination.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                    window.Add(new(chunk.Hash.ToByteArray(), length, bytes, chunkOffset, origin, reused, remoteRequested, remote));
                 }
-                whole.Update(bytes.Span);
-                blocks.Put(bytes.Span, chunk.Hash.Span, cancellationToken);
-                offset = checked(offset + length); verified++;
-                journal?.TryWrite(new(origin, "assembly") { SessionId = session, Level = DiagnosticLevel.Debug,
-                    Bytes = offset, ItemsVisited = verified, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
+
+                await Task.WhenAll(window.Where(item => item.Remote is not null).Select(item => ObserveFetchAsync(item))).ConfigureAwait(false);
+                if (fetchBatch is not null)
+                {
+                    ChunkWork[][] batches = window.Where(item => item.RemoteRequested).Chunk(64).ToArray();
+                    for (int batchIndex = 0; batchIndex < batches.Length; batchIndex++)
+                    {
+                        ChunkWork[] batch = batches[batchIndex];
+                        try
+                        {
+                            PeerBlockRequest[] requests = batch.Select(item => new PeerBlockRequest(item.Hash, item.Length)).ToArray();
+                            bool endgame = chunkIndex == body.Chunks.Count && batchIndex == batches.Length - 1;
+                            IReadOnlyList<PeerBlockResult> received = await fetchBatch(requests, endgame, cancellationToken).ConfigureAwait(false);
+                            if (received.Count != batch.Length) throw new InvalidDataException("Remote peer returned the wrong block batch size.");
+                            for (int i = 0; i < batch.Length; i++)
+                            {
+                                if (received[i].ErrorCode is { } errorCode) batch[i].Failure = new PeerBlockException(errorCode);
+                                else batch[i].Received = received[i].Data;
+                            }
+                        }
+                        catch (Exception error)
+                        {
+                            foreach (ChunkWork item in batch) item.Failure = error;
+                        }
+                    }
+                }
+                Exception? failure = null;
+                foreach (ChunkWork item in window)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (item.RemoteRequested)
+                    {
+                        if (item.Failure is not null) { failure ??= item.Failure; continue; }
+                        ReadOnlyMemory<byte> received = item.Received;
+                        if (received.Length != item.Length)
+                        { failure ??= new InvalidDataException("Remote chunk length does not match its signed record."); continue; }
+                        received.CopyTo(item.Bytes);
+                        if (!Matches(item.Bytes, item.Hash))
+                        { failure ??= new CryptographicException("Remote chunk hash verification failed."); continue; }
+                        remoteBytes += item.Length;
+                    }
+                    if (!item.Reused)
+                    {
+                        destination.Position = item.Offset;
+                        await destination.WriteAsync(item.Bytes, cancellationToken).ConfigureAwait(false);
+                    }
+                    whole.Update(item.Bytes);
+                    blocks.Put(item.Bytes, item.Hash, cancellationToken);
+                    offset = checked(offset + item.Length); verified++;
+                    journal?.TryWrite(new(item.Origin, "assembly") { SessionId = session, Level = DiagnosticLevel.Debug,
+                        Bytes = offset, ItemsVisited = verified, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
+                }
+                if (failure is not null) throw failure;
             }
             cancellationToken.ThrowIfCancellationRequested();
             var digest = whole.Finalize();
@@ -94,9 +156,34 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         }
         finally
         {
-            try { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
-            finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
+            await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false);
         }
+    }
+
+    private static async Task<ReadOnlyMemory<byte>> FetchSafelyAsync(
+        Func<ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        ReadOnlyMemory<byte> hash, int length, CancellationToken token)
+        => await fetch(hash, length, token).ConfigureAwait(false);
+
+    private static async Task ObserveFetchAsync(ChunkWork item)
+    {
+        try { item.Received = await item.Remote!.ConfigureAwait(false); }
+        catch (Exception error) { item.Failure = error; }
+    }
+
+    private sealed class ChunkWork(byte[] hash, int length, byte[] bytes, long offset, string origin, bool reused, bool remoteRequested,
+        Task<ReadOnlyMemory<byte>>? remote)
+    {
+        internal byte[] Hash { get; } = hash;
+        internal int Length { get; } = length;
+        internal byte[] Bytes { get; } = bytes;
+        internal long Offset { get; } = offset;
+        internal string Origin { get; } = origin;
+        internal bool Reused { get; } = reused;
+        internal bool RemoteRequested { get; } = remoteRequested;
+        internal Task<ReadOnlyMemory<byte>>? Remote { get; } = remote;
+        internal ReadOnlyMemory<byte> Received { get; set; }
+        internal Exception? Failure { get; set; }
     }
 
     private bool TryLocal(byte[] hash, Memory<byte> bytes, CancellationToken cancellationToken)

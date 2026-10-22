@@ -1,10 +1,14 @@
 # PeerSync
 
-A Windows peer-to-peer folder sync service, currently in **P1: local sync
-engine**. P0 passed with physical LAN/NAT validation deferred to Gates P2/P4.
-The production sync engine, central tracker/relay, WPF client and
-installers are not implemented yet. See [plan.md](plan.md) for the acceptance
-criteria and phase gates. P6 is optional and outside the v1 target.
+PeerSync is a Windows peer-to-peer folder sync service. The P2 service, CLI,
+authenticated QUIC and TCP/TLS folder transports, sync engine, control pipe
+and diagnostic collection are implemented in this working tree. A complete
+local verifier pass is recorded, while the latest current-source rerun stops at
+three WPF render assertions with fully transparent off-screen bitmaps. The
+product remains experimental: the installer, cross-network rendezvous/relay
+path, physical LAN and soak gates are incomplete. See
+[plan.md](plan.md) for acceptance criteria and phase gates. P6 is optional and
+outside the v1 target.
 
 Requires Windows 11 / Server 2022 or newer and .NET SDK 10.0.402. The solution
 contains all eleven production projects plus test projects and executable P0
@@ -16,8 +20,8 @@ dotnet test --project tests/PeerSync.Core.Tests/PeerSync.Core.Tests.csproj -c Re
 dotnet test --project tests/PeerSync.Crypto.Tests/PeerSync.Crypto.Tests.csproj -c Release --report-trx
 ./build/Run-P0.ps1             # native local probes, including 1 GiB QUIC transfers
 ./build/Run-ServiceP0.ps1      # elevated; temporary services and one standard user, cleaned up
-./build/Verify.ps1             # CI parity: build, local tests, probes, 10 min fuzz, publish
-./build/Publish.ps1 -Runtime win-x64
+./build/Verify.ps1                       # local build, tests, simulations, probes, fuzz and publishing
+./build/Publish-Service.ps1 -Runtime win-x64 # experimental self-contained service + CLI bundle
 ```
 
 CI builds x64 and Arm64 on Windows. Runtime checks run on x64; Arm64 currently
@@ -35,10 +39,13 @@ when disposed. The checked-in public synthetic vectors are generated
 independently with Python/OpenSSL; normal .NET tests need no Python. See
 [the key verification report](docs/verification/P1.1.1-folder-keys-2026-10-19.md).
 
-For server / second-PC probe deployment, debug events and diagnostic bundles,
-read [docs/diagnostics.md](docs/diagnostics.md). Probe bundles deliberately say
-`productionSyncAvailable: false` in their manifest. No installer or working
-folder sync is implied by a successful scaffold build.
+For an experimental Windows Server / second-PC service deployment, use the
+[two-PC service runbook](docs/peersync-service-two-pc-runbook.md). The service
+package manifest marks P2 and keeps `gateP2Passed: false`; a local verifier pass
+does not imply cross-PC validation. For event meanings and sanitized diagnostic
+bundles, read [docs/diagnostics.md](docs/diagnostics.md). P0 probe bundles
+deliberately say `productionSyncAvailable: false` and do not implement folder
+sync.
 
 The full design is checked in as
 [the design document](Resilio-style%20P2P%20Sync%20for%20Windows%20Implementation%20Plan.md).

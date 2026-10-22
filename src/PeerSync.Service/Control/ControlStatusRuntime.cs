@@ -1,5 +1,7 @@
 using PeerSync.Control.Contracts;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Engine.Sync;
+using PeerSync.Service.Hosting;
 
 namespace PeerSync.Service.Control;
 
@@ -7,10 +9,47 @@ namespace PeerSync.Service.Control;
 /// lifetime or admission authority; remove it before disposing the engine.</summary>
 public sealed class ControlStatusRuntime
 {
+    private readonly DiagnosticJournal? diagnostics;
     private readonly object gate = new();
     private readonly Dictionary<string, TransportFolder> folders = new(StringComparer.Ordinal);
+    private readonly HashSet<Guid> activePeerSessions = [];
     private readonly Guid instance = Guid.NewGuid();
+    private InstalledFolderHost? folderHost;
     private ulong sequence;
+    public ControlStatusRuntime(DiagnosticJournal? diagnostics = null) => this.diagnostics = diagnostics;
+    public event Action? Suspending;
+    public event Action? Resumed;
+    public event Action? NetworkChanged;
+
+    internal void NotifySuspending() => Raise(Suspending, "service.power_suspending");
+    internal void NotifyResumed() => Raise(Resumed, "service.power_resumed");
+    internal void NotifyNetworkChanged() => Raise(NetworkChanged, "service.network_changed");
+    internal void AttachFolderHost(InstalledFolderHost host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        lock (gate)
+        {
+            if (folderHost is not null) throw new InvalidOperationException("Folder host is already attached.");
+            folderHost = host;
+        }
+    }
+    internal InstalledFolderHost RequireFolderHost()
+        => folderHost ?? throw new ControlRuntimeUnavailableException();
+
+    private void Raise(Action? callbacks, string eventName)
+    {
+        if (callbacks is null) return;
+        foreach (Action callback in callbacks.GetInvocationList())
+        {
+            try { callback(); }
+            catch (Exception error)
+            {
+                diagnostics?.TryWrite(new(eventName, "service_power")
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            }
+        }
+    }
+
     public IDisposable RegisterFolder(TransportFolder folder)
     {
         ArgumentNullException.ThrowIfNull(folder); string key = Convert.ToHexString(folder.FolderId);
@@ -33,8 +72,17 @@ public sealed class ControlStatusRuntime
                 rows.AddRange(page.Sessions.Select(session => new FolderPeerClockStatus(folder.FolderId, session)));
                 truncated |= page.Truncated;
             }
-            // Production engine/network supervision is not implemented by this status slice.
-            return new(instance, checked(++sequence), false, rows.AsReadOnly(), truncated);
+            return new(instance, checked(++sequence), activePeerSessions.Count != 0, rows.AsReadOnly(), truncated);
+        }
+    }
+
+    internal void SetPeerSessionActive(Guid sessionId, bool active)
+    {
+        if (sessionId == Guid.Empty) throw new ArgumentException("Session id is required.", nameof(sessionId));
+        lock (gate)
+        {
+            if (active) activePeerSessions.Add(sessionId);
+            else activePeerSessions.Remove(sessionId);
         }
     }
     private sealed class Registration(ControlStatusRuntime runtime, string key, TransportFolder folder) : IDisposable
@@ -47,3 +95,5 @@ public sealed class ControlStatusRuntime
         }
     }
 }
+
+internal sealed class ControlRuntimeUnavailableException() : InvalidOperationException("Folder management is unavailable.");

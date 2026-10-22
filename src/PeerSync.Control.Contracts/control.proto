@@ -5,10 +5,47 @@ option csharp_namespace = "PeerSync.Control.Contracts.V1";
 service PeerSyncControl {
   rpc GetStatus(StatusRequest) returns (ServiceStatus);
   rpc WatchEvents(StatusRequest) returns (stream ControlEvent);
+  rpc ListFolders(ListFoldersRequest) returns (ListFoldersResponse);
+  rpc SetPredefinedHosts(SetPredefinedHostsRequest) returns (SetPredefinedHostsResponse);
+  rpc AddFolder(AddFolderRequest) returns (FolderInfo);
+  rpc JoinFolder(JoinFolderRequest) returns (FolderInfo);
+  rpc GetFolderKeys(GetFolderKeysRequest) returns (GetFolderKeysResponse);
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
+  rpc DumpIndex(DumpIndexRequest) returns (stream IndexEntry);
 }
 
 message StatusRequest {}
 message ControlEvent { ServiceStatus status = 1; }
+message ListFoldersRequest {}
+message SetPredefinedHostsRequest { string folder = 1; repeated string hosts = 2; }
+message SetPredefinedHostsResponse { string folder_id = 1; repeated string hosts = 2; }
+message FolderInfo {
+  string folder_id = 1;
+  string path = 2;
+  string access = 3;
+  bool paused = 4;
+}
+message ListFoldersResponse { repeated FolderInfo folders = 1; }
+message AddFolderRequest { string path = 1; }
+message JoinFolderRequest { string key = 1; string path = 2; }
+message GetFolderKeysRequest { string folder = 1; }
+message GetFolderKeysResponse { string folder_id = 1; string access = 2; string key = 3; }
+message ListPeersRequest { string folder = 1; }
+message PeerInfo {
+  string device_id = 1;
+  string name = 2;
+  string approval = 3;
+  bool pinned = 4;
+  optional int64 last_seen_utc_ticks = 5;
+}
+message ListPeersResponse { string folder_id = 1; repeated PeerInfo peers = 2; }
+message DumpIndexRequest { string folder = 1; }
+message IndexEntry {
+  string path = 1;
+  int64 size = 2;
+  int64 modified_utc_ticks = 3;
+  bool deleted = 4;
+}
 
 message ServiceStatus {
   // Canonical Guid N format. Sequence is scoped to this service instance.

@@ -58,6 +58,30 @@ public sealed partial class FolderIndex
     public DirectoryGraphState? ReadDirectoryGraph(byte[] graphId)
     { FolderMaps.RequireBytes(graphId, 32); using var connection = database.OpenReader(); return FindDirectoryGraph(connection, null, graphId); }
 
+    /// <summary>Complete, active directory snapshots that publish a block. Results
+    /// are ordered and bounded by the caller so serving authorization can apply
+    /// the current local ignore policy to their signed directory paths.</summary>
+    public IEnumerable<DirectoryGraphState> FindDirectoryGraphsForBlock(byte[] hash, int length)
+    {
+        FolderMaps.RequireBytes(hash, 32);
+        if (length is < 1 or > 8388608) throw new ArgumentOutOfRangeException(nameof(length));
+        byte[] frozen = hash.ToArray();
+        return Read();
+        IEnumerable<DirectoryGraphState> Read()
+        {
+            using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+            command.CommandText = "SELECT g.id,g.root_id,g.directory_path,g.node_hash,g.node_length,g.complete,g.retiring "
+                + "FROM directory_graph_references r JOIN directory_graphs g ON g.id=r.graph_id "
+                + "WHERE r.hash=$hash AND r.length=$length AND g.complete=1 AND g.retiring=0 "
+                + "ORDER BY g.directory_path,g.id;";
+            command.Parameters.AddWithValue("$hash", frozen); command.Parameters.AddWithValue("$length", length);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+                yield return new(reader.GetFieldValue<byte[]>(0), reader.GetFieldValue<byte[]>(1), reader.GetString(2),
+                    reader.GetFieldValue<byte[]>(3), reader.GetInt32(4), reader.GetBoolean(5)) { Retiring = reader.GetBoolean(6) };
+        }
+    }
+
     // Reference prefixes may be replayed after cancellation. A FULL work commit
     // flushes those frames before it makes progress visible.
     public Task<int> AppendDirectoryGraphReferencesAsync(byte[] graphId, IReadOnlyList<DirectoryGraphBlock> references, CancellationToken cancellationToken = default)

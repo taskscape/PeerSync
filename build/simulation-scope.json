@@ -7,7 +7,9 @@
     1583987140,
     1608819303,
     1648781653,
-    1878823561
+    1878823561,
+    1390180802,
+    1686969054
   ],
   "baselineMethods": [
     "ConnectedMaintenanceExpiresArchivesAndBlocksWithoutLosingDelayedPeerVersions",

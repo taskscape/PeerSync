@@ -1,9 +1,16 @@
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using PeerSync.Control.Contracts;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Settings;
+using PeerSync.Service.Hosting;
+using PeerSync.Service.Events;
+using PeerSync.Service.Settings;
 
 namespace PeerSync.Service.Control;
 
@@ -13,23 +20,30 @@ public sealed class ControlApiHost : IAsyncDisposable
     private readonly ControlServerLifetime lifetime;
     private readonly CancellationTokenRegistration stopping;
     private readonly ControlSubscriptionBudget subscriptions;
+    private readonly PowerEvents power;
+    private readonly NetworkChangeMonitor networkChanges;
     private readonly object gate = new();
     private Task? closed;
-    private ControlApiHost(WebApplication application, ControlServerLifetime lifetime, CancellationTokenRegistration stopping, ControlSubscriptionBudget subscriptions)
-    { this.application = application; this.lifetime = lifetime; this.stopping = stopping; this.subscriptions = subscriptions; }
+    private ControlApiHost(WebApplication application, ControlServerLifetime lifetime, CancellationTokenRegistration stopping,
+        ControlSubscriptionBudget subscriptions, PowerEvents power, NetworkChangeMonitor networkChanges)
+    { this.application = application; this.lifetime = lifetime; this.stopping = stopping; this.subscriptions = subscriptions; this.power = power; this.networkChanges = networkChanges; }
     internal int ActiveSubscriptions => subscriptions.Active;
+    internal TimeSpan ShutdownTimeout => application.Services.GetRequiredService<IOptions<HostOptions>>().Value.ShutdownTimeout;
     internal IReadOnlyCollection<string> BoundAddresses => application.Urls.ToArray();
+    internal PowerEvents Power => power;
 
     public static Task<ControlApiHost> StartInstalledAsync(ControlStatusRuntime runtime, DiagnosticJournal? diagnostics = null, CancellationToken cancellationToken = default)
     {
         var group = (SecurityIdentifier)new NTAccount(Environment.MachineName, ControlServiceNames.UsersGroup).Translate(typeof(SecurityIdentifier));
-        return StartAsync(ControlServiceNames.PipeName, runtime, [group], true, diagnostics, cancellationToken);
+        var settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "config", "settings.json");
+        return StartAsync(ControlServiceNames.PipeName, runtime, [group], true, settingsPath, diagnostics, null, cancellationToken);
     }
     internal static Task<ControlApiHost> StartFixtureAsync(string pipe, ControlStatusRuntime runtime, IReadOnlyList<SecurityIdentifier> allowed,
-        DiagnosticJournal? diagnostics = null, CancellationToken cancellationToken = default) => StartAsync(pipe, runtime, allowed, false, diagnostics, cancellationToken);
+        DiagnosticJournal? diagnostics = null, INetworkChangeSource? networkSource = null, CancellationToken cancellationToken = default)
+        => StartAsync(pipe, runtime, allowed, false, null, diagnostics, networkSource, cancellationToken);
 
     private static async Task<ControlApiHost> StartAsync(string pipe, ControlStatusRuntime runtime, IReadOnlyList<SecurityIdentifier> allowed, bool administrators,
-        DiagnosticJournal? diagnostics, CancellationToken token)
+        string? settingsPath, DiagnosticJournal? diagnostics, INetworkChangeSource? networkSource, CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(runtime); ArgumentNullException.ThrowIfNull(allowed);
         using var identity = WindowsIdentity.GetCurrent(); var self = identity.User ?? throw new InvalidOperationException("Control server has no Windows identity.");
@@ -38,9 +52,26 @@ public sealed class ControlApiHost : IAsyncDisposable
         foreach (var sid in allowed) security.AddAccessRule(new(sid, PipeAccessRights.ReadWrite, AccessControlType.Allow));
         if (administrators) security.AddAccessRule(new(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [], ContentRootPath = AppContext.BaseDirectory });
-        builder.Configuration.Sources.Clear(); builder.Configuration.AddInMemoryCollection();
+        builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(15));
+        builder.Configuration.Sources.Clear();
+        if (settingsPath is null) builder.Configuration.AddInMemoryCollection();
+        else
+        {
+            builder.Configuration.AddJsonFile(settingsPath, optional: false, reloadOnChange: true);
+            builder.Services.AddSingleton<IValidateOptions<DeviceSettings>, DeviceSettingsValidator>();
+            builder.Services.AddOptions<DeviceSettings>().Bind(builder.Configuration).ValidateOnStart();
+        }
         builder.Logging.ClearProviders(); builder.WebHost.UseSetting(WebHostDefaults.ServerUrlsKey, "");
         builder.Services.AddWindowsService(options => options.ServiceName = ControlServiceNames.ServiceName);
+        var power = new PowerEvents(diagnostics);
+        power.Suspending += runtime.NotifySuspending;
+        power.Resumed += runtime.NotifyResumed;
+        builder.Services.AddSingleton(power);
+        var networkChanges = new NetworkChangeMonitor(diagnostics, networkSource);
+        networkChanges.Changed += runtime.NotifyNetworkChanged;
+        builder.Services.AddSingleton(networkChanges);
+        if (OperatingSystem.IsWindows() && WindowsServiceHelpers.IsWindowsService())
+            builder.Services.AddSingleton<IHostLifetime, PeerSyncServiceLifetime>();
         builder.Services.AddSingleton(runtime); builder.Services.AddSingleton(new ControlCallerPolicy(allowed, administrators));
         var shutdown = new ControlServerLifetime(); var budget = new ControlSubscriptionBudget();
         builder.Services.AddSingleton(shutdown); builder.Services.AddSingleton(budget);
@@ -50,8 +81,12 @@ public sealed class ControlApiHost : IAsyncDisposable
         builder.WebHost.ConfigureKestrel(options => options.ListenNamedPipe(pipe, listen => listen.Protocols = HttpProtocols.Http2));
         var app = builder.Build(); var stopping = app.Lifetime.ApplicationStopping.Register(shutdown.Cancel);
         app.MapGrpcService<ControlStatusRpc>();
-        try { await app.StartAsync(token).ConfigureAwait(false); return new(app, shutdown, stopping, budget); }
-        catch { stopping.Dispose(); shutdown.Dispose(); await app.DisposeAsync().ConfigureAwait(false); throw; }
+        try { await app.StartAsync(token).ConfigureAwait(false); return new(app, shutdown, stopping, budget, power, networkChanges); }
+        catch
+        {
+            networkChanges.Changed -= runtime.NotifyNetworkChanged;
+            networkChanges.Dispose(); stopping.Dispose(); shutdown.Dispose(); await app.DisposeAsync().ConfigureAwait(false); throw;
+        }
     }
     public Task WaitForShutdownAsync(CancellationToken cancellationToken = default) => application.WaitForShutdownAsync(cancellationToken);
     public ValueTask DisposeAsync()
@@ -60,6 +95,10 @@ public sealed class ControlApiHost : IAsyncDisposable
     {
         lifetime.Cancel(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try { await application.StopAsync(deadline.Token).ConfigureAwait(false); }
-        finally { stopping.Dispose(); await application.DisposeAsync().ConfigureAwait(false); lifetime.Dispose(); }
+        finally
+        {
+            networkChanges.Changed -= application.Services.GetRequiredService<ControlStatusRuntime>().NotifyNetworkChanged;
+            networkChanges.Dispose(); stopping.Dispose(); await application.DisposeAsync().ConfigureAwait(false); lifetime.Dispose();
+        }
     }
 }

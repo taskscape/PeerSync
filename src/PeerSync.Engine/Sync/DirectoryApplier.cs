@@ -49,6 +49,7 @@ public sealed class DirectoryApplier
             if (index.ReadApplyIntents().Any()) throw new IOException("Recover pending application before changing directories.");
             using var tree = new SafeFileTree(rootPath); ValidateRoot(tree); Signal("start", session);
             using var selection = await ScheduledApplySelection.AcquireDirectoryAsync(index, needed, ownDevice, key, scheduled, cancellationToken).ConfigureAwait(false);
+            Signal("selected", session);
             var known = selection.Known; var decision = selection.Decision;
             if (decision.BlockedReason is not null) { Signal(decision.BlockedReason == "directory-publication-pending" ? "publication-pending" : "blocked", session); return new(FileApplyOutcome.Blocked); }
             if (!decision.RequiresApply) { Signal("unchanged", session); return new(FileApplyOutcome.Unchanged); }
@@ -61,6 +62,7 @@ public sealed class DirectoryApplier
                 catch (ArgumentOutOfRangeException) { Signal("timestamp-unrepresentable", session); return new(FileApplyOutcome.Blocked); }
             }
             using var parentProbe = version.Deleted ? tree.ProbeDirectory(ApplyState.Parent(version.Path)) : null;
+            Signal("parent-probed", session);
             if (parentProbe?.Absent == true)
             {
                 if (known is { Deleted: false }) return new(FileApplyOutcome.Deferred, RequiresScan: true);
@@ -73,7 +75,9 @@ public sealed class DirectoryApplier
                 return new(FileApplyOutcome.Applied, RequiresScan: true);
             }
             using var parent = parentProbe?.Directory ?? tree.Directory(ApplyState.Parent(version.Path));
+            Signal("parent-opened", session);
             using var existing = TryNode(parent, ApplyState.Name(version.Path));
+            Signal("node-opened", session);
             if (existing is not null)
             {
                 var current = FileSnapshot.Read(existing);

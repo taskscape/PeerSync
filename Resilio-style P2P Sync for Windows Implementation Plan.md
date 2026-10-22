@@ -145,7 +145,68 @@ key strings, which cannot be reliably erased from managed memory.
 
 A folder can optionally require approval: unknown DeviceIds are held as Pending until approved in the UI, like Resilio's "Approve all peers".
 
+P2 transport implementation uses a single mutually authenticated peer connection
+with bounded control requests on stream 0, a persistent bidirectional index
+stream per admitted folder and a bounded pool of short-lived block streams.
+Both peers can initiate requests. Hello carries request_id/response and at
+most 256 announced FolderIds; its wire nonce and certificate identity stay
+fixed for the connection while UTC samples refresh. The adapter supplies
+configured device/version text and preserves the engine's UTC sample.
+FolderAuth requests have request IDs; FolderAuthResult includes the responder's
+direction-bound proof and the matching request ID. Neither peer creates an
+engine handler before validating folder proofs and local pin/approval policy.
+Index queries/responses carry request IDs; zero denotes an unsolicited update
+or the initial folder-stream binder. The lower certificate DeviceId opens the
+folder index stream, preventing duplicate streams. All readers have one owner,
+writes are serialized, pending work is bounded and cancellation drains before
+handler/key/certificate ownership is released. Shared diagnostic session IDs
+derive from the ordered certificate identities and connection nonces, without
+logging keys, FolderIds, paths or packet bodies.
+
+Direction-bound RW authentication signs "psp1 rw-auth" followed by sender and
+receiver certificate DeviceIds, sender and receiver nonces and FolderId.
+The ordinary/RO MACs use their existing distinct labels and derived keys.
+Certificate validation requires current P-256 device certificates and TLS 1.3
+with ALPN psp/1; folder proofs and optional pins establish authorization for
+self-signed peers. Clear exported auth-key buffers after proof operations.
+
 ### Messages
+
+P2 fixes the wire type numbers as Hello=1, FolderAuth=2, FolderAuthResult=3,
+IndexSummary=4, IndexRequest=5, IndexUpdate=6, Availability=7,
+BlockRequestBatch=8, BlockResponse=9, Ping=10, Pong=11 and Close=12.
+The canonical unsigned varint is the Protobuf body length, excluding the
+one-byte type; body length is at most 16 MiB. Reject overlong/noncanonical
+prefixes, oversized bodies and truncated EOF. Unknown types and malformed
+Protobuf are connection violations, with safe numeric reason codes.
+PipeReader bodies remain valid only until the next iterator advance/disposal;
+message decoding copies/parses before that boundary. Always advance examined
+to the available buffer end when a frame is incomplete. Reader ownership
+stays with the connection. IndexUpdate explicitly carries after_seq and
+last_seq so complete reviewed ranges can include unpublished sequence gaps.
+P2 message schemas supplement, rather than rewrite, original signed bodies.
+Frame fuzz adds coverage alongside all four existing boundary targets.
+
+P2 ingress validation is separate from structural Protobuf parsing. Require
+protocol version 1, 32-byte Hello identity/nonce, valid nonzero UTC ticks,
+single-line strict UTF-8 device/client names capped at 128/64 bytes, and
+known role/decision/reason values. Folder-scoped post-handshake messages
+require the authenticated folder context, not an identity/key from the body.
+Enforce 1000 ordered index records and 64 block requests per frame, signed
+64-byte signatures, reviewed sequence ranges within Int64, and existing path,
+version metadata, chunk class/hash/length/total rules. Verify original signed
+bytes before opening FileRecordBody; forwarding preserves those exact bytes.
+Availability bitmaps are capped at 64 KiB (more bits than can be represented
+by a legal 16-MiB signed chunk list). Data blocks are at most the class-2
+8-MiB maximum and must match their BLAKE3 digest; response/request matching
+and folder permissions remain mandatory in the transport/transfer layer.
+Protocol violations add a strike to the certificate-derived device identity
+and close the owned connection with a reason, even if recording a strike
+fails. Error messages contain safe codes, not records, paths or keys.
+Enforce repeated-message limits before generated Protobuf collection
+allocation. Reject deprecated groups; keep ordinary unknown fields and opaque
+signed bodies intact. After signature verification, preflight nested chunk
+and vector entries before opening their full repeated collections.
 
 Each stream carries frames of `varint length ‖ 1-byte type ‖ Protobuf body`. Stream 0 is control. Each folder gets one index stream. Block requests use a pool of short-lived streams, so one slow request never blocks another.
 
@@ -2023,6 +2084,43 @@ cohort is a failure. Preserve stdout/stderr and source/binary hashes. Local
 controls/full execution and actual PR/main CI remain mandatory; this runner-only
 change does not create a new thousand-seed campaign or waive any acceptance.
 See docs/proposals/P1-bounded-ci-simulation-cohorts.md.
+
+### Correctness-first implementation phasing
+
+On 2026-10-21 the user explicitly approves: "Defer CI timing blocker; continue
+implementation" after directing an end to further performance tuning. Permit
+qualified P1 acceptance and P2 implementation using the completed local/native,
+two-date campaign, full-corpus and unchanged-source hosted correctness evidence.
+Ordinary CI's timeout remains visible verification debt, not a successful run.
+This narrow exception permits the requirement/tooling merge and phase progress;
+failed product assertions still require repair. Preserve all tests, native
+durability/oracles and later service/LAN/NAT gates. Complete current-source
+verification remains mandatory before release. See
+docs/proposals/P1-correctness-first-implementation-phasing.md.
+
+### Workspace NTFS Simulation fixtures
+
+Implementation stopped on 2026-10-21 at the user's direction to stop further
+performance tuning and complete the system. The storage hypothesis below was
+documented but not implemented. Preserve it as historical investigation only;
+it is not a correctness prerequisite or a claimed fix.
+
+Run 39598885501 proves two cohorts alone do not meet the hosted budget: all
+seven baseline methods pass, but five retained cases consume almost forty
+minutes before the last case is stopped at the shared deadline. There is no
+new failed product assertion. Preserve that failed result and all prior proof.
+
+Keep unchanged Simulation sources/oracles and run each cohort with child-only
+TMP/TEMP pointing to a unique workspace-owned NTFS directory. Record actual
+original/selected paths, filesystem/volume information and small Flush(true)
+measurements on both locations. Verify a fresh child resolves the selected
+temporary path before executing tests. Neither a particular drive letter nor
+a speedup is assumed: GitHub images/storage can change, and hosted timings
+must establish the result. Keep FULL/native durability, all thirteen methods,
+600-second fuzz, five jobs and existing time limits. The default campaign
+runner and accepted dates remain unchanged. Never use a RAM disk, disable
+flush/security or alter user/global temporary environment settings.
+See docs/proposals/P1-workspace-ntfs-simulation-fixtures.md.
 
 ### Subtree deletion and preserved-copy convergence
 

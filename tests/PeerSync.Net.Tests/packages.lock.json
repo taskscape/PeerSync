@@ -231,6 +231,7 @@
         "type": "Project",
         "dependencies": {
           "PeerSync.Core": "[1.0.0, )",
+          "PeerSync.Crypto": "[1.0.0, )",
           "PeerSync.Protocol": "[1.0.0, )"
         }
       },

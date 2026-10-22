@@ -18,6 +18,8 @@ public sealed partial class RealEngineProperties
     [InlineData(1583987140)] // Tombstone metadata needed beneath a staged ancestor.
     [InlineData(1608819303)] // Parent root classes must include covered causal provenance variants.
     [InlineData(794669444)] // Nonempty directory revivals must outlive their signed deletion time.
+    [InlineData(1390180802)] // Stable indexes require extra healing rounds after trees and queues converge.
+    [InlineData(1686969054)] // Completed case-copy members cover their original canonical child during rebase.
     public async Task RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(int seed)
     {
         string evidence = Path.GetFullPath(Environment.GetEnvironmentVariable("PEERSYNC_SIMULATION_ARTIFACTS") ?? "artifacts/simulation");

@@ -1,0 +1,37 @@
+syntax = "proto3";
+package peersync.wire;
+option csharp_namespace = "PeerSync.Protocol.Wire";
+import "records.proto";
+
+enum FolderAccess { FOLDER_ACCESS_UNKNOWN = 0; FOLDER_ACCESS_READ_WRITE = 1; FOLDER_ACCESS_READ_ONLY = 2; FOLDER_ACCESS_ENCRYPTED = 3; }
+enum AuthDecision { AUTH_DECISION_UNKNOWN = 0; AUTH_DECISION_ALLOWED = 1; AUTH_DECISION_PENDING = 2; AUTH_DECISION_DENIED = 3; }
+enum CloseReason {
+  CLOSE_REASON_UNSPECIFIED = 0;
+  CLOSE_REASON_PEER_SHUTDOWN = 1;
+  CLOSE_REASON_PROTOCOL_VIOLATION = 2;
+  CLOSE_REASON_AUTHENTICATION_FAILED = 3;
+  CLOSE_REASON_UNSUPPORTED_VERSION = 4;
+  CLOSE_REASON_NOT_AUTHORIZED = 5;
+  CLOSE_REASON_TIMEOUT = 6;
+  CLOSE_REASON_DUPLICATE_CONNECTION = 7;
+  CLOSE_REASON_SERVER_STOPPING = 8;
+  CLOSE_REASON_RATE_LIMITED = 9;
+  CLOSE_REASON_INTERNAL_ERROR = 10;
+  CLOSE_REASON_CLOCK_SKEW = 11;
+}
+enum BlockError { BLOCK_ERROR_NONE = 0; BLOCK_ERROR_NOT_FOUND = 1; BLOCK_ERROR_FORBIDDEN = 2; BLOCK_ERROR_INVALID_REQUEST = 3; BLOCK_ERROR_BUSY = 4; BLOCK_ERROR_UNAVAILABLE = 5; }
+
+message FolderAuth { bytes folder_id = 1; bytes proof = 2; bytes read_only_proof = 3; bytes signature = 4; FolderAccess access = 5; uint64 request_id = 6; }
+message FolderAuthResult { bytes folder_id = 1; AuthDecision decision = 2; CloseReason reason = 3; FolderAuth server_proof = 4; uint64 request_id = 5; }
+message IndexSummary { bytes folder_id = 1; uint64 highest_seq = 2; bool request = 3; uint64 request_id = 4; bool notification = 5; }
+message IndexRequest { bytes folder_id = 1; uint64 after_seq = 2; uint32 limit = 3; uint64 request_id = 4; }
+// last_seq is the reviewed range cursor, including unpublished local gaps.
+// Preserve each record's body/signature bytes verbatim when forwarding.
+message IndexUpdate { bytes folder_id = 1; repeated peersync.records.SignedRecord records = 2; uint64 last_seq = 3; uint64 after_seq = 4; uint64 request_id = 5; }
+message Availability { bytes folder_id = 1; string path = 2; bytes chunk_bitmap = 3; }
+message BlockRequest { bytes chunk_hash = 1; uint32 length = 2; }
+message BlockRequestBatch { bytes folder_id = 1; repeated BlockRequest requests = 2; }
+message BlockResponse { bytes chunk_hash = 1; oneof payload { bytes data = 2; BlockError error_code = 3; } }
+message Ping { uint64 id = 1; }
+message Pong { uint64 id = 1; }
+message Close { CloseReason reason = 1; }

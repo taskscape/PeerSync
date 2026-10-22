@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/PeerSync.App/PeerSync.App.csproj" />
+    <ProjectReference Include="../../src/PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
+    <ProjectReference Include="../../src/PeerSync.Core/PeerSync.Core.csproj" />
+    <ProjectReference Include="../../src/PeerSync.Crypto/PeerSync.Crypto.csproj" />
+    <ProjectReference Include="../../src/PeerSync.Net/PeerSync.Net.csproj" />
+    <ProjectReference Include="../../src/PeerSync.Service/PeerSync.Service.csproj" />
+    <ProjectReference Include="../../src/PeerSync.Storage/PeerSync.Storage.csproj" />
+  </ItemGroup>
+</Project>

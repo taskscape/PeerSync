@@ -6,8 +6,10 @@ using PeerSync.Crypto;
 using PeerSync.Crypto.Chunking;
 using PeerSync.Engine.Native;
 using PeerSync.Engine.Sync;
+using PeerSync.Net;
 using PeerSync.Protocol.Records;
 using PeerSync.Protocol.Signing;
+using PeerSync.Protocol.Wire;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
 using Xunit;
@@ -58,6 +60,71 @@ public sealed class ChunkAssemblerTests : IDisposable
             (_, _, _) => throw new InvalidOperationException("Network must not be needed."), Token);
         result.LocalBytes.ShouldBe(bytes.Length); result.RemoteBytes.ShouldBe(0);
         temporary.ToArray().ShouldBe(bytes);
+    }
+
+    [Fact]
+    public async Task RemoteChunksArePrefetchedConcurrentlyWithinTheAssemblyWindow()
+    {
+        byte[][] chunks = [Enumerable.Repeat((byte)1, 64 * 1024).ToArray(),
+            Enumerable.Repeat((byte)2, 64 * 1024).ToArray(), Enumerable.Repeat((byte)3, 64 * 1024).ToArray()];
+        await using var index = await OpenBoundIndexAsync();
+        using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
+        int active = 0, maximumActive = 0;
+        var result = await new ChunkAssembler(tree, index).AssembleAsync(Version(chunks), temporary, async (hash, length, token) =>
+        {
+            int count = Interlocked.Increment(ref active);
+            UpdateMaximum(ref maximumActive, count);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(40), token);
+                return chunks.Single(chunk => chunk.Length == length && Hash(chunk).SequenceEqual(hash.ToArray()));
+            }
+            finally { Interlocked.Decrement(ref active); }
+        }, Token);
+
+        maximumActive.ShouldBeGreaterThan(1);
+        result.RemoteBytes.ShouldBe(chunks.Sum(chunk => (long)chunk.Length));
+        temporary.ToArray().ShouldBe(chunks.SelectMany(chunk => chunk).ToArray());
+    }
+
+    [Fact]
+    public async Task RemoteChunksUseBatchesBoundedToSixtyFourRequests()
+    {
+        byte[][] chunks = Enumerable.Range(0, 65).Select(index => Enumerable.Repeat((byte)(index + 1), 64).ToArray()).ToArray();
+        await using var index = await OpenBoundIndexAsync();
+        using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
+        var batchSizes = new List<int>();
+        var endgameFlags = new List<bool>();
+        var result = await new ChunkAssembler(tree, index).AssembleAsync(Version(chunks), temporary,
+            (_, _, _) => throw new InvalidOperationException("Batch callback must serve remote blocks."),
+            (requests, endgame, _) =>
+            {
+                batchSizes.Add(requests.Count);
+                endgameFlags.Add(endgame);
+                return ValueTask.FromResult<IReadOnlyList<PeerBlockResult>>(requests.Select(request =>
+                    new PeerBlockResult(chunks.Single(chunk => chunk.Length == request.Length
+                        && Hash(chunk).SequenceEqual(request.ChunkHash.ToArray())), null)).ToArray());
+            }, Token);
+
+        batchSizes.ShouldBe([64, 1]);
+        endgameFlags.ShouldBe([false, true]);
+        result.RemoteBytes.ShouldBe(chunks.Sum(chunk => (long)chunk.Length));
+        temporary.ToArray().ShouldBe(chunks.SelectMany(chunk => chunk).ToArray());
+    }
+
+    [Fact]
+    public async Task SuccessfulBlocksInAPartialBatchAreRetainedWhenAnotherBlockIsUnavailable()
+    {
+        byte[][] chunks = ["available"u8.ToArray(), "missing"u8.ToArray()];
+        await using var index = await OpenBoundIndexAsync();
+        using var tree = new SafeFileTree(Root); using var temporary = new MemoryStream();
+        Exception? error = await Record.ExceptionAsync(() => new ChunkAssembler(tree, index).AssembleAsync(Version(chunks), temporary,
+            (_, _, _) => throw new InvalidOperationException("Batch callback must serve remote blocks."),
+            (requests, _, _) => ValueTask.FromResult<IReadOnlyList<PeerBlockResult>>(
+            [new(chunks[0], null), new(ReadOnlyMemory<byte>.Empty, BlockError.NotFound)]), Token));
+
+        error.ShouldBeOfType<PeerBlockException>().ErrorCode.ShouldBe(BlockError.NotFound);
+        temporary.ToArray().ShouldBe(chunks[0]);
     }
 
     [Fact]
@@ -159,5 +226,11 @@ public sealed class ChunkAssemblerTests : IDisposable
         return VersionView.Open(SignedRecordFactory.Create(body, keys, 1), keys, device);
     }
     private static byte[] Hash(byte[] bytes) { var hash = Blake3.Hasher.Hash(bytes); return hash.AsSpan().ToArray(); }
+    private static void UpdateMaximum(ref int maximum, int value)
+    {
+        int observed;
+        while (value > (observed = Volatile.Read(ref maximum))
+            && Interlocked.CompareExchange(ref maximum, value, observed) != observed) { }
+    }
     public void Dispose() { keys.Dispose(); Directory.Delete(fixture, recursive: true); }
 }

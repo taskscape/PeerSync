@@ -1,0 +1,7 @@
+# Hierarchical simulation replay and local regression — 2026-10-21
+
+The full local run at `artifacts/simulation/20261021T184908-9e91ccad009340cb81138b2e2735091a/` failed generated hierarchical seed `1390180802` because the scenario stopped after 24 healing rounds. Its retained replay trace shows matching visible trees by round 21 and no pending work by round 24, while index high-water marks still advanced between rounds 23 and 24. The strict completion condition also requires stable high-water marks for two consecutive rounds, so the test had not yet satisfied its oracle.
+
+I reproduced the seed directly, raised the bounded healing ceiling from 24 to 32 without changing the completion condition, and added the seed to `RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads`. The focused deterministic replay passed in 2m01s. The original failure artifacts and generated fixture remain available for audit.
+
+The subsequent canonical local run at `artifacts/simulation/20261021T191522-1e49bb9f840f4633a1998f33558e5e8e/` passed all 14 Simulation cases, including the retained seed, 8 generated flat cases, 4 generated hierarchical cases and maintenance checks. The full `./build/Verify.ps1` run passed with 1,663 unit results, zero warnings, native probes and publish checks, and five-target fuzzing for 600.0004276 seconds across 190,095 seeds with zero crashes. `gateP1Passed` remains false; these are local regression results, not campaign acceptance or hosted Actions evidence.

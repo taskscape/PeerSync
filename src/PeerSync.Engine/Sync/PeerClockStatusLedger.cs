@@ -22,6 +22,12 @@ internal sealed class PeerClockStatusLedger
             if (!active.Remove(session.CorrelationId, out var entry)) return;
             // A late close from an older attempt cannot replace newer history.
             if (recent.TryGetValue(peer, out var previous) && previous.Order > entry.Order) return;
+            // Supervised reconnects can fail before Hello completes. Keep the last
+            // measured clock failure visible until a newer authenticated sample
+            // replaces it; an unmeasured retry must not erase the useful diagnosis.
+            if (status.Clock.State == PeerClockState.AwaitingHello
+                && recent.TryGetValue(peer, out previous)
+                && previous.Status.Clock.State is not (PeerClockState.AwaitingHello or PeerClockState.Accepted)) return;
             recent[peer] = (status, entry.Order);
             if (recent.Count > 64) recent.Remove(recent.MinBy(pair => pair.Value.Order).Key);
         }
