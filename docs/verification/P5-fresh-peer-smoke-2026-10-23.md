@@ -22,3 +22,14 @@ than final million-file gate evidence.
 Next run the committed-source wrapper against the retained million-file
 corpus. Keep all failures and logs; do not infer a million-file pass from
 the 1,000-file control.
+
+The first committed-source million-file attempt passed its scanner target
+but was stopped after 50 of roughly 1,000 bounded source-publication passes.
+At about 11 seconds per pass, its original four-hour whole-run ceiling left
+insufficient room for fresh-peer application and native verification. Its
+incomplete output and logs remain under
+`artifacts/scale/p5-peer-20261022T232743-5ae652c974354447a1e06f39343bca31`
+and the fixture's `source-peer-logs-*` directory. The benchmark ceiling is
+now 12 hours, matching the scale guide's willingness to give a smaller
+100,000-file five-node corpus 12 hours. The stopped attempt is not a failed
+engine assertion and is not a million-file peer pass.

@@ -26,7 +26,9 @@ internal static class MillionPeerBenchmark
         var elapsed = Stopwatch.StartNew();
         string phase = "open";
         int round = 0;
-        using var deadline = new CancellationTokenSource(TimeSpan.FromHours(4));
+        // Source publication alone takes thousands of bounded 1,000-member
+        // passes at million-file scale; this is a ceiling, not a target time.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromHours(12));
         using var heartbeatStop = new CancellationTokenSource();
         Task heartbeat = HeartbeatAsync(() => phase, () => round, elapsed, heartbeatStop.Token);
         try
