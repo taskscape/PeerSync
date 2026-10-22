@@ -33,3 +33,13 @@ and the fixture's `source-peer-logs-*` directory. The benchmark ceiling is
 now 12 hours, matching the scale guide's willingness to give a smaller
 100,000-file five-node corpus 12 hours. The stopped attempt is not a failed
 engine assertion and is not a million-file peer pass.
+
+The stopped wrapper's `benchmark.log` remained empty despite visible console
+progress, because its pipeline buffered the file until normal completion.
+The runner now appends and flushes each progress line as it arrives. A
+1,000-file `-NoBuild` control passed in four rounds (41.951 seconds), and
+the live log had 1,031 bytes before the process exited. Its retained
+evidence is `artifacts/scale/p5-peer-20261022T235636-f8781ebd002b43d7a6ca93ffdf001658`.
+The already-running 12-hour million-file process started before this wrapper
+edit, so its source and destination diagnostic journals remain the reliable
+live evidence until the wrapper exits.

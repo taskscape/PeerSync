@@ -40,7 +40,11 @@ try {
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'provenance.json')
 
     $log = Join-Path $evidence 'benchmark.log'
-    & $binary --scan-peer-existing $fixturePath --files $Files 2>&1 | Tee-Object -FilePath $log
+    & $binary --scan-peer-existing $fixturePath --files $Files 2>&1 | ForEach-Object {
+        $line = [string]$_
+        Add-Content -LiteralPath $log -Value $line
+        Write-Output $line
+    }
     $runnerExit = $LASTEXITCODE
     $rows = Get-Content -LiteralPath $log | Where-Object { $_ -match '^\{"target":' } |
         ForEach-Object { $_ | ConvertFrom-Json }
