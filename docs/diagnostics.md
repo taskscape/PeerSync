@@ -26,11 +26,14 @@ requires a release signing identity.
 
 ## Deployment status
 
-The product is in P2. The installed service now loads its device certificate
-and registered folder engines and runs local watcher/periodic scans. Production
-peer supervision and authenticated production folder synchronization, tracker,
-relay and installer remain incomplete. The P0 probes below are deployable test
-executables, not a v1 release.
+P3 service, control app and signed development installer code is merged. The
+installed service runs registered folder engines, watcher/periodic scans and
+authenticated QUIC/TCP peer synchronization. A signed x64 setup and an older
+installed host exchanged files in both directions over a virtual LAN; see
+[the Server 2025 installed two-machine smoke](verification/P3-virtual-two-pc-sync-2026-10-22.md).
+The rendezvous tracker and relay remain P4 work. Physical two-PC, Windows 11
+and Server 2022 clean-install, NAT and soak gates remain open; this is not a
+beta or v1 release. The P0 probes below are separate test executables.
 
 The installed folder host has [local verification evidence](verification/P2-installed-folder-host-local-2026-10-21.md).
 Its smoke test proves registered-folder startup scan and orderly local drain;
@@ -38,7 +41,8 @@ it does not prove installed SCM operation or production peer synchronization.
 
 Structured events use UTC timestamps, component, process/run ID, session ID,
 trace ID when present, transport, operation, byte counts, elapsed milliseconds,
-native error number and retry delay. Debug events are opt-in. The event model
+native error number and retry delay. The installed service currently enables
+debug events in its local journal. The event model
 accepts metadata rather than arbitrary payloads or exception messages. Never
 add folder keys, FolderIds, file contents or record bodies to diagnostics.
 

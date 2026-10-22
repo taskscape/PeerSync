@@ -63,16 +63,16 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
 | P1 Local sync engine | 4-8 | Accepted with the explicit CI timing exception: all correctness, two actual campaign dates and the repaired 100000-file corpus are accepted. PR #42 is merged; hosted timeout/incomplete scope stays visible and full current-source verification remains required before release. Installed-service/production clock integration remains mandatory at P2.5.7/Gate P2. | 2026-10-21, qualified timing exception |
 | P2 LAN sync as a service | 9-13 | Merged code and current-head nine-job main CI passed [run 39812526107](https://github.com/taskscape/PeerSync/actions/runs/39812526107), permitting P3 implementation under the approved phasing. The [merge audit](docs/verification/P2-code-merge-2026-10-22.md) retains earlier failed seeds and their repairs. The self-contained package runs under local SCM; its verified client observed authenticated skew/recovery and a SHA-256-verified transfer. The second installed PC, authenticated external session, physical LAN corpus/throughput, recovery soak and remaining P2 gate evidence remain open. | - |
-| P3 WPF app and installer | 14-17 | In progress: control RPCs/streams, WPF dashboard and signed local x64/Arm64 installer builds are implemented on a branch. Focused local checks and a [supplemental clean Server 2025 installer/standard-user smoke](docs/verification/P3-server2025-installer-smoke-2026-10-22.md) pass; current-head PR/main CI, required clean Windows 11/Server 2022 and two-PC gates remain open. | - |
-| P4 Internet sync | 18-22 | Not started | - |
+| P3 WPF app and installer | 14-17 | Code merged in PR #47; all ten PR jobs passed [run 39832543696](https://github.com/taskscape/PeerSync/actions/runs/39832543696), and all ten main jobs passed [run 39835422181 attempt 2](https://github.com/taskscape/PeerSync/actions/runs/39835422181). Focused local checks and a [supplemental clean Server 2025 installer/standard-user smoke](docs/verification/P3-server2025-installer-smoke-2026-10-22.md) pass. The [merge CI audit](docs/verification/P3-main-ci-2026-10-22.md) retains the failed first attempt. Required clean Windows 11/Server 2022 and physical two-PC gates remain open. P4 implementation is permitted under the approved phasing. | - |
+| P4 Internet sync | 18-22 | Implementation starting after green P3 main CI; deployment and physical WAN/NAT gates remain open. | - |
 | P5 Hardening and v1.0 | 23-26 | Not started | - |
 | P6 After v1.0 (optional) | 2-8 per feature | Not started | - |
 
 The 2026-10-22 implementation-order exception allows later phase code to
 proceed while physical gates remain open, but it does not change these gate
 statuses or permit a beta/release claim. P2 current-head CI passed on main
-before P3 began; P3 code and CI are in progress, and the physical P2 gate
-remains open.
+before P3 began; P3 code and required PR/main CI now pass, permitting P4
+implementation. The physical P2 and P3 gates remain open.
 
 ---
 
