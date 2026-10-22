@@ -68,25 +68,47 @@ public sealed class ConnectionManager : IAsyncDisposable
         var pending = ordered.Select((candidate, index) => ConnectCandidateAsync(candidate, index,
             expectedBytes, attempts.Token)).ToList();
         ManagedPeerConnection? winner = null;
+        ManagedPeerConnection? selected = null;
         try
         {
-            while (pending.Count != 0 && winner is null)
+            while (pending.Count != 0 && selected is null)
             {
                 Task<ManagedPeerConnection?> completed = await Task.WhenAny(pending).ConfigureAwait(false);
                 pending.Remove(completed);
-                winner = await completed.ConfigureAwait(false);
+                ManagedPeerConnection? candidate = await completed.ConfigureAwait(false);
+                if (candidate is null) continue;
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    await candidate.DisposeAsync().ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                try
+                {
+                    // A peer can resolve a simultaneous QUIC/TCP duplicate while
+                    // our losing attempt drains. Install before waiting for it, so
+                    // the authenticated peer identity reaches the reconnect owner.
+                    selected = await InstallAsync(candidate,
+                        expectedBytes ?? candidate.RemoteDeviceId).ConfigureAwait(false);
+                    winner = candidate;
+                }
+                catch (IOException) when (candidate.Closed.IsCompleted)
+                {
+                    diagnostics?.TryWrite(new("connection.candidate_closed_before_install", "connection_manager")
+                        { Level = DiagnosticLevel.Debug, SessionId = candidate.SessionId });
+                }
             }
         }
         finally
         {
-            if (winner is not null) attempts.Cancel();
+            attempts.Cancel();
             await DisposeLateAttemptsAsync(pending).ConfigureAwait(false);
         }
 
         if (cancellationToken.IsCancellationRequested)
         {
-            if (winner is not null)
+            if (winner is not null && ReferenceEquals(selected, winner))
             {
+                RemoveIfCurrent(Convert.ToHexString(winner.RemoteId), winner);
                 try { await winner.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception error)
                 {
@@ -96,8 +118,8 @@ public sealed class ConnectionManager : IAsyncDisposable
             }
             cancellationToken.ThrowIfCancellationRequested();
         }
-        if (winner is null) throw new IOException("No transport candidate completed authenticated connection.");
-        return await InstallAsync(winner, expectedBytes ?? winner.RemoteDeviceId).ConfigureAwait(false);
+        if (selected is null) throw new IOException("No transport candidate completed authenticated connection.");
+        return selected;
     }
 
     public ValueTask<ManagedPeerConnection> RegisterIncomingAsync(ManagedPeerConnection session,
@@ -324,6 +346,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         OperationCanceledException => "cancelled",
         _ => error.GetType().Name,
     };
+
 
     public async ValueTask DisposeAsync()
     {
