@@ -63,8 +63,8 @@ try {
     }
     $buildSeconds = $clock.Elapsed.TotalSeconds
     Assert-Budget
-    # All copied outputs are immutable before any worker starts. Baseline and
-    # retained fixtures are independent; their evidence filenames are disjoint.
+    # All copied outputs are immutable before any worker starts. Simulation
+    # cases have independent fixtures and disjoint evidence filenames.
     foreach ($project in @('PeerSync.Fuzz','PeerSync.Simulation')) {
         foreach ($file in Get-ChildItem -LiteralPath "tests/$project/bin/Release/net10.0-windows10.0.20348.0" -Filter 'PeerSync*.dll' -File) {
             $hashes += [pscustomobject]@{path=$file.FullName;sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash}
@@ -72,11 +72,34 @@ try {
     }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $root 'tests/PeerSync.Simulation/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Simulation.dll')).ProductVersion
     if (-not $version.EndsWith("+$source")) { throw 'Simulation executable does not match the current source revision' }
+    $registry = Read-Json (Join-Path $PSScriptRoot simulation-scope.json)
+    $seeds = @($registry.retainedSeeds)
+    if ($registry.schema -ne 'peersync-simulation-scope-v1' -or $seeds.Count -ne 8 -or @($seeds | Sort-Object -Unique).Count -ne 8) {
+        throw 'Boundary retained seed registry is incomplete or duplicated'
+    }
+    $retainedGroups = @(
+        [Collections.Generic.List[int]]::new(),
+        [Collections.Generic.List[int]]::new(),
+        [Collections.Generic.List[int]]::new()
+    )
+    for ($index = 0; $index -lt $seeds.Count; $index++) {
+        $retainedGroups[$index % $retainedGroups.Count].Add([int]$seeds[$index])
+    }
+    $simulationCohorts = @('baseline','retained-1','retained-2','retained-3')
     Start-Worker -Name fuzz -Executable (Join-Path $root 'tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0/PeerSync.Fuzz.exe') -Arguments @('--seconds',"$FuzzSeconds")
-    foreach ($cohort in @('baseline','retained')) {
+    foreach ($cohort in $simulationCohorts) {
         $arguments = @('test','--project','tests/PeerSync.Simulation','-c','Release','--no-build','--report-trx','--results-directory',(Join-Path $results $cohort))
-        $filter = if ($cohort -eq 'baseline') { '--filter-not-method' } else { '--filter-method' }
-        $arguments += @($filter,'*RetainedHierarchicalRegressions*')
+        if ($cohort -eq 'baseline') {
+            $arguments += @('--filter-not-method','*RetainedHierarchicalRegressions*')
+        }
+        else {
+            $group = $retainedGroups[[int]$cohort.Substring('retained-'.Length) - 1]
+            foreach ($seed in $group) {
+                # Repeated display-name filters are ORed by xUnit. Each exact
+                # seed appears once across the three independently owned jobs.
+                $arguments += @('--filter-display-name',"*RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(seed: $seed)")
+            }
+        }
         Start-Worker -Name $cohort -Executable dotnet -Arguments $arguments -Simulation
     }
     $nextProgress = 0
@@ -94,7 +117,7 @@ try {
         Start-Sleep -Milliseconds 250
     }
     $trx = @()
-    foreach ($cohort in @('baseline','retained')) {
+    foreach ($cohort in $simulationCohorts) {
         $files = @(Get-ChildItem -LiteralPath (Join-Path $results $cohort) -Filter '*.trx' -File)
         if ($files.Count -ne 1) { throw "Cannot identify the fresh $cohort Simulation TRX" }
         $trx += $files[0].FullName
@@ -108,7 +131,6 @@ try {
         $casesRead = @(Get-Content -LiteralPath (Join-Path $evidence $item[0]) | ForEach-Object { $_ | ConvertFrom-Json })
         if ($casesRead.Count -ne $item[1] -or @($casesRead.Seed | Sort-Object -Unique).Count -ne $item[1] -or @($casesRead | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw "Incomplete generated Simulation case list: $($item[0])" }
     }
-    $registry = Read-Json (Join-Path $PSScriptRoot simulation-scope.json)
     $retained = @(Get-ChildItem -LiteralPath (Join-Path $evidence regressions) -Filter result.json -Recurse -File | ForEach-Object { Read-Json $_.FullName })
     if ($retained.Count -ne $registry.retainedSeeds.Count -or @(Compare-Object @($registry.retainedSeeds | Sort-Object) @($retained.Seed | Sort-Object)).Count -ne 0 -or @($retained | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw 'Incomplete retained Simulation evidence' }
     $maintenance = Read-Json (Join-Path $evidence connected-maintenance.json)
@@ -121,11 +143,11 @@ try {
     Assert-Budget
     @{status='passed';requestedSeconds=$FuzzSeconds;seconds=$result.seconds;target=$result.target;seeds=$result.seeds;gateP0Passed=$false} |
         ConvertTo-Json | Set-Content artifacts/fuzz/verification.json
-    @{status='passed';sourceRevision=$source;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;retainedRegressionCases=$scope.retainedRegressionCases;maintenanceCases=$scope.maintenanceCases;executedMethods=$scope.executedMethods;actualFuzzSeconds=$result.seconds;parallel=$true;simulationCohorts=2;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;binaryHashes=$hashes;binaryOutputsUnchanged=$true;simulationEvidence=$evidence;trx=$trx;gateP1Passed=$false} |
+    @{status='passed';sourceRevision=$source;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;retainedRegressionCases=$scope.retainedRegressionCases;maintenanceCases=$scope.maintenanceCases;executedMethods=$scope.executedMethods;actualFuzzSeconds=$result.seconds;parallel=$true;simulationCohorts=$simulationCohorts.Count;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;binaryHashes=$hashes;binaryOutputsUnchanged=$true;simulationEvidence=$evidence;trx=$trx;gateP1Passed=$false} |
         ConvertTo-Json -Depth 6 | Set-Content artifacts/fuzz/boundary-simulation.json
 }
 catch {
-    @{status='failed';sourceRevision=$source;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;parallel=$true;simulationCohorts=2;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;error=$_.Exception.Message;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult;workers=@($workers | Select-Object name,pid,startedUtc);gateP1Passed=$false} |
+    @{status='failed';sourceRevision=$source;runId=$runId;fuzzSeconds=$FuzzSeconds;simulationCases=$Cases;hierarchicalCases=$HierarchicalCases;parallel=$true;simulationCohorts=4;verificationBudgetSeconds=$VerificationBudgetSeconds;buildSeconds=$buildSeconds;seconds=$clock.Elapsed.TotalSeconds;error=$_.Exception.Message;errorType=$_.Exception.GetType().Name;hResult=$_.Exception.HResult;workers=@($workers | Select-Object name,pid,startedUtc);gateP1Passed=$false} |
         ConvertTo-Json -Depth 5 | Set-Content artifacts/fuzz/boundary-simulation.json
     throw
 }

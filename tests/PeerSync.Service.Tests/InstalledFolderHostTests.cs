@@ -394,13 +394,23 @@ public sealed class InstalledFolderHostTests
             !Guid.TryParseExact(name[(name.LastIndexOf('-') + 1)..], "N", out _))
             throw new IOException("Unexpected service-test fixture root.");
 
-        // SQLite pools are cleared by host disposal; Windows can briefly keep
-        // the closed file handle busy while its filesystem filters release it.
+        // SQLite pools are cleared by host disposal. Hosted Windows still
+        // reports sharing violations for these fixture databases after shutdown.
+        // Keep the functional assertion result and report deferred cleanup;
+        // other I/O failures remain test failures.
         for (int attempt = 0; attempt < 30; attempt++)
         {
             if (!Directory.Exists(full)) return;
             try { Directory.Delete(full, recursive: true); return; }
             catch (IOException) when (attempt < 29) { await Task.Delay(100); }
+            catch (IOException error) when ((error.HResult & 0xFFFF) is 32 or 33)
+            {
+                string message = $"Service test fixture cleanup deferred after 3 seconds " +
+                    $"(Windows sharing violation): {full}; {error.Message}";
+                TestContext.Current.TestOutputHelper?.WriteLine(message);
+                TestContext.Current.SendDiagnosticMessage(message);
+                return;
+            }
         }
     }
 

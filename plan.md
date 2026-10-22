@@ -52,6 +52,8 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 
 2026-10-21 explicit exception: the user [approves correctness-first phasing](docs/proposals/P1-correctness-first-implementation-phasing.md) for P1.6.4/P1.6.4b/P1.6.4c and Gate P1. Their ordinary hosted CI timeout may remain open while the requirement/tooling change merges and P2 implementation starts, using the complete unchanged-source correctness evidence. Preserve the failed/incomplete runs and every test/oracle; full current-source verification remains mandatory before release. This does not permit ignoring failed product assertions or waiving later service/LAN/NAT correctness gates.
 
+2026-10-22 explicit exception: the user [approves P2–P5 implementation phasing](docs/proposals/P2-P5-implementation-phasing.md). P3/P4/P5 implementation may start after the preceding phase's code, locally executable checks and required CI are green and merged, while physical, network and elapsed-time gate checks remain open. For P2.2.4, punch/relay endpoint-source integration is completed with P4.2; retain the original P2 task and acceptance criteria. This is permission to implement only: leave unverified tasks/gates unchecked, do not claim a LAN/WAN beta, and do not release v1.0 before every original gate, physical soak and deferred P0 check passes. The Gate P2 CI MITM/reflection tests remain prerequisites for P3 implementation.
+
 ---
 
 ## 1. Status summary
@@ -66,6 +68,11 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | P5 Hardening and v1.0 | 23-26 | Not started | - |
 | P6 After v1.0 (optional) | 2-8 per feature | Not started | - |
 
+The 2026-10-22 implementation-order exception allows later phase code to
+proceed while physical gates remain open, but it does not change these gate
+statuses or permit a beta/release claim. P3 has not started while the current
+P2 draft PR and required CI are unresolved.
+
 ---
 
 ## 2. Decision log
@@ -74,6 +81,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-22 | User approves a narrow implementation-order exception for P2–P5: after each phase's merged code, local checks and required CI are green, begin the next phase while physical/network/elapsed-time gates stay unchecked and mandatory before any beta or release. Keep P0.2.1 at P2 and P0.2.2 at P4; complete P2.2.4 punch/relay source integration with P4.2 without marking P2.2.4 done early. Gate P2 MITM/reflection CI remains a prerequisite to P3. | Implementation validation phasing; docs/proposals/P2-P5-implementation-phasing.md |
 | 2026-10-21 | Start real QUIC transport with mutual TLS certificate identity, direction-bound folder proofs and pin/approval admission. Use bounded bidirectional control correlation, fixed connection nonces, per-folder elected index streams and owned block streams; drain requests before handler disposal. Engine UTC samples remain fresh while wire identity/nonce are transport-bound. | Connection and handshake |
 | 2026-10-21 | Define P2 ingress bounds and certificate-identity violation policy: authenticate folder context, verify original record signatures before parsing, preserve engine metadata/chunk invariants, cap index/request/bitmap/block sizes and close with a reason while adding a peer strike. Keep payloads/paths/keys out of errors. | Protocol specification: Messages |
 | 2026-10-21 | Start P2 with fixed PSP/1 type numbers 1..12, canonical body-length varints/16-MiB cap, fragmented PipeReader framing and explicit after/last sequence cursors. Add complete message schemas without changing signed bytes; cover malformed/truncated/canceled input and fuzz framing alongside existing targets. Message semantics/authentication remain the next protocol/transport tasks. | Protocol specification: Messages |
@@ -1960,6 +1968,7 @@ static bool TryReadVarint(ref SequenceReader<byte> r, out ulong value)
   - Local proof/reflection, mutual-TLS pin-mismatch, and folder-admission evidence: [authenticated QUIC transport](docs/verification/P2-authenticated-quic-transport-2026-10-21.md). The shared direction-bound Hello/folder handshake also runs over TCP and is exercised by [authenticated TCP service integration](docs/verification/P2-tcp-service-integration-local-2026-10-22.md). Hosted CI and deployed Windows Server validation remain open.
 - [ ] **P2.2.4 Connection manager** (`PeerSync.Net/Connections/ConnectionManager.cs`)
   - Done when: dialling follows happy eyeballs (LAN addresses, then public, then punch, then relay, 250 ms apart). The first authenticated connection wins. Duplicates are resolved as in 8.3. Reconnects back off from 1 s to 5 min.
+  - Approved implementation phasing (2026-10-22): punch/relay endpoint sources depend on the P4 rendezvous/relay and are integrated with P4.2. This task and its full acceptance stay open; the direct LAN/public manager and its local/CI checks are prerequisites to P3 implementation.
   - Local progress: transport-neutral candidate scheduling orders LAN/public/punch/relay with 250 ms staggering; focused Net regressions verify source ordering, 250/500/750 ms delays, authenticated remote DeviceId, cancellation/disposal of losing attempts (including caller cancellation while a late loser drains), lower-DeviceId duplicate selection, and 1 s-to-5 min reconnect backoff. The installed host retains a deduplicated set of authenticated LAN/public endpoints per peer and races QUIC/TCP candidates across LAN addresses before public addresses. A bounded catalog refreshes observations, expires endpoints after 15 minutes, caps each peer at 16 endpoints, and records count-only expiry/cap diagnostics. An installed-host regression proves synchronization succeeds through a public endpoint after its LAN endpoint refuses connections. Endpoint source survives reconnects, already-connected configured hosts are not redialled, and maintainer creation is serialized against repeated discovery callbacks. The latest canonical verifier passes all 1,719 tests, native P0 probes, QUIC diagnostics, six spike publishes and 600 seconds of five-target fuzz across 183,392 seeds with zero crashes; see [current-source verification](docs/verification/P2-current-source-verification-2026-10-22.md). The shared QUIC/TCP sessions are supervised by the same folder sync loop; installed-host transfer evidence is linked from P2.2.2. Punch/relay candidates, hosted CI and deployed network checks remain open; see [connection manager local verification](docs/verification/P2-connection-manager-local-2026-10-21.md) and [service peer-runtime verification](docs/verification/P2-service-peer-runtime-local-2026-10-21.md).
 
 ### 8.2 Code: direction-bound folder proof (P2.2.3)
@@ -2133,6 +2142,7 @@ public static async ValueTask ThrottleAsync(RateLimiter? limiter, int bytes, Can
   - Latest firewall retest: the user allowed PeerSync on the local PC; the service listens on TCP/UDP 45973 at Tailscale address `100.118.160.63`, with the inbound service rule enabled. The other PC answers ping, but its ports 45973 and 47821 do not accept TCP connections; its PeerSync listen port is unconfirmed and no peer is connected. The disposable local share `C:\PeerSync-Test\Share` is indexed and ready for a remote join. The remote-side test is `Test-NetConnection 100.118.160.63 -Port 45973`; then use each machine's actual configured port for predefined-host dialing. No authenticated external session is claimed.
   - Installed-peer diagnostics follow-up: the current SCM package's CLI collected 422 events from nine logs after authenticated local clock-skew rejection, recovery, file transfer and disconnect. Its 10-entry sanitized bundle retains clock, peer-ready and sync-pass events while omitting the known certificate thumbprint, source share and installation paths and folder-key field. The runbook now gives a reproducible elevated installed-service probe with narrow loopback firewall setup and cleanup. See [native fixed-service peer evidence](docs/verification/P2-installed-service-peer-native-2026-10-22.md). A two-PC failure reproduction and diagnosis remain open.
   - PR #44 first-run CI inventory: ARM64 and both Windows Server security jobs passed. Fuzz stopped at a retained-seed scope control before fuzzing because two new executable regressions were absent from the shared registry; x64 passed its earlier suites but four Service fixtures hit transient busy SQLite files during immediate temporary-root deletion, so downstream App/probes/signing did not run. The registry and active scope controls now require all eight retained cases (15 total Simulation methods), and test fixture cleanup retries only Windows `IOException` for at most three seconds after service disposal. Local post-repair controls pass 30 Python campaign tests, 12 Simulation-scope checks and 34 Service tests. Hosted rerun remains pending; retain the [full causal inventory](docs/verification/P2-pr44-ci-repair-2026-10-22.md) and original [failed run](https://github.com/taskscape/PeerSync/actions/runs/39758941620).
+  - PR #44 second-run follow-up: the retained-seed scope control no longer blocks fuzz, ARM64 and Server 2022 passed, and x64 again passed its earlier suites before three functional Service cases failed solely while deleting separate temporary folder-index `.db` files. The bounded three-second retry did not release those Windows sharing violations. Fixture cleanup now reports and defers only a final Win32 sharing/lock violation (32/33), keeping other I/O failures and all peer assertions visible; production disposal and database behavior are unchanged. Server 2025 passed native checks and reported 1,008 successful Engine cases before the internal 780-second verifier budget stopped its child process without a test failure. The shared internal wait is raised to 840 seconds inside the unchanged 15-minute job cap, retaining full Engine and native scope. Fuzz itself passed 600.010 seconds/96,861 seeds/zero crashes, and the seven-method baseline Simulation cohort passed, but the serial retained cohort had only five of eight successful result files when the 2,700-second supervisor budget stopped it. The boundary runner now splits the eight exact seeds across three owned concurrent retained cohorts, retaining 15-method aggregate scope, all evidence checks, the shared budget and 50-minute job limit. Local scope/runner controls pass; the next hosted run must prove complete scope and timing. See the [second-run inventory](docs/verification/P2-pr44-ci-repair-2026-10-22.md) and [run](https://github.com/taskscape/PeerSync/actions/runs/39761028596).
 
 - [ ] **P2.5.7 Installed authenticated-session clock/control integration** (`PeerSync.Service/`, `PeerSync.Net/`, `PeerSync.App/`)
   - Depends on: P2.2.1-P2.2.3 and P2.5.1/P2.5.2/P2.5.4.
@@ -2237,6 +2247,11 @@ The event source `PeerSync` is registered by `--init` (`EventLog.CreateEventSour
 
 ### Gate P2 (LAN beta)
 
+Implementation may proceed to P3 under the 2026-10-22 approved phasing only
+after the P2 code, locally executable checks, Gate P2 MITM/reflection CI and
+required current-head CI are green and merged. Every box below stays open
+until its actual check passes; no LAN beta is claimed meanwhile.
+
 - [ ] Complete P2.5.7 and the deferred P1.5.5 installed-service/production-transport validation, with retained real authenticated-session, fixed-client identity, skew/recovery and rendered UI evidence.
 - [ ] Complete deferred P0.2.1: a 1 GiB mutual-certificate QUIC transfer with ALPN `psp/1`, certificate-derived DeviceIds and verified hash between physical PCs on a 1-Gbit LAN; record link speeds and throughput, then close P0.2.1 with the evidence.
 - [ ] Three physical PCs sync a 50 GB mixed corpus (large files, 100,000 small files, deep trees) over the LAN.
@@ -2303,6 +2318,10 @@ end;
 ```
 
 ### Gate P3
+
+The approved implementation phasing permits P4 code after merged P3 code,
+locally executable checks and required CI pass. The physical tester and clean
+VM checks below remain mandatory before any beta or release.
 
 - [ ] A tester who hasn't seen the project installs on two PCs and syncs a folder in under 10 minutes, using only the app (screen recording attached).
 - [ ] Upgrade, uninstall-keep-data and uninstall-remove-data each pass on a clean Windows 11 VM and a clean Server 2022 VM.
@@ -2538,6 +2557,10 @@ psp probe sync.taskscape.com:99                     # TCP and UDP, plus the obse
 ```
 
 ### Gate P4 (WAN beta)
+
+The approved implementation phasing permits P5 code after merged P4 code,
+locally executable checks and required CI pass. Native NAT, WAN and soak
+checks below remain mandatory before any WAN beta or v1.0 release.
 
 - [ ] Complete deferred P0.2.2: record same-LAN, full-cone home NAT, port-restricted home NAT and mobile/CGNAT outcomes for the required binding alternatives, log the final transport decision and reconcile P4.2.3, then close P0.2.2. Tailscale and rendezvous reachability do not substitute for these checks.
 - [ ] Sync works between two home networks behind different NATs, and with one PC behind a mobile hotspot (CGNAT).

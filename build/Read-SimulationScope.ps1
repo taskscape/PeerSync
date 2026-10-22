@@ -6,7 +6,7 @@ if ($registry.schema -ne 'peersync-simulation-scope-v1') { throw 'Unknown simula
 $expected=@($registry.baselineMethods | ForEach-Object { $registry.prefix + $_ })
 $expected+=@($registry.retainedSeeds | ForEach-Object { $registry.prefix + "RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(seed: $_)" })
 $results=@()
-if ($Path.Count -lt 1 -or $Path.Count -gt 2) { throw 'Simulation requires one full report or two cohort reports' }
+if ($Path.Count -lt 1 -or $Path.Count -gt 4) { throw 'Simulation requires one full report or up to four cohort reports' }
 foreach ($report in $Path) {
     $file=Get-Item -LiteralPath $report
     if ($file.Length -gt 10MB) { throw 'Simulation TRX exceeds the evidence limit' }

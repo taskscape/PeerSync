@@ -8,6 +8,7 @@ New-Item -ItemType Directory -Force "$fixture/build","$fixture/bin" | Out-Null
 # evidence directories. A native invalid-argument executable substitutes for
 # dotnet, so no product Simulation fixture is started in this failure control.
 Copy-Item -LiteralPath "$PSScriptRoot/Run-BoundarySimulation.ps1" -Destination "$fixture/build/Run-BoundarySimulation.ps1"
+Copy-Item -LiteralPath "$PSScriptRoot/simulation-scope.json" -Destination "$fixture/build/simulation-scope.json"
 $fuzzOutput=Join-Path $root tests/PeerSync.Fuzz/bin/Release/net10.0-windows10.0.20348.0
 $simulationOutput=Join-Path $root tests/PeerSync.Simulation/bin/Release/net10.0-windows10.0.20348.0
 foreach ($project in @('PeerSync.Fuzz','PeerSync.Simulation')) {
@@ -41,7 +42,7 @@ try {
     catch { $rejected=$_.Exception.Message -like '*Boundary worker*failed*' }
     if (-not $rejected) { throw 'Failed worker was accepted' }
     $workers=Get-Content "$fixture/artifacts/fuzz/workers.json" -Raw | ConvertFrom-Json
-    if ($workers.workers.Count -ne 3 -or @($workers.workers | Where-Object { -not $_.exited }).Count -ne 0 -or $workers.cleanupErrors.Count -ne 0) { throw 'Owned workers were not all stopped' }
+    if ($workers.workers.Count -ne 5 -or @($workers.workers | Where-Object { -not $_.exited }).Count -ne 0 -or $workers.cleanupErrors.Count -ne 0) { throw 'Owned workers were not all stopped' }
     if ($sentinel.HasExited) { throw 'Supervisor stopped an unrelated process' }
     if (@($workers.workers | Where-Object { $_.name -eq 'fuzz' -and $_.exitCode -ne 0 }).Count -ne 1) { throw 'Control did not stop the running owned fuzz worker' }
 }

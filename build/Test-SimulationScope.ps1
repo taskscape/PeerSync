@@ -26,8 +26,13 @@ function Expect-Rejected([string]$Name,[string[]]$Reports) {
 $full=Write-Trx full ($baseline+$retained)
 $a=Write-Trx baseline $baseline
 $b=Write-Trx retained $retained
-foreach ($reports in @(@($full),@($a,$b))) {
-    $scope=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $reports
+$split=@(
+    (Write-Trx retained-1 $retained[0,3,6]),
+    (Write-Trx retained-2 $retained[1,4,7]),
+    (Write-Trx retained-3 $retained[2,5])
+)
+foreach ($reports in @(@{paths=@($full)},@{paths=@($a,$b)},@{paths=@($a)+$split})) {
+    $scope=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $reports.paths
     if ($scope.executedMethods -ne 15 -or $scope.retainedRegressionCases -ne 8 -or $scope.maintenanceCases -ne 1) { throw 'Complete Simulation scope rejected' }
     $passed++
 }
@@ -39,6 +44,8 @@ Expect-Rejected failed-result @($a,(Write-Trx failed $retained -Outcome Failed))
 Expect-Rejected skipped-counter @($a,(Write-Trx skipped $retained -NotExecuted 1))
 Expect-Rejected wrong-seed @($a,(Write-Trx wrong ($retained[0..6]+@('unexpected method'))))
 Expect-Rejected extra-cohort @($a,$b,$b)
+Expect-Rejected missing-split @($a,$split[0],$split[1])
+Expect-Rejected duplicated-split @($a,$split[0],$split[1],$split[1])
 $empty=Write-Trx empty @()
 Expect-Rejected empty @($full,$empty)
 $dtd=Join-Path $fixture dtd.trx
