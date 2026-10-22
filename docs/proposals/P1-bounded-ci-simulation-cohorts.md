@@ -38,3 +38,8 @@ limits, add jobs, reduce cases/retained seeds/healing rounds or weaken native,
 reference, queue or published-version oracles. No further thousand-seed
 campaign or repeat of the unchanged successful 100000-file corpus is needed
 for this orchestration-only change.
+
+For P2 CI only, the user approved a later [isolated-runner exception](P2-boundary-ci-runner-isolation.md)
+on 2026-10-22 after both the two-cohort and four-cohort hosted layouts
+exhausted the same shared runner budget. This historical P1 decision and its
+failed-run evidence remain intact.

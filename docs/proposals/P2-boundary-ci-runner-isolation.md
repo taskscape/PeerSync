@@ -1,5 +1,9 @@
 # Isolate P2 boundary Simulation cohorts on hosted runners
 
+Approved by the user on 2026-10-22 as a narrow exception to the prior
+five-job/no-new-jobs CI design. The required test scope and per-job limits
+remain unchanged.
+
 PR #44 run [39767094436](https://github.com/taskscape/PeerSync/actions/runs/39767094436)
 reached the unchanged 2,700-second boundary supervisor limit. The five-target
 fuzzer completed 600.001 seconds, 94,470 seeds and zero crashes. The seven

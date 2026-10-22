@@ -57,8 +57,8 @@ jobs:
           retention-days: 7
   fuzz-smoke:
     runs-on: windows-latest
-    # Four bounded Simulation cohorts retain all fifteen methods; three split
-    # the eight independent retained seeds while ten-minute fuzz overlaps.
+    # Fuzz and the seven baseline methods share this runner. Three retained
+    # cohorts run on separate hosted runners to avoid fixture I/O contention.
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
@@ -68,24 +68,86 @@ jobs:
           python -m unittest discover -s tests -p 'campaign_*_test.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Campaign controls failed' }
           ./build/Test-SimulationScope.ps1
+          ./build/Test-BoundaryCiArtifacts.ps1
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - name: Required ten-minute boundary fuzz and real-engine simulations
+      - name: Required ten-minute boundary fuzz and baseline simulations
         shell: pwsh
-        run: ./build/Run-BoundarySimulation.ps1 -FuzzSeconds 600
+        run: ./build/Run-BoundarySimulation.ps1 -FuzzSeconds 600 -Cohort baseline
       - name: Boundary supervisor budget and owned cleanup controls
         shell: pwsh
         run: ./build/Test-BoundaryRunner.ps1
+      - name: Upload baseline scope for aggregate verification
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-baseline-attempt-${{ github.run_attempt }}
+          path: artifacts/boundary-shards/baseline/
+          if-no-files-found: error
       - name: Upload fuzz evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-smoke-evidence
+          name: fuzz-smoke-evidence-attempt-${{ github.run_attempt }}
           path: |
             artifacts/fuzz/
             artifacts/simulation/
             artifacts/tests/simulation/
+  retained-simulation:
+    strategy:
+      fail-fast: false
+      matrix:
+        cohort: [retained-1, retained-2, retained-3]
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Run exact retained Simulation cohort
+        shell: pwsh
+        run: ./build/Run-BoundarySimulation.ps1 -Cohort '${{ matrix.cohort }}'
+      - name: Upload retained scope for aggregate verification
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-${{ matrix.cohort }}-attempt-${{ github.run_attempt }}
+          path: artifacts/boundary-shards/${{ matrix.cohort }}/
+          if-no-files-found: error
+      - name: Upload retained failure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: simulation-${{ matrix.cohort }}-evidence-attempt-${{ github.run_attempt }}
+          path: |
+            artifacts/fuzz/
+            artifacts/simulation/
+            artifacts/tests/simulation/
+  boundary-aggregate:
+    needs: [fuzz-smoke, retained-simulation]
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: boundary-*-attempt-${{ github.run_attempt }}
+          path: artifacts/boundary-ci/
+      - name: Verify all fifteen Simulation methods and ten-minute fuzz
+        shell: pwsh
+        run: |
+          $source = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify aggregate source revision' }
+          ./build/Read-BoundaryCiArtifacts.ps1 -Path artifacts/boundary-ci `
+            -RunId "$env:GITHUB_RUN_ID" -RunAttempt "$env:GITHUB_RUN_ATTEMPT" `
+            -SourceRevision $source | ConvertTo-Json -Depth 5 |
+            Set-Content artifacts/boundary-ci-summary.json
+      - name: Upload aggregate result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: boundary-aggregate-attempt-${{ github.run_attempt }}
+          path: artifacts/boundary-ci-summary.json
   service-security:
     strategy:
       fail-fast: false
