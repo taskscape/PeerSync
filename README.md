@@ -1,17 +1,16 @@
 # PeerSync
 
-PeerSync is a Windows peer-to-peer folder sync service. The P2 service, CLI,
-authenticated QUIC and TCP/TLS folder transports, sync engine, control pipe
-and diagnostic collection are implemented in this working tree. A complete
-local verifier pass is recorded, while the latest current-source rerun stops at
-three WPF render assertions with fully transparent off-screen bitmaps. The
-product remains experimental: the installer, cross-network rendezvous/relay
-path, physical LAN and soak gates are incomplete. See
+PeerSync is a Windows peer-to-peer folder sync service. The service, CLI,
+authenticated QUIC and TCP/TLS transports, sync engine, control pipe,
+diagnostics, and development installer are implemented. P4 rendezvous and
+end-to-end encrypted relay code is being validated in this working tree.
+The product remains experimental: physical LAN, native NAT, WAN and soak
+gates are incomplete. See
 [plan.md](plan.md) for acceptance criteria and phase gates. P6 is optional and
 outside the v1 target.
 
 Requires Windows 11 / Server 2022 or newer and .NET SDK 10.0.402. The solution
-contains all eleven production projects plus test projects and executable P0
+contains the production projects plus test projects and executable P0
 probes. Dependencies are centrally pinned and restore uses checked-in lockfiles.
 
 ```powershell
@@ -43,7 +42,8 @@ For an experimental Windows Server / second-PC service deployment, use the
 [two-PC service runbook](docs/peersync-service-two-pc-runbook.md). The service
 package manifest marks P2 and keeps `gateP2Passed: false`; a local verifier pass
 does not imply cross-PC validation. For event meanings and sanitized diagnostic
-bundles, read [docs/diagnostics.md](docs/diagnostics.md). P0 probe bundles
+bundles, including the P4 rendezvous server, read
+[docs/diagnostics.md](docs/diagnostics.md). P0 probe bundles
 deliberately say `productionSyncAvailable: false` and do not implement folder
 sync.
 

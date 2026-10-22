@@ -137,9 +137,12 @@
       "peersync.net": {
         "type": "Project",
         "dependencies": {
+          "Grpc.Net.Client": "[2.84.0, )",
+          "Mono.Nat": "[3.0.4, )",
           "PeerSync.Core": "[1.0.0, )",
           "PeerSync.Crypto": "[1.0.0, )",
-          "PeerSync.Protocol": "[1.0.0, )"
+          "PeerSync.Protocol": "[1.0.0, )",
+          "PeerSync.Rendezvous.Contracts": "[1.0.0, )"
         }
       },
       "peersync.protocol": {
@@ -148,6 +151,13 @@
           "Google.Protobuf": "[3.36.2, )",
           "PeerSync.Core": "[1.0.0, )",
           "PeerSync.Crypto": "[1.0.0, )"
+        }
+      },
+      "peersync.rendezvous.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Google.Protobuf": "[3.36.2, )",
+          "Grpc.Net.Client": "[2.84.0, )"
         }
       },
       "peersync.storage": {
@@ -195,6 +205,12 @@
           "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
           "SQLitePCLRaw.core": "2.1.13"
         }
+      },
+      "Mono.Nat": {
+        "type": "CentralTransitive",
+        "requested": "[3.0.4, )",
+        "resolved": "3.0.4",
+        "contentHash": "oodXnwdcML4qUaZ+J44gaC/hn0n3uZHkvxScdt8NOcBbmbNmA7z1t5FEvUvn8cOnYSha8F4ZS57FJuXSKYhqdw=="
       },
       "NSec.Cryptography": {
         "type": "CentralTransitive",

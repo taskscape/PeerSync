@@ -87,6 +87,7 @@ message PeerInfo {
   string approval = 3;
   bool pinned = 4;
   optional int64 last_seen_utc_ticks = 5;
+  string transport = 6;
 }
 message ListPeersResponse { string folder_id = 1; repeated PeerInfo peers = 2; }
 message FolderPeerInfo { string folder_id = 1; PeerInfo peer = 2; }

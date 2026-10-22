@@ -1,0 +1,79 @@
+syntax = "proto3";
+package peersync.rendezvous.v1;
+option csharp_namespace = "PeerSync.Rendezvous.Contracts.V1";
+
+service Rendezvous {
+  rpc Session (stream ClientMessage) returns (stream ServerMessage);
+}
+
+service Relay {
+  rpc Pipe (stream RelayChunk) returns (stream RelayChunk);
+}
+
+message Endpoint {
+  string address = 1;
+  uint32 port = 2;
+}
+
+message Announce {
+  repeated bytes folder_ids = 1;
+  repeated Endpoint local_endpoints = 2;
+  uint32 listen_port = 3;
+}
+
+message PunchRequest {
+  bytes device_id = 1;
+  bytes folder_id = 2;
+}
+
+message RelayRequest {
+  bytes device_id = 1;
+  bytes folder_id = 2;
+}
+
+message ClientMessage {
+  oneof payload {
+    Announce announce = 1;
+    PunchRequest punch_request = 2;
+    RelayRequest relay_request = 3;
+  }
+}
+
+message ObservedAddress {
+  Endpoint endpoint = 1;
+  bytes session_id = 2;
+}
+
+message Peer {
+  bytes device_id = 1;
+  repeated Endpoint endpoints = 2;
+}
+
+message PeerList {
+  bytes folder_id = 1;
+  repeated Peer peers = 2;
+}
+
+message PunchNow {
+  bytes device_id = 1;
+  repeated Endpoint endpoints = 2;
+  int64 start_utc_ticks = 3;
+}
+
+message RelayOffer {
+  bytes session_id = 1;
+  bytes token = 2;
+  bytes peer_device_id = 3;
+  bool initiator = 4;
+}
+
+message ServerMessage {
+  oneof payload {
+    ObservedAddress observed_address = 1;
+    PeerList peer_list = 2;
+    PunchNow punch_now = 3;
+    RelayOffer relay_offer = 4;
+  }
+}
+
+message RelayChunk { bytes data = 1; }

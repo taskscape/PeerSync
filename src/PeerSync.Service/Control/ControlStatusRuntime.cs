@@ -14,6 +14,7 @@ public sealed class ControlStatusRuntime
     private readonly object gate = new();
     private readonly Dictionary<string, TransportFolder> folders = new(StringComparer.Ordinal);
     private readonly HashSet<Guid> activePeerSessions = [];
+    private readonly Dictionary<Guid, (string DeviceId, DiagnosticTransport Transport, DateTimeOffset Since)> peerTransports = [];
     private readonly Dictionary<string, TransferTotals> transferTotals = new(StringComparer.Ordinal);
     private readonly Queue<ControlDiagnosticError> recentErrors = new();
     private readonly Guid instance = Guid.NewGuid();
@@ -138,6 +139,23 @@ public sealed class ControlStatusRuntime
             if (active) activePeerSessions.Add(sessionId);
             else activePeerSessions.Remove(sessionId);
         }
+    }
+
+    internal void SetPeerTransport(Guid sessionId, ReadOnlySpan<byte> deviceId, DiagnosticTransport transport)
+    {
+        if (sessionId == Guid.Empty || deviceId.Length != 32) throw new ArgumentException("A session and device id are required.");
+        lock (gate) peerTransports[sessionId] = (Convert.ToHexString(deviceId), transport, DateTimeOffset.UtcNow);
+    }
+
+    internal void ClearPeerTransport(Guid sessionId)
+    { lock (gate) peerTransports.Remove(sessionId); }
+
+    internal string ReadPeerTransport(ReadOnlySpan<byte> deviceId)
+    {
+        if (deviceId.Length != 32) return "";
+        string key = Convert.ToHexString(deviceId);
+        lock (gate) return peerTransports.Values.Where(item => item.DeviceId == key)
+            .OrderByDescending(item => item.Since).Select(item => item.Transport.ToString()).FirstOrDefault() ?? "";
     }
     private sealed record TransferTotals(long Uploaded, long Downloaded);
     internal sealed record ControlDiagnosticError(string Code, string Source, long OccurredUtcTicks);

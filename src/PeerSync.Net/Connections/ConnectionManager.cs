@@ -196,7 +196,11 @@ public sealed class ConnectionManager : IAsyncDisposable
     {
         try
         {
-            if (index != 0) await delay(TimeSpan.FromTicks(AttemptStagger.Ticks * index), cancellationToken).ConfigureAwait(false);
+            // Relay candidates perform their own five-second direct-path grace
+            // period. Do not add a stagger for every public endpoint ahead of
+            // them, or a peer with many endpoints could wait far longer.
+            if (index != 0 && candidate.Source != ConnectionSource.Relay)
+                await delay(TimeSpan.FromTicks(AttemptStagger.Ticks * index), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             diagnostics?.TryWrite(new("connection.candidate_started", CandidateOperation(candidate))
                 { Level = DiagnosticLevel.Debug, Transport = candidate.Transport,

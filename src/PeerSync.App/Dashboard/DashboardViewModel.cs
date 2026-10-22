@@ -53,7 +53,8 @@ internal sealed partial class DashboardViewModel : ObservableObject
         SelectedFolderId = Folders.Any(folder => folder.Id == previous) ? previous : Folders.FirstOrDefault()?.Id ?? "";
         if (foldersChanged && SelectedFolderId == previous) OnPropertyChanged(nameof(SelectedFolderId));
         ReplaceIfChanged(Peers, update.Peers.Select(row => new PeerItem(
-            row.FolderId, row.Peer.DeviceId, row.Peer.Name, row.Peer.Approval)).ToArray());
+            row.FolderId, row.Peer.DeviceId, row.Peer.Name, row.Peer.Approval)
+            { Transport = row.Peer.Transport }).ToArray());
         var overwrites = new List<OverwriteItem>();
         foreach (var item in update.Overwrites)
         {
@@ -135,6 +136,14 @@ internal sealed record FolderItem(string Id, string Path, string Access, string 
 internal sealed record PeerItem(string FolderId, string DeviceId, string Name, string Approval)
 {
     public string Fingerprint => DeviceId.Length > 16 ? DeviceId[..16] : DeviceId;
+    public string Transport { get; init; } = "";
+    public string Route => Transport switch
+    {
+        "Relay" => "via relay",
+        "Quic" => "direct QUIC",
+        "Tcp" => "direct TCP",
+        _ => "Offline",
+    };
 }
 internal sealed record OverwriteItem(string FolderId, long ArchiveId, string Path, string ArchivedLocal);
 internal sealed record PendingDeviceItem(string FolderId, string DeviceId, string Name, string RequestedLocal)

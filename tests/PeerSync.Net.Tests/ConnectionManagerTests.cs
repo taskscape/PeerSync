@@ -41,7 +41,7 @@ public sealed class ConnectionManagerTests
     }
 
     [Fact]
-    public async Task AllCandidateSourcesFollowPriorityWithQuarterSecondStaggering()
+    public async Task DirectCandidatesStaggerWithoutDelayingRelay()
     {
         byte[] local = Id(1), remote = Id(2);
         var attempted = new ConcurrentQueue<ConnectionSource>();
@@ -71,7 +71,6 @@ public sealed class ConnectionManagerTests
         delays.ToArray().ShouldBe([
             TimeSpan.FromMilliseconds(250),
             TimeSpan.FromMilliseconds(500),
-            TimeSpan.FromMilliseconds(750),
         ]);
 
         ConnectionCandidate Failed(ConnectionSource source) => new(source, _ =>

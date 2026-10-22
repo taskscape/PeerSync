@@ -187,6 +187,7 @@ internal sealed partial class ControlStatusRpc
                         {
                             DeviceId = Convert.ToHexString(peer.DeviceId), Name = peer.Name ?? "",
                             Approval = peer.Approval.ToString(), Pinned = peer.Pinned,
+                            Transport = runtime.ReadPeerTransport(peer.DeviceId),
                         },
                     };
                     if (peer.LastSeenTicks is { } ticks) item.Peer.LastSeenUtcTicks = ticks;

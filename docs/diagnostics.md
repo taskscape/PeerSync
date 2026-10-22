@@ -26,11 +26,69 @@ requires a release signing identity.
 
 ## Deployment status
 
-The product is in P2. The installed service now loads its device certificate
-and registered folder engines and runs local watcher/periodic scans. Production
-peer supervision and authenticated production folder synchronization, tracker,
-relay and installer remain incomplete. The P0 probes below are deployable test
-executables, not a v1 release.
+P3 service, control app and signed development installer code is merged. The
+installed service runs registered folder engines, watcher/periodic scans and
+authenticated QUIC/TCP peer synchronization. A signed x64 setup and an older
+installed host exchanged files in both directions over a virtual LAN; see
+[the Server 2025 installed two-machine smoke](verification/P3-virtual-two-pc-sync-2026-10-22.md).
+The rendezvous tracker and relay are implemented locally for P4. Physical two-PC, Windows 11
+and Server 2022 clean-install, NAT and soak gates remain open; this is not a
+beta or v1 release. The P0 probes below are separate test executables.
+
+## Rendezvous server and two-PC diagnosis
+
+Install the rendezvous service only after a current Server Authentication
+certificate for `sync.taskscape.com` with its private key exists in
+`Cert:\LocalMachine\My`. The installer checks that certificate before changing
+the service, grants its virtual account private-key read access, installs TCP
+and UDP 99 firewall rules, and preserves `appsettings.json` on upgrade. Run
+`After-RendezvousRenewal.ps1` as the win-acme post-renewal action: it reapplies
+that ACL and restarts the service so Kestrel loads the new certificate.
+
+On the server, first check `Get-Service PeerSyncRendezvous`,
+`Get-NetTCPConnection -LocalPort 99`, and `Get-NetUDPEndpoint -LocalPort 99`.
+From a second PC, run `psp probe sync.taskscape.com:99`; its JSON result must
+show `tcp.reachable` and `udp.reachable` true and the server-observed address.
+An HTTP/2 success with HTTP/3 failure points to UDP 99, QUIC or provider
+filtering. Neither a local probe nor a virtual LAN probe proves provider
+reachability from another network. Check the service certificate subject and
+expiry if both protocols fail before an HTTP response. The probe needs no
+device certificate, but tracker and relay streams require a current P-256
+device certificate and derive DeviceId from its public key.
+
+The server writes structured events to
+`C:\ProgramData\PeerSync.Rendezvous\logs` with debug events enabled by default.
+It records startup, HTTP/2 or HTTP/3 probes, authentication rejection,
+presence updates, punch introductions, relay joins/leaves, rate limits and
+session close. Application Event Log entries from `PeerSyncRendezvous` contain
+warning/error event names, operation, session ID and error code. They omit IPs,
+FolderIds, keys, paths and payloads. The configured OTLP endpoint exports
+aggregate counters for tracker/relay sessions, relay bytes, rejected auth,
+rate limits and probes; set `Rendezvous:OtlpEndpoint` to an HTTPS collector (or
+loopback HTTP) only when one is available.
+
+To collect a server bundle, run this elevated on the server shortly after the
+failure:
+
+```powershell
+& "$env:ProgramFiles\PeerSync Rendezvous\PeerSync.Rendezvous.exe" diagnostics `
+  --output C:\Temp\PeerSync-rendezvous-diagnostics.zip
+```
+
+If `Rendezvous:LogDirectory` is customized in the server configuration, pass
+that absolute directory with `--logs`; the default command reads the standard
+ProgramData journal directory.
+
+On both PCs run `psp diagnostics --logs <service-log-directory> --output
+<new-zip>`. Collect all three bundles after a forced relay attempt and compare
+UTC timestamps and session IDs: `tracker.session_connected`,
+`tracker.peer_list_received`, `tracker.relay_offer_received`,
+`rendezvous.relay_joined`, `service.peer_connected`, and sync-pass events.
+The default bundles omit network addresses; add `--include-network-addresses`
+only when routing details are needed and review the ZIP before sharing it.
+Diagnostics expire IP-bearing journal files within 24 hours; the collector
+also excludes events older than 24 hours. Never attach settings, certificate
+private keys, the raw service database or arbitrary logs to a support bundle.
 
 The installed folder host has [local verification evidence](verification/P2-installed-folder-host-local-2026-10-21.md).
 Its smoke test proves registered-folder startup scan and orderly local drain;
@@ -38,7 +96,8 @@ it does not prove installed SCM operation or production peer synchronization.
 
 Structured events use UTC timestamps, component, process/run ID, session ID,
 trace ID when present, transport, operation, byte counts, elapsed milliseconds,
-native error number and retry delay. Debug events are opt-in. The event model
+native error number and retry delay. The installed service currently enables
+debug events in its local journal. The event model
 accepts metadata rather than arbitrary payloads or exception messages. Never
 add folder keys, FolderIds, file contents or record bodies to diagnostics.
 
