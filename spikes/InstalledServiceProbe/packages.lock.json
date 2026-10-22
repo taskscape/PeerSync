@@ -355,7 +355,8 @@
           "Microsoft.Extensions.Hosting": "[10.0.13, )",
           "PeerSync.Control.Contracts": "[1.0.0, )",
           "PeerSync.Crypto": "[1.0.0, )",
-          "QRCoder": "[1.8.1, )"
+          "QRCoder": "[1.8.1, )",
+          "System.ServiceProcess.ServiceController": "[10.0.13, )"
         }
       },
       "peersync.control.contracts": {

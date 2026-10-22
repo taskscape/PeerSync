@@ -9,6 +9,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="QRCoder" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" VersionOverride="10.0.13" />
     <ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
     <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
     <InternalsVisibleTo Include="PeerSync.App.Tests" />

@@ -24,7 +24,18 @@ remained accessible, and the fixture file still had SHA-256
 `775B39482DB51D8443311DC02EFCA29DDBE97E78B435375D484613F056BF0A0A`.
 A silent uninstall had exited 0 and preserved ProgramData and the fixture.
 
+A temporary standard Windows account on the same guest could not call the
+installed control API (`psp status` exit 1). An elevated `PeerSync.exe
+--authorize-user <SID>` saved the account authorization, restarted the service
+through SCM, and exited 0. The same account and logon session then called the
+API successfully (`psp status` exit 0), without signing out. The helper's
+redacted journal recorded one transient SCM start error 1053 followed by a
+successful retry and RUNNING state. The test restored the prior settings and
+removed the temporary account; the service remained running. The same check
+passed again after upgrading with the final locally signed x64 setup, whose
+manifest hash and guest Authenticode signature were verified before install.
+
 The VM's setup logs are under `C:\Temp\PeerSync\` in the local test guest.
-This smoke did not exercise the interactive remove-data prompt, Windows 11,
-Server 2022, Arm64 execution, a standard-user account, or two-PC sync; their
-plan gates stay open.
+This smoke did not exercise the rendered WPF authorization flow, interactive
+remove-data prompt, Windows 11, Server 2022, Arm64 execution, or two-PC sync;
+their plan gates stay open.

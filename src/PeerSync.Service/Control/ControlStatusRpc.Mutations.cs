@@ -26,8 +26,10 @@ internal sealed partial class ControlStatusRpc
             bool changed = settings.AuthorizeUser(targetSid);
             diagnostics?.TryWrite(new("control.user_authorized", "control")
                 { SessionId = session, ItemsChanged = changed ? 1 : 0 });
-            if (changed) lifetime.RequestRestartAfterResponse();
-            return new() { Completed = true, Detail = changed ? "RestartingControlPipe" : "AlreadyAuthorized" };
+            // Recycling this host in the installed Windows-service process ended
+            // the service on a clean guest. The elevated app helper restarts it
+            // after this response, rebuilding the pipe ACL and caller policy.
+            return new() { Completed = true, Detail = changed ? "ServiceRestartRequired" : "AlreadyAuthorized" };
         }
         catch (ControlRuntimeUnavailableException) { throw new RpcException(new(StatusCode.Unavailable, "Device settings are unavailable.")); }
         catch (Exception error) when (error is IOException or InvalidOperationException)

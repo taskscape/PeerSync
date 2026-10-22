@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using System.Security.Principal;
+using System.ServiceProcess;
 using PeerSync.Control.Contracts;
+using PeerSync.Core.Diagnostics;
 
 namespace PeerSync.App.Dashboard;
 
@@ -40,10 +43,19 @@ internal static class ElevatedActions
     internal static async Task<int> RunHelperAsync(string[] args)
     {
         if (args.Length == 0 || (args[0] == "--start-service" ? args.Length != 1 : args.Length != 2)) return 2;
-        using var identity = WindowsIdentity.GetCurrent();
-        if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) return 5;
+        DiagnosticRunJournal? run = null;
         try
         {
+            string logs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "PeerSync", "logs", "app-helper");
+            run = DiagnosticRunJournal.Open(logs, "app-helper", debugEnabled: true);
+            run.Journal.TryWrite(new("app.helper_started", "helper"));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException) { }
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) return 5;
             switch (args[0])
             {
                 case "--grant-folder":
@@ -53,8 +65,11 @@ internal static class ElevatedActions
                     using (var client = ControlStatusClient.CreateForInstalledService())
                     {
                         var result = await client.AuthorizeUserAsync(args[1]).ConfigureAwait(false);
-                        return result.Completed ? 0 : 1;
+                        if (!result.Completed) return 1;
                     }
+                    RestartService(run?.Journal);
+                    run?.Journal.TryWrite(new("app.account_authorized", "helper"));
+                    return 0;
                 case "--start-service":
                     var start = new ProcessStartInfo("sc.exe") { UseShellExecute = false,
                         CreateNoWindow = true };
@@ -69,6 +84,56 @@ internal static class ElevatedActions
             }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
-        { return 1; }
+        {
+            run?.Journal.TryWrite(new("app.helper_failed", "helper")
+            {
+                Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name,
+                HResult = error.HResult,
+                NativeError = (error as Win32Exception ?? error.InnerException as Win32Exception)?.NativeErrorCode,
+            });
+            return 1;
+        }
+        finally { run?.Dispose(); }
+    }
+
+    private static void RestartService(DiagnosticJournal? diagnostics)
+    {
+        using var service = new ServiceController("PeerSync");
+        service.Refresh();
+        if (service.Status != ServiceControllerStatus.Stopped)
+        {
+            diagnostics?.TryWrite(new("app.service_stop_requested", "helper"));
+            if (service.Status != ServiceControllerStatus.StopPending) service.Stop();
+            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+        }
+        diagnostics?.TryWrite(new("app.service_stopped", "helper"));
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                service.Refresh();
+                if (service.Status == ServiceControllerStatus.Stopped)
+                {
+                    service.Start();
+                    diagnostics?.TryWrite(new("app.service_start_requested", "helper"));
+                }
+                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(3));
+                diagnostics?.TryWrite(new("app.service_running", "helper"));
+                return;
+            }
+            catch (Exception error) when (attempt < 9 &&
+                (error is System.TimeoutException or System.ServiceProcess.TimeoutException ||
+                 error is InvalidOperationException &&
+                 error.InnerException is Win32Exception { NativeErrorCode: 1053 or 1056 }))
+            {
+                diagnostics?.TryWrite(new("app.service_start_retry", "helper")
+                {
+                    Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name,
+                    NativeError = (error as Win32Exception ?? error.InnerException as Win32Exception)?.NativeErrorCode,
+                    RetryInMilliseconds = 500,
+                });
+                Thread.Sleep(500);
+            }
+        }
     }
 }

@@ -1477,6 +1477,14 @@ identity mismatch before sending RPC data. Fixture endpoints may supply their
 known process/SID directly; the production app resolves them through SCM and
 exposes no arbitrary endpoint/owner override.
 
+For a standard user's **Authorize this account** action, the elevated app
+helper submits `AuthorizeUser` through the administrator-only RPC, then stops
+and starts the Windows service through SCM and waits for RUNNING. This rebuilds
+the pipe ACL and per-RPC caller policy from the durable SID list without a
+sign-out. Recycling the control host inside the same Windows-service process
+ended that process on a clean Server 2025 guest, so the RPC no longer requests
+an in-process host restart.
+
 The app initially queries status, then consumes WatchEvents and reconnects after
 disconnect. Bind updates to the current client generation and service instance,
 ignore stale sequences, and never preserve an old success after a connection
@@ -1643,6 +1651,14 @@ Phase 6 options are independent of each other:
 ## Testing strategy
 
 The engine's correctness matters more than its speed: every phase gate includes a soak run with zero lost versions. Most of the logic is tested with many simulated nodes in one process over the in-memory transport, before any real network is involved.
+
+Directory-metadata tests that exercise rebase after receiving a root must
+allow the worker's bounded source deadline to defer one attempt on a loaded
+host. Use an injected clock to advance persisted backoff through bounded
+retries, then require the signed graph to be complete before the local child
+edit is rebased. Keep the production source deadline and graph checks intact;
+the Server 2025 P3 PR failure and focused repair are recorded in
+`docs/verification/P3-pr47-ci-repair-2026-10-22.md`.
 
 The engine exchanges Hello, bounded index pages/range targets and immutable
 blocks through `IPeerTransport`. The in-process fabric grants each registered
