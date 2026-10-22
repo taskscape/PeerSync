@@ -1,5 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
+using System.Runtime.ExceptionServices;
 using System.Net;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
@@ -527,9 +528,11 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         status.NetworkChanged -= OnNetworkChanged;
         stopping.Cancel();
         await addGate.WaitAsync().ConfigureAwait(false);
+        Exception? networkFailure = null;
         try
         {
-        if (network is not null) await network.DisposeAsync().ConfigureAwait(false);
+        try { if (network is not null) await network.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception error) { networkFailure = error; }
         Task? pendingRescans;
         lock (rescanGate) pendingRescans = rescanTask;
         try { await schedulerTask.ConfigureAwait(false); }
@@ -554,8 +557,9 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         {
             addGate.Release();
             addGate.Dispose();
+            stopping.Dispose();
         }
-        stopping.Dispose();
+        if (networkFailure is not null) ExceptionDispatchInfo.Capture(networkFailure).Throw();
     }
 
     internal sealed class FolderRuntime(FolderIndex index, FolderKeys keys, Scanner scanner, TransportFolder transport,

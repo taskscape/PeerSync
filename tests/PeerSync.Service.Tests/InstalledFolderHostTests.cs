@@ -74,6 +74,11 @@ public sealed class InstalledFolderHostTests
                 rightCertificate, new PeerSync.Core.Settings.DeviceSettings { ListenPort = rightPort, LanDiscovery = false },
                 rightStatus, rightJournal, timeProvider: skewedClock, cancellationToken: timeout.Token);
 
+            await AbortQuicHandshakeAsync(rightPort, leftCertificate, timeout.Token);
+            await UntilAsync(() => ReadDiagnosticLog(Path.Combine(root, "right-logs", "debug.jsonl"))
+                .Contains("\"eventName\":\"service.incoming_peer_rejected\"", StringComparison.Ordinal), timeout.Token);
+            right.Completion.IsCompleted.ShouldBeFalse("one aborted peer handshake must not stop the installed QUIC listener");
+
             await left.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, rightPort), timeout.Token);
             await UntilAsync(() => leftStatus.ReadStatus().Clocks.Any(row => row.Session.Clock.State == PeerClockState.Skewed)
                 && rightStatus.ReadStatus().Clocks.Any(row => row.Session.Clock.State == PeerClockState.Skewed), timeout.Token);
@@ -435,6 +440,19 @@ public sealed class InstalledFolderHostTests
         using X509Certificate2 ephemeral = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
         return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx, "service-test"), "service-test",
             X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.Exportable);
+    }
+
+    private static async Task AbortQuicHandshakeAsync(int port, X509Certificate2 certificate, CancellationToken token)
+    {
+        var options = new System.Net.Quic.QuicClientConnectionOptions
+        {
+            RemoteEndPoint = new IPEndPoint(IPAddress.Loopback, port),
+            ClientAuthenticationOptions = PeerTls.Client(certificate),
+            DefaultCloseErrorCode = 1, DefaultStreamErrorCode = 1,
+        };
+        await using var connection = await System.Net.Quic.QuicConnection.ConnectAsync(options, token);
+        await using var stream = await connection.OpenOutboundStreamAsync(System.Net.Quic.QuicStreamType.Bidirectional, token);
+        stream.Abort(System.Net.Quic.QuicAbortDirection.Both, 1);
     }
 
     private static Guid[] EventSessions(string jsonLines, string eventName)

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Quic;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -167,7 +168,22 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                QuicPeerSession session = await listener!.AcceptAsync(cancellationToken).ConfigureAwait(false);
+                QuicPeerSession session;
+                try { session = await listener!.AcceptAsync(cancellationToken).ConfigureAwait(false); }
+                catch (Exception error) when (!cancellationToken.IsCancellationRequested &&
+                    (error is AuthenticationException or OperationCanceledException or InvalidDataException
+                     || error is IOException and not QuicException
+                     || error is QuicException { QuicError: QuicError.StreamAborted or QuicError.ConnectionAborted
+                         or QuicError.ConnectionIdle or QuicError.ConnectionTimeout }))
+                {
+                    // AcceptAsync has already disposed the accepted connection. A
+                    // peer can reset its control stream during Hello; reject that
+                    // connection without faulting the long-lived listener.
+                    diagnostics?.TryWrite(new("service.incoming_peer_rejected", "peer_network")
+                        { Level = DiagnosticLevel.Debug, Transport = DiagnosticTransport.Quic,
+                            ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    continue;
+                }
                 TrackSession(session);
                 try { await connections.RegisterIncomingAsync(ManagedPeerConnection.FromQuic(session), cancellationToken).ConfigureAwait(false); }
                 catch (Exception error) when (error is AuthenticationException or IOException or OperationCanceledException
@@ -181,6 +197,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested) { }
+        catch (QuicException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.peer_accept_failed", "peer_network")
@@ -606,8 +623,12 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         }
         if (listener is not null) await listener.DisposeAsync().ConfigureAwait(false);
         if (tcpListener is not null) await tcpListener.DisposeAsync().ConfigureAwait(false);
+        Exception? acceptFailure = null;
         if (acceptTask is not null)
-            try { await acceptTask.ConfigureAwait(false); } catch (OperationCanceledException) { } catch (ObjectDisposedException) { }
+            try { await acceptTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+            catch (Exception error) { acceptFailure = error; }
         await connections.DisposeAsync().ConfigureAwait(false);
         Task[] workers = sessionWorkers.Values.Concat(maintainers.Values).ToArray();
         try { await Task.WhenAll(workers).ConfigureAwait(false); } catch (OperationCanceledException) { } catch { }
@@ -616,6 +637,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         CryptographicOperations.ZeroMemory(localDeviceId);
         stopping.Dispose();
         diagnostics?.TryWrite(new("service.peer_network_stopped", "shutdown"));
+        if (acceptFailure is not null) ExceptionDispatchInfo.Capture(acceptFailure).Throw();
     }
 
     private sealed class RegistrationList(Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders)
