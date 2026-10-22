@@ -60,5 +60,13 @@ working set was still 2,544,041,984 bytes. The benchmark log is
 `artifacts/scale/p5-large-reclaim-final-diagnostic-20261023.log` and its
 session-correlated events are in the retained `logs-e10ce6988ccc42438f18803ae075dc24`
 folder. This run used an uncommitted diagnostic working tree; a final
-committed-source gate run remains to be done. A new-peer sync of the
-million-file folder has not yet run.
+committed-source gate run was then performed. Commit
+`73f90588b6df23e4ae4ce0021aa77f65e6168038` and benchmark SHA-256
+`6E140295317F78A4E08A18208272CC73C58ECD42F8831CB7DC73D3F1600AD0BC`
+indexed all million files in 226.529 seconds, then found 1,001,000 rows
+unchanged in 6.880 seconds with zero rehashes, updates or sequence change.
+Idle CPU was 0.2474%, working set 135,827,456 bytes and private bytes
+86,089,728; peak working set was 2,545,479,680 bytes. The retained
+scanner and running fresh-peer evidence are in
+`artifacts/scale/p5-peer-20261022T234611-e6deecf51d6b416f8716ec5614bf42fe`.
+The million-file fresh-peer result is still pending.
