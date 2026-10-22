@@ -26,7 +26,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
 {
     private readonly byte[] source = device is { Length: 32 } ? device.ToArray() : throw new ArgumentException("Invalid publication source.", nameof(device));
     internal Action<string>? Checkpoint { get; init; }
-    internal async Task<DirectoryPublicationPass> RunAsync(int maximumMembers = 1000, int maximumDirectories = 32, CancellationToken token = default)
+    internal async Task<DirectoryPublicationPass> RunAsync(int maximumMembers = 1000, int maximumDirectories = 64, CancellationToken token = default)
     {
         if (maximumMembers is < 1 or > 1000 || maximumDirectories is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumMembers));
         using var gate = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);

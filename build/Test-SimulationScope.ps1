@@ -27,18 +27,18 @@ $full=Write-Trx full ($baseline+$retained)
 $a=Write-Trx baseline $baseline
 $b=Write-Trx retained $retained
 $split=@(
-    (Write-Trx retained-1 $retained[0,3,6]),
+    (Write-Trx retained-1 $retained[0,3,6,9]),
     (Write-Trx retained-2 $retained[1,4,7]),
-    (Write-Trx retained-3 $retained[2,5])
+    (Write-Trx retained-3 $retained[2,5,8])
 )
 foreach ($reports in @(@{paths=@($full)},@{paths=@($a,$b)},@{paths=@($a)+$split})) {
     $scope=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $reports.paths
-    if ($scope.executedMethods -ne 15 -or $scope.retainedRegressionCases -ne 8 -or $scope.maintenanceCases -ne 1) { throw 'Complete Simulation scope rejected' }
+    if ($scope.executedMethods -ne 17 -or $scope.retainedRegressionCases -ne 10 -or $scope.maintenanceCases -ne 1) { throw 'Complete Simulation scope rejected' }
     $passed++
 }
 foreach ($item in @(@('baseline',$a),@('retained-1',$split[0]),@('retained-2',$split[1]),@('retained-3',$split[2]))) {
     $scope=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $item[1] -Cohort $item[0]
-    if ($scope.executedMethods -ne $(if($item[0] -eq 'baseline'){7}elseif($item[0] -eq 'retained-3'){2}else{3})) { throw "Named Simulation cohort rejected: $($item[0])" }
+    if ($scope.executedMethods -ne $(if($item[0] -eq 'baseline'){7}elseif($item[0] -eq 'retained-1'){4}else{3})) { throw "Named Simulation cohort rejected: $($item[0])" }
     $passed++
 }
 foreach ($item in @(@('baseline',$split[0]),@('retained-1',$split[1]),@('retained-2',$split[2]),@('retained-3',$a))) {
@@ -50,11 +50,11 @@ foreach ($item in @(@('baseline',$split[0]),@('retained-1',$split[1]),@('retaine
 }
 Expect-Rejected missing @($a)
 Expect-Rejected duplicate @($a,$a)
-Expect-Rejected omitted-seed @($a,(Write-Trx omitted $retained[0..6]))
+Expect-Rejected omitted-seed @($a,(Write-Trx omitted $retained[0..8]))
 Expect-Rejected partial-counters @($a,(Write-Trx partial $retained -Count 7))
 Expect-Rejected failed-result @($a,(Write-Trx failed $retained -Outcome Failed))
 Expect-Rejected skipped-counter @($a,(Write-Trx skipped $retained -NotExecuted 1))
-Expect-Rejected wrong-seed @($a,(Write-Trx wrong ($retained[0..6]+@('unexpected method'))))
+Expect-Rejected wrong-seed @($a,(Write-Trx wrong ($retained[0..8]+@('unexpected method'))))
 Expect-Rejected extra-cohort @($a,$b,$b)
 Expect-Rejected missing-split @($a,$split[0],$split[1])
 Expect-Rejected duplicated-split @($a,$split[0],$split[1],$split[1])

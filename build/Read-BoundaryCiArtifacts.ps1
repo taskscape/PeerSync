@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference='Stop'
 $cohorts=@('baseline','retained-1','retained-2','retained-3')
 $registry=Get-Content -LiteralPath (Join-Path $PSScriptRoot simulation-scope.json) -Raw | ConvertFrom-Json
-if ($registry.schema -ne 'peersync-simulation-scope-v1' -or @($registry.retainedSeeds).Count -ne 8) { throw 'Invalid Simulation scope registry' }
+if ($registry.schema -ne 'peersync-simulation-scope-v1' -or @($registry.retainedSeeds).Count -ne 10) { throw 'Invalid Simulation scope registry' }
 function Read-Json([string]$File) {
     $item=Get-Item -LiteralPath $File
     if ($item.Length -gt 1MB) { throw "Oversized boundary evidence: $($item.Name)" }
@@ -76,7 +76,7 @@ foreach ($cohort in $cohorts) {
     }
     else {
         $index=[int]$cohort.Substring('retained-'.Length)-1
-        $expectedSeeds=@(for ($i=$index; $i -lt 8; $i+=3) { [int]$registry.retainedSeeds[$i] })
+        $expectedSeeds=@(for ($i=$index; $i -lt 10; $i+=3) { [int]$registry.retainedSeeds[$i] })
         if ($scope.executedMethods -ne $expectedSeeds.Count -or $scope.maintenanceCases -ne 0 -or
             @(Compare-Object @($expectedSeeds | Sort-Object) @($manifest.retainedSeeds | Sort-Object)).Count -ne 0) {
             throw "Wrong retained seed ownership: $cohort"
@@ -94,7 +94,7 @@ foreach ($cohort in $cohorts) {
     }
 }
 $combined=& "$PSScriptRoot/Read-SimulationScope.ps1" -Path $reports
-if ($combined.executedMethods -ne 15 -or $combined.retainedRegressionCases -ne 8 -or $combined.maintenanceCases -ne 1) {
+if ($combined.executedMethods -ne 17 -or $combined.retainedRegressionCases -ne 10 -or $combined.maintenanceCases -ne 1) {
     throw 'Incomplete aggregate boundary Simulation scope'
 }
 [pscustomobject]@{status='passed';sourceRevision=$SourceRevision;ciRunId=$RunId;ciRunAttempt=$RunAttempt;

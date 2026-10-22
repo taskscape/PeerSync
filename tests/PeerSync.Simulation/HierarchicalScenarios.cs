@@ -20,6 +20,8 @@ public sealed partial class RealEngineProperties
     [InlineData(794669444)] // Nonempty directory revivals must outlive their signed deletion time.
     [InlineData(1390180802)] // Stable indexes require extra healing rounds after trees and queues converge.
     [InlineData(1686969054)] // Completed case-copy members cover their original canonical child during rebase.
+    [InlineData(1718992307)] // Dominating child tombstones pass an unpublished ancestor without losing its clock.
+    [InlineData(1994764809)] // A seven-node case-clash fan-out drains its directory publication backlog.
     public async Task RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(int seed)
     {
         string evidence = Path.GetFullPath(Environment.GetEnvironmentVariable("PEERSYNC_SIMULATION_ARTIFACTS") ?? "artifacts/simulation");

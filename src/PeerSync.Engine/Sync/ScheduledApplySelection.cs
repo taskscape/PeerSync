@@ -1,3 +1,4 @@
+using PeerSync.Core.Sync;
 using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Sync;
@@ -48,8 +49,37 @@ internal sealed class ScheduledApplySelection : IDisposable
             selection.Decision = needed.Decide(new(key, selection.Known, index.RemotesForPath(key).ToArray()));
             bool newDirectory = selection.Decision.Winner is { Type: 1, Deleted: false } && selection.Known is null;
             if (index.HasPendingCasePreservation(key, includeDescendants: !newDirectory)) selection.Decision = selection.Decision with { BlockedReason = "case-preservation-pending" };
-            if (index.HasBlockingDirectoryPublication(key, includeDescendants: true)) selection.Decision = selection.Decision with { BlockedReason = "directory-publication-pending" };
+            if (BlocksDirectoryPublication(index, ownDevice, key, selection.Known, selection.Decision, scheduled))
+                selection.Decision = selection.Decision with { BlockedReason = "directory-publication-pending" };
         }
+    }
+
+    internal static bool BlocksDirectoryPublication(FolderIndex index, byte[] ownDevice, string key,
+        LocalFileRow? known, NeededDecision decision, bool scheduled)
+    {
+        if (!index.HasBlockingDirectoryPublication(key, includeDescendants: true)) return false;
+        // Only a fully scheduled, causally newer remote tombstone can pass an
+        // unpublished ancestor. Its mutation changes the capture epoch, so the
+        // ancestor cannot commit a stale child snapshot. Its own and descendant
+        // publications remain barriers, including concurrent local edits.
+        return !scheduled || decision.BlockedReason is not null || !decision.RequiresApply
+            || known is not { Deleted: false, Flags: LocalFileState.None, Record: not null }
+            || decision.Winner is not { Deleted: true } winner
+            || winner.SourceDevice.SequenceEqual(ownDevice)
+            || VersionVector.Compare(winner.Vector, known.Vector) != VvOrder.Dominates
+            || index.HasBlockingDirectoryPublicationAtOrBelow(key);
+    }
+
+    internal static bool BlocksDirectoryPublicationDuringRecovery(FolderIndex index, NeededSet needed, byte[] ownDevice,
+        VersionView expected, bool scheduled)
+    {
+        string key = expected.Path;
+        if (!index.HasBlockingDirectoryPublication(key, includeDescendants: true)) return false;
+        var known = index.LocalFiles.Find(key);
+        var decision = needed.Decide(new(PeerSync.Core.Paths.PathRules.Key(key), known, index.RemotesForPath(key).ToArray()));
+        return decision.DesiredRecord is null || !decision.DesiredRecord.Body.SequenceEqual(expected.Record.Body)
+            || !decision.DesiredRecord.Signature.SequenceEqual(expected.Record.Signature)
+            || BlocksDirectoryPublication(index, ownDevice, PeerSync.Core.Paths.PathRules.Key(key), known, decision, scheduled);
     }
 
     public void Dispose() => Interlocked.Exchange(ref references, null)?.Dispose();

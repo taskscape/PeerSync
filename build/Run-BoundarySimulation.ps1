@@ -75,7 +75,7 @@ try {
     if (-not $version.EndsWith("+$source")) { throw 'Simulation executable does not match the current source revision' }
     $registry = Read-Json (Join-Path $PSScriptRoot simulation-scope.json)
     $seeds = @($registry.retainedSeeds)
-    if ($registry.schema -ne 'peersync-simulation-scope-v1' -or $seeds.Count -ne 8 -or @($seeds | Sort-Object -Unique).Count -ne 8) {
+    if ($registry.schema -ne 'peersync-simulation-scope-v1' -or $seeds.Count -ne 10 -or @($seeds | Sort-Object -Unique).Count -ne 10) {
         throw 'Boundary retained seed registry is incomplete or duplicated'
     }
     $retainedGroups = @(

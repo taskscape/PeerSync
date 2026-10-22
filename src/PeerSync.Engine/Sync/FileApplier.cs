@@ -96,6 +96,8 @@ public sealed partial class FileApplier
             if (decision.BlockedReason == "directory-publication-pending") Signal("publication-pending", session);
             return FileApplyOutcome.Blocked;
         }
+        if (scheduled && decision.Winner is { Deleted: true } && index.HasBlockingDirectoryPublication(key, includeDescendants: true))
+            Signal("ancestor-publication-bypassed", session);
         if (!decision.RequiresApply) return FileApplyOutcome.Unchanged;
         if (!selection.RangeComplete) { Signal("index-range-pending", session); return FileApplyOutcome.Deferred; }
         var winner = decision.Winner!;
@@ -143,7 +145,7 @@ public sealed partial class FileApplier
             stream.Flush(flushToDisk: true);
         }
         using var mutationReferences = selection.HoldsReferences ? null : await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-        if (index.HasPendingCasePreservation(key) || index.HasBlockingDirectoryPublication(key, includeDescendants: true))
+        if (index.HasPendingCasePreservation(key) || ScheduledApplySelection.BlocksDirectoryPublication(index, ownDevice, key, known, decision, scheduled))
         {
             await ParkAsync(tree, state, intent, cancellationToken, tempHandle).ConfigureAwait(false);
             await index.AbandonApplyAsync(intent, cancellationToken).ConfigureAwait(false);
@@ -237,7 +239,8 @@ public sealed partial class FileApplier
             using var target = TryOpen(targetParent, ApplyState.Name(state.Path));
             using var tempParent = state.Temporary.Length == 0 ? null : tree.Directory(ApplyState.Parent(state.Temporary));
             using var temporary = tempParent is null ? null : TryOpen(tempParent, ApplyState.Name(state.Temporary), temporary: true);
-            if (!state.IsRestore && (index.HasPendingCasePreservation(state.Path) || index.HasBlockingDirectoryPublication(state.Path, includeDescendants: true)))
+            if (!state.IsRestore && (index.HasPendingCasePreservation(state.Path)
+                || ScheduledApplySelection.BlocksDirectoryPublicationDuringRecovery(index, needed, ownDevice, state.Version!, state.ScheduledDeletion)))
             {
                 if (state.OriginalId.Length == 0 && target is null || target is not null && HasIdentity(target, state.OriginalId))
                 {

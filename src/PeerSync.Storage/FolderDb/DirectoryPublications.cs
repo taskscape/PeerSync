@@ -89,6 +89,17 @@ public sealed partial class FolderIndex
     /// <summary>Incoming reconstruction permits child/root arrival; ordinary publication remains a mutation barrier.</summary>
     public bool HasBlockingDirectoryPublication(string path, bool includeDescendants = false)
         => HasDirectoryPublication(path, includeDescendants, blockingOnly: true);
+    /// <summary>Checks the target and its descendants, excluding staged ancestors.
+    /// A causally newer descendant deletion can invalidate an unpublished parent
+    /// capture without replacing the parent's signed row.</summary>
+    public bool HasBlockingDirectoryPublicationAtOrBelow(string path)
+    {
+        string key = PathRules.Key(path); using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM directory_publications WHERE reconstruction_only=0 "
+            + "AND (path_key=$key OR (path_key >= $low AND path_key < $high)));";
+        command.Parameters.AddWithValue("$key", key); command.Parameters.AddWithValue("$low", key + '/');
+        command.Parameters.AddWithValue("$high", key + '0'); return (long)command.ExecuteScalar()! != 0;
+    }
     private bool HasDirectoryPublication(string path, bool includeDescendants, bool blockingOnly)
     {
         string key = PathRules.Key(path); using var connection = database.OpenReader(); using var command = connection.CreateCommand();

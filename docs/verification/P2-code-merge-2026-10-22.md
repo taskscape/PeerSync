@@ -105,3 +105,66 @@ sleep/network-change checks and 72-hour soak still need their specified
 external evidence. The user-approved implementation phasing permits P3 source
 work after code, local and main CI acceptance without turning those physical
 checks into passes or calling this a LAN beta.
+
+## Second main-run hierarchical convergence repair
+
+PR #45 merged as main `4cd74358f2b1a0f4422c6094d288b12fd9b80961` after
+its [nine-job PR run](https://github.com/taskscape/PeerSync/actions/runs/39795227892)
+passed. The subsequent [main run](https://github.com/taskscape/PeerSync/actions/runs/39800861363)
+passed x64 Net 51/51 and App 14/14, including the installed-host WPF test,
+but its fuzz-smoke job found a separate generated hierarchical failure at
+seed `1718992307`. The runner retained the replay and six-node fixture. Five
+nodes converged on a deleted `topic`; the sixth retained a live
+`TOPIC/nested/shared` after 32 healing rounds. Its ordinary `TOPIC`
+publication waited for a child reconstruction, the reconstruction waited for
+the old child to advance causally, and the scheduled remote tombstones for
+that child were blocked by the ancestor publication. The aggregate cannot
+accept this failed main run; other jobs may still finish independently.
+
+The focused follow-up preserves the unpublished ancestor clock. A signed
+remote tombstone may pass that ancestor barrier only when it causally
+dominates the target's signed local vector, its sender index range is complete,
+and neither the target nor a descendant has an ordinary pending publication.
+The folder and reference gates, native guards, case-preservation checks and
+durable recovery remain in force. Mutation advances the directory capture
+epoch, so the queued parent cannot publish a stale child snapshot; the next
+scan can rebuild it. Debug journals record
+`ancestor-publication-bypassed` without paths or payloads. Four focused
+native file/directory apply-and-recovery cases and a separate live-byte
+archive preservation case pass. The prior native/range barrier theory still
+checks altered native children, incomplete sender ranges, flagged rows and
+case-preservation work; its live-row case now has an explicit archive oracle.
+The exact seed
+replays successfully: six nodes, ten operations, 14 published versions,
+eight healing rounds, zero staging files, 22.435 seconds. This is local
+source evidence, not yet a green full verifier or hosted current-head run.
+
+The next local canonical attempt passed all 1,034 Engine and 300 Storage
+tests, but its WPF render tests captured black frames because the Windows
+session was disconnected (`quser` reported `Disc`). The hosted PR #45 App
+job had passed the same 14 tests; current-head hosted App validation is still
+required. The separately completed P0 probes, QUIC diagnostics and x64 spike
+publishes passed; five-target fuzz completed 600.001 seconds and 198,540
+seeds with zero crashes.
+
+The separately run eight-case Simulation batch passed all eight existing
+retained seeds and 14 of 15 methods, but generated seven-node hierarchy seed
+`1994764809` exceeded the unchanged 32-round bound. Its fixture showed the
+visible trees matching by round 28, while late case-clash propagation staged
+48 directory publications per peer and left queued work after round 32. The
+worker's default 32-directory selection could not drain that fan-out promptly.
+Raising only its bounded directory count to 64, while retaining the
+1,000-member cap and the same 32-round oracle, makes the exact seed converge
+in 12 rounds with seven nodes, 14 operations, 15 preserved versions and zero
+staging files. Both failed seeds are now permanent retained cases, divided
+among the existing three CI shards. The registry and strict aggregate require
+17 methods and all ten retained cases; synthetic scope and artifact rejection
+controls pass (23 and 12 controls respectively). Two additional native
+controls prove that a concurrent tombstone still waits behind the ancestor
+and a causally dominant tombstone cannot pass its own ordinary publication;
+the final Engine suite passes 1,036/1,036. The fresh full Simulation
+run passes all 17 methods in 8m58s: ten retained seeds, eight flat generated
+cases, four hierarchical generated cases and connected maintenance. The
+strict TRX scope reader confirms 17/17 methods, ten retained and one
+maintenance case. The local App render limitation and current-head hosted
+PR/main matrix remain open.

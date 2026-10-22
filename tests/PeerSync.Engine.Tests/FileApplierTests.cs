@@ -638,12 +638,11 @@ public sealed class FileApplierTests : IDisposable
     [InlineData("file")]
     [InlineData("directory")]
     [InlineData("incomplete-range")]
-    [InlineData("live-row")]
     [InlineData("flagged-row")]
     [InlineData("case-work")]
     public async Task ParentPublicationKeepsNativeAndRangeBarriersForTombstones(string obstacle)
     {
-        await using var index = await DeletedChildPublication(obstacle == "live-row");
+        await using var index = await DeletedChildPublication();
         var before = index.LocalFiles.Find("parent/child")!;
         if (obstacle == "file") File.WriteAllBytes(Disk("parent/child"), New);
         if (obstacle == "directory") Directory.CreateDirectory(Disk("parent/child"));
@@ -661,7 +660,21 @@ public sealed class FileApplierTests : IDisposable
         index.ReadDirectoryPublication("parent").ShouldNotBeNull();
         if (obstacle == "file") File.ReadAllBytes(Disk("parent/child")).ShouldBe(New);
         if (obstacle == "directory") Directory.Exists(Disk("parent/child")).ShouldBeTrue();
-        if (obstacle is not ("live-row" or "flagged-row")) index.LocalFiles.Find("parent/child")!.LocalSequence.ShouldBe(before.LocalSequence);
+        if (obstacle != "flagged-row") index.LocalFiles.Find("parent/child")!.LocalSequence.ShouldBe(before.LocalSequence);
+    }
+
+    [Fact]
+    public async Task DominatingLiveChildTombstoneArchivesBytesBehindParentPublication()
+    {
+        await using var index = await DeletedChildPublication(live: true);
+        var queued = index.ReadDirectoryPublication("parent")!;
+        var result = await new FileApplier(Root, index, keys, own).ApplyScheduledAsync("parent/child",
+            (_, _, _, _) => throw new InvalidOperationException("Tombstone must not fetch bytes."), Token);
+        result.Outcome.ShouldBe(FileApplyOutcome.Applied);
+        File.Exists(Disk("parent/child")).ShouldBeFalse();
+        index.LocalFiles.Find("parent/child")!.Deleted.ShouldBeTrue();
+        index.ReadDirectoryPublication("parent")!.Version.ShouldBe(queued.Version);
+        index.Archive.ReadAll().Any(row => File.ReadAllBytes(Disk(row.ArchivePath)).AsSpan().SequenceEqual(Old)).ShouldBeTrue();
     }
 
     [Fact]
