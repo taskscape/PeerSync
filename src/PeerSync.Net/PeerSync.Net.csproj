@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../PeerSync.Core/PeerSync.Core.csproj" />
+    <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
     <ProjectReference Include="../PeerSync.Protocol/PeerSync.Protocol.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="PeerSync.Net.Tests" />
+    <InternalsVisibleTo Include="PeerSync.Service" />
   </ItemGroup>
 </Project>

@@ -17,16 +17,17 @@ enum CloseReason {
   CLOSE_REASON_SERVER_STOPPING = 8;
   CLOSE_REASON_RATE_LIMITED = 9;
   CLOSE_REASON_INTERNAL_ERROR = 10;
+  CLOSE_REASON_CLOCK_SKEW = 11;
 }
 enum BlockError { BLOCK_ERROR_NONE = 0; BLOCK_ERROR_NOT_FOUND = 1; BLOCK_ERROR_FORBIDDEN = 2; BLOCK_ERROR_INVALID_REQUEST = 3; BLOCK_ERROR_BUSY = 4; BLOCK_ERROR_UNAVAILABLE = 5; }
 
-message FolderAuth { bytes folder_id = 1; bytes proof = 2; bytes read_only_proof = 3; bytes signature = 4; FolderAccess access = 5; }
-message FolderAuthResult { bytes folder_id = 1; AuthDecision decision = 2; CloseReason reason = 3; }
-message IndexSummary { bytes folder_id = 1; uint64 highest_seq = 2; }
-message IndexRequest { bytes folder_id = 1; uint64 after_seq = 2; uint32 limit = 3; }
+message FolderAuth { bytes folder_id = 1; bytes proof = 2; bytes read_only_proof = 3; bytes signature = 4; FolderAccess access = 5; uint64 request_id = 6; }
+message FolderAuthResult { bytes folder_id = 1; AuthDecision decision = 2; CloseReason reason = 3; FolderAuth server_proof = 4; uint64 request_id = 5; }
+message IndexSummary { bytes folder_id = 1; uint64 highest_seq = 2; bool request = 3; uint64 request_id = 4; bool notification = 5; }
+message IndexRequest { bytes folder_id = 1; uint64 after_seq = 2; uint32 limit = 3; uint64 request_id = 4; }
 // last_seq is the reviewed range cursor, including unpublished local gaps.
 // Preserve each record's body/signature bytes verbatim when forwarding.
-message IndexUpdate { bytes folder_id = 1; repeated peersync.records.SignedRecord records = 2; uint64 last_seq = 3; uint64 after_seq = 4; }
+message IndexUpdate { bytes folder_id = 1; repeated peersync.records.SignedRecord records = 2; uint64 last_seq = 3; uint64 after_seq = 4; uint64 request_id = 5; }
 message Availability { bytes folder_id = 1; string path = 2; bytes chunk_bitmap = 3; }
 message BlockRequest { bytes chunk_hash = 1; uint32 length = 2; }
 message BlockRequestBatch { bytes folder_id = 1; repeated BlockRequest requests = 2; }

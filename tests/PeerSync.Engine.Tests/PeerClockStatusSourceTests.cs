@@ -73,6 +73,23 @@ public sealed class PeerClockStatusSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task UnmeasuredReconnectDoesNotEraseRecentClockRejection()
+    {
+        var time=new Clock(); await using var node=await NodeAsync(1,time); var peer=Device(2);
+        var rejected=node.Engine.CreateHandler(peer);
+        await rejected.ExchangeHelloAsync(Hello(peer,time.GetUtcNow().UtcTicks+11*TimeSpan.TicksPerMinute),Token);
+        await rejected.DisposeAsync();
+
+        var retry=node.Engine.CreateHandler(peer);
+        await retry.DisposeAsync();
+
+        var recent=node.Engine.ReadClockStatuses().Sessions.Single();
+        recent.RemoteDeviceId.ShouldBe(peer);
+        recent.Clock.State.ShouldBe(PeerClockState.Skewed);
+        recent.IsConnected.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task StatusPollingDetectsLocalClockJumpAndRecoveryWithoutIndexTraffic()
     {
         var time=new Clock(); await using var a=await NodeAsync(1,time); await using var b=await NodeAsync(2,new Clock());

@@ -18,12 +18,54 @@ public sealed class PeerFolderConnection : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? liveIndexPump;
     private int active;
     private int disposed;
     internal PeerFolderConnection(TransportFolder owner, IPeerTransport transport, PeerIndexSession session)
     { this.owner = owner; this.transport = transport; this.session = session; remote = session.RemoteDeviceId; }
     public byte[] RemoteDeviceId => remote.ToArray();
     public PeerClockStatus ClockStatus => session.ClockStatus;
+    public Guid? SharedSessionId => (transport as IPeerSessionIdentity)?.SessionId;
+
+    internal void StartLiveIndexPump()
+    {
+        if (transport is not IPeerIndexPushTransport push) return;
+        lock (lifecycle)
+        {
+            RequireOpen();
+            if (liveIndexPump is not null) throw new InvalidOperationException("Live index listener already started.");
+            liveIndexPump = ListenForIndexPushesAsync(push);
+        }
+    }
+
+    internal async ValueTask PublishIndexTargetAsync(long highestSequence, CancellationToken cancellationToken)
+    {
+        if (transport is not IPeerIndexPushTransport push) return;
+        Enter();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        try { await push.PublishIndexTargetAsync(highestSequence, linked.Token).ConfigureAwait(false); }
+        finally { Exit(); }
+    }
+
+    private async Task ListenForIndexPushesAsync(IPeerIndexPushTransport push)
+    {
+        try
+        {
+            await foreach (long target in push.IndexTargets.ReadAllAsync(lifetime.Token).ConfigureAwait(false))
+            {
+                try
+                {
+                    PeerIndexSyncResult result;
+                    do { result = await SynchronizeAsync(cancellationToken: lifetime.Token).ConfigureAwait(false); }
+                    while (!result.Complete && !lifetime.IsCancellationRequested);
+                    owner.RecordIndexPush("index.push_applied", target, SharedSessionId);
+                }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+                catch (Exception error) { owner.RecordIndexPush("index.push_failed", target, SharedSessionId, error); }
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+    }
 
     internal async Task HandshakeAsync(CancellationToken token)
     {
@@ -72,6 +114,22 @@ public sealed class PeerFolderConnection : IAsyncDisposable
         }
         finally { Exit(); }
     }
+
+    internal async ValueTask<IReadOnlyList<PeerBlockResult>> FetchBatchAsync(
+        IReadOnlyList<PeerBlockRequest> requests, CancellationToken token)
+    {
+        Enter();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
+        try
+        {
+            session.RequireClock();
+            IReadOnlyList<PeerBlockResult> results = await transport.ReadBlockBatchAsync(requests, linked.Token).ConfigureAwait(false);
+            RequireOpen(); session.RequireClock();
+            if (results.Count != requests.Count) throw new InvalidDataException("Peer returned the wrong number of block responses.");
+            return results;
+        }
+        finally { Exit(); }
+    }
     private void RequireOpen() => ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
     private void Enter() { lock (lifecycle) { RequireOpen(); active++; } }
     private void Exit() { lock (lifecycle) { active--; if (disposed != 0 && active == 0) drained.TrySetResult(); } }
@@ -88,6 +146,8 @@ public sealed class PeerFolderConnection : IAsyncDisposable
     {
         Exception? failure = null;
         try { await lifetime.CancelAsync().ConfigureAwait(false); } catch (Exception error) { failure = error; }
+        if (liveIndexPump is not null)
+            try { await liveIndexPump.ConfigureAwait(false); } catch (Exception error) { failure ??= error; }
         try { await transport.DisposeAsync().ConfigureAwait(false); } catch (Exception error) { failure ??= error; }
         await drained.Task.ConfigureAwait(false);
         synchronization.Dispose(); lifetime.Dispose();

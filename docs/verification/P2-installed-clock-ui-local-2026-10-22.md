@@ -1,0 +1,11 @@
+# P2 installed-host clock UI local verification
+
+The new App test `InstalledHostQuicClockSkewAndReconnectReachVerifiedPipeAndRenderedWpf` starts two real `InstalledFolderHost` instances with generated device certificates, registered/approved folders and authenticated loopback QUIC. It injects an 11-minute clock offset into one host without changing the machine clock, reads the service status over a local authorized named-pipe fixture, and renders the status in the real WPF window.
+
+The skew capture shows the peer as connected, a `+11.00` minute offset and “Clock difference exceeds 10 minutes; exchange blocked”; production sync is unavailable. The test pauses status polling only while it captures that transient state because the supervised reconnect can replace it between UI frames. It then corrects the injected clock, resumes polling, verifies “Clock accepted”, zero offset and production availability, and waits until the pending file is present on the peer. Finally it stops the pipe and verifies the UI reports reconnecting. The test also verifies the pipe subscription drains on shutdown.
+
+The session ledger now keeps a recent measured rejection when a newer retry closes before exchanging Hello. This prevents a clock failure from disappearing from diagnostics when an unmeasured reconnect attempt races status polling. A focused engine regression test covers that retention rule.
+
+The focused App test and engine regression both passed locally on 2026-10-22. The subsequent canonical `./build/Verify.ps1` also passed: 1,686 tests, 14 simulation cases, native probes/publishing, and 600.000 seconds of five-target fuzz (187,190 seeds, zero crashes). `artifacts/verification-win-x64.json` reports `gateP1Passed=false`; this local run does not certify hosted CI or Gate P2. Rendered captures are `artifacts/clock-ui/installed-runtime-skewed.png`, `installed-runtime-recovered.png`, and `installed-runtime-control-reconnecting.png`.
+
+This is a local installed-host loopback with a fixture named-pipe endpoint. It does not establish the default installed-service client's owner/PID verification in this same UI process, TCP service transport, external peer interoperability, physical LAN/NAT behavior, or hosted CI results. Those remain open under P2.5.7 and Gate P2.

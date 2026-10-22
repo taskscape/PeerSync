@@ -22,9 +22,12 @@ response digests are bounded. A rejected connection cannot admit later frames.
 The violation guard binds a caller-supplied certificate-derived identity,
 never Hello's identity. A real loopback TCP test observes a framed close reason
 and EOF, with the strike attributed to the frozen supplied identity. Another
-test proves strike-storage failure still closes the owned connection. Actual
-TLS certificate derivation, folder proof exchange and production transport
-integration remain the next P2 tasks; this test does not claim TLS coverage.
+test proves strike-storage failure still closes the owned connection. The
+current working tree now adds actual TLS certificate derivation, pin checks,
+folder proof exchange and QUIC index/block streams; its separate local evidence
+is in [the authenticated QUIC transport report](P2-authenticated-quic-transport-2026-10-21.md).
+That report does not claim hosted CI, installed-service integration, or the
+full P2 gate.
 
 | Actual verification | Result |
 | --- | --- |

@@ -11,6 +11,7 @@ using PeerSync.Crypto;
 using PeerSync.Engine.Archive;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Native;
+using PeerSync.Net;
 using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Sync;
@@ -65,9 +66,21 @@ public sealed partial class FileApplier
         return new(outcome, requiresScan);
     }
 
+    internal async Task<ScheduledFileApplyResult> ApplyScheduledAsync(string path,
+        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
+        Func<ReadOnlyMemory<byte>, IReadOnlyList<PeerBlockRequest>, bool, CancellationToken, ValueTask<IReadOnlyList<PeerBlockResult>>>? fetchBatch,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetch); bool requiresScan = false;
+        var outcome = await ObserveAsync("scheduled-pull", session => ApplyCoreAsync(path, fetch, session, true,
+            () => requiresScan = true, cancellationToken, fetchBatch)).ConfigureAwait(false);
+        return new(outcome, requiresScan);
+    }
+
     private async Task<FileApplyOutcome> ApplyCoreAsync(string path,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
-        Guid session, bool scheduled, Action? requireScan, CancellationToken cancellationToken)
+        Guid session, bool scheduled, Action? requireScan, CancellationToken cancellationToken,
+        Func<ReadOnlyMemory<byte>, IReadOnlyList<PeerBlockRequest>, bool, CancellationToken, ValueTask<IReadOnlyList<PeerBlockResult>>>? fetchBatch = null)
     {
         ArgumentNullException.ThrowIfNull(fetch); string key = PathRules.Key(path);
         using var operation = await FolderOperationGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
@@ -125,7 +138,8 @@ public sealed partial class FileApplier
             using var borrowed = new SafeFileHandle(tempHandle.DangerousGetHandle(), ownsHandle: false);
             using var stream = new FileStream(borrowed, FileAccess.ReadWrite, 0, isAsync: false);
             await new ChunkAssembler(tree, index, journal).AssembleAsync(desired, stream,
-                (hash, length, token) => fetch(source, hash, length, token), cancellationToken).ConfigureAwait(false);
+                (hash, length, token) => fetch(source, hash, length, token),
+                fetchBatch is null ? null : (requests, endgame, token) => fetchBatch(source, requests, endgame, token), cancellationToken).ConfigureAwait(false);
             stream.Flush(flushToDisk: true);
         }
         using var mutationReferences = selection.HoldsReferences ? null : await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);

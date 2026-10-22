@@ -16,21 +16,26 @@ namespace PeerSync.Protocol.Validation;
 public static class MessageValidator
 {
     public const int MaximumRecords = 1000, MaximumBlockRequests = 64;
+    public const int MaximumAnnouncedFolders = 256;
+    public const int MaximumFieldOccurrences = 65_536;
     public const int MaximumBlockBytes = 8 * 1024 * 1024, MaximumBitmapBytes = 64 * 1024;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     public static void Validate(IMessage message, FolderKeys? authenticatedFolder = null)
     {
         ArgumentNullException.ThrowIfNull(message);
+        var fieldBudget = new ProtobufIngressLimits.FieldBudget();
         switch (message)
         {
             case Hello hello:
                 Require(hello.ProtocolVersion == 1, MessageFailure.UnsupportedVersion);
                 Require(hello.DeviceId.Length == 32 && hello.Nonce.Length == 32 && hello.UtcTicks > 0 && hello.UtcTicks <= DateTime.MaxValue.Ticks
-                    && TextValid(hello.DeviceName, 128) && TextValid(hello.ClientVersion, 64), MessageFailure.InvalidHello);
+                    && TextValid(hello.DeviceName, 128) && TextValid(hello.ClientVersion, 64)
+                    && (!hello.Response || hello.RequestId != 0) && hello.FolderIds.Count <= MaximumAnnouncedFolders
+                    && hello.FolderIds.All(id => id.Length == 32) && hello.FolderIds.Distinct().Count() == hello.FolderIds.Count, MessageFailure.InvalidHello);
                 break;
             case FolderAuth auth:
-                Require(auth.FolderId.Length == 32 && auth.Proof.Length == 32 && auth.Access switch
+                Require(auth.RequestId != 0 && auth.FolderId.Length == 32 && auth.Proof.Length == 32 && auth.Access switch
                 {
                     FolderAccess.ReadWrite => auth.ReadOnlyProof.Length == 32 && auth.Signature.Length == 64,
                     FolderAccess.ReadOnly => auth.ReadOnlyProof.Length == 32 && auth.Signature.IsEmpty,
@@ -39,26 +44,40 @@ public static class MessageValidator
                 }, MessageFailure.InvalidAuthentication);
                 break;
             case FolderAuthResult result:
-                Require(result.FolderId.Length == 32 && result.Decision is >= AuthDecision.Allowed and <= AuthDecision.Denied
+                Require(result.RequestId != 0 && result.FolderId.Length == 32 && result.Decision is >= AuthDecision.Allowed and <= AuthDecision.Denied
                     && KnownReason(result.Reason, allowUnspecified: true), MessageFailure.InvalidAuthentication);
+                Require(result.Decision != AuthDecision.Allowed || result.ServerProof is not null, MessageFailure.InvalidAuthentication);
+                if (result.ServerProof is not null)
+                {
+                    Require(result.ServerProof.FolderId.Equals(result.FolderId) && result.ServerProof.RequestId == result.RequestId, MessageFailure.InvalidAuthentication);
+                    Validate(result.ServerProof);
+                }
                 break;
             case IndexSummary summary:
                 RequireFolder(summary.FolderId, authenticatedFolder);
-                Require(summary.HighestSeq <= long.MaxValue, MessageFailure.InvalidSequence);
+                // RequestId zero is reserved for an explicitly marked unsolicited
+                // notification; ordinary request/reply exchanges stay correlated.
+                Require((summary.RequestId != 0 || summary.Notification) && summary.HighestSeq <= long.MaxValue
+                    && (!summary.Notification || !summary.Request && summary.RequestId == 0), MessageFailure.InvalidSequence);
                 break;
             case IndexRequest request:
                 RequireFolder(request.FolderId, authenticatedFolder);
-                Require(request.AfterSeq <= long.MaxValue && request.Limit <= MaximumRecords, MessageFailure.InvalidSequence);
+                Require(request.RequestId != 0 && request.AfterSeq <= long.MaxValue
+                    && request.Limit is > 0 and <= MaximumRecords, MessageFailure.InvalidSequence);
                 break;
             case IndexUpdate update:
                 RequireFolder(update.FolderId, authenticatedFolder);
+                Require(update.RequestId != 0, MessageFailure.InvalidSequence);
                 Require(update.Records.Count <= MaximumRecords, MessageFailure.TooManyRecords);
                 Require(update.LastSeq <= long.MaxValue && update.AfterSeq <= update.LastSeq, MessageFailure.InvalidSequence);
                 ulong previous = update.AfterSeq;
+                var paths = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var record in update.Records)
                 {
                     Require(record.LocalSeq > previous && record.LocalSeq <= update.LastSeq, MessageFailure.InvalidSequence);
-                    ValidateRecord(record, authenticatedFolder!); previous = record.LocalSeq;
+                    string path = ValidateRecord(record, authenticatedFolder!, ref fieldBudget);
+                    Require(paths.Add(path), MessageFailure.InvalidRecord);
+                    previous = record.LocalSeq;
                 }
                 break;
             case Availability availability:
@@ -92,29 +111,31 @@ public static class MessageValidator
     private static void RequireFolder(ByteString folder, FolderKeys? keys) => Require(keys is not null && folder.Length == 32
         && CryptographicOperations.FixedTimeEquals(folder.Span, keys.FolderId()), MessageFailure.FolderNotAuthorized);
 
-    private static void ValidateRecord(Records.SignedRecord wire, FolderKeys keys)
+    private static string ValidateRecord(Records.SignedRecord wire, FolderKeys keys, ref ProtobufIngressLimits.FieldBudget fieldBudget)
     {
         Require(wire.Signature.Length == 64 && wire.Body.Length <= Core.Sync.SignedRecord.MaxBodyBytes, MessageFailure.InvalidSignedRecord);
         // Verify before any FileRecordBody parsing, including allocation guards.
         byte[] signed = [.. "psp1 record"u8, .. keys.FolderId(), .. wire.Body.Span];
         Require(keys.Verify(signed, wire.Signature.Span), MessageFailure.InvalidSignedRecord);
-        try { CheckRecordAllocations(wire.Body.ToByteArray()); }
+        try { CheckRecordAllocations(wire.Body.ToByteArray(), ref fieldBudget); }
         catch (InvalidProtocolBufferException) { throw new MessageValidationException(MessageFailure.InvalidRecord); }
         var record = SignedRecordFactory.FromWire(wire);
         Require(SignedRecordFactory.TryOpen(record, keys, out var body), MessageFailure.InvalidSignedRecord);
         Require(ValidMetadata(body!), MessageFailure.InvalidRecord);
+        return PathRules.Key(body!.Path);
     }
 
-    private static void CheckRecordAllocations(byte[] bytes)
+    private static void CheckRecordAllocations(byte[] bytes, ref ProtobufIngressLimits.FieldBudget fieldBudget)
     {
         using var input = new CodedInputStream(bytes);
         bool hasDevice = false; ulong previous = 0; uint tag;
         while ((tag = input.ReadTag()) != 0)
         {
+            fieldBudget.Consume();
             ProtobufIngressLimits.RejectGroups(tag);
             if (tag is 66 or 82)
             {
-                byte[] part = input.ReadBytes().ToByteArray(); ProtobufIngressLimits.ValidateFlat(part);
+                byte[] part = input.ReadBytes().ToByteArray(); ProtobufIngressLimits.ValidateFlat(part, ref fieldBudget);
                 if (tag == 66)
                 {
                     var entry = VvEntry.Parser.ParseFrom(part);
@@ -149,10 +170,10 @@ public static class MessageValidator
         return size == body.Size && (size != 0 || CryptographicOperations.FixedTimeEquals(body.FileHash.Span, Blake3.Hasher.Hash(ReadOnlySpan<byte>.Empty).AsSpan()));
     }
 
-    private static bool KnownReason(CloseReason reason, bool allowUnspecified) => reason >= (allowUnspecified ? CloseReason.Unspecified : CloseReason.PeerShutdown) && reason <= CloseReason.InternalError;
+    private static bool KnownReason(CloseReason reason, bool allowUnspecified) => reason >= (allowUnspecified ? CloseReason.Unspecified : CloseReason.PeerShutdown) && reason <= CloseReason.ClockSkew;
     private static bool TextValid(string text, int maximum)
     {
-        if (text.Length == 0 || text.Any(char.IsControl)) return false;
+        if (text.Length == 0 || text.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029')) return false;
         try { return StrictUtf8.GetByteCount(text) <= maximum; }
         catch (EncoderFallbackException) { return false; }
     }

@@ -4,12 +4,14 @@ using System.Security.Cryptography;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Ignore;
 using PeerSync.Core.Paths;
 using PeerSync.Core.Settings;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
 using PeerSync.Engine.Native;
 using PeerSync.Engine.Scanning;
+using PeerSync.Net;
 using PeerSync.Storage.FolderDb;
 using Envelope = PeerSync.Core.Sync.SignedRecord;
 
@@ -37,6 +39,7 @@ public sealed class Puller : IDisposable
     private readonly DirectoryMetadataWorker metadata;
     private long? nextMetadataTicks;
     private readonly Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch;
+    internal Func<ReadOnlyMemory<byte>, IReadOnlyList<PeerBlockRequest>, bool, CancellationToken, ValueTask<IReadOnlyList<PeerBlockResult>>>? BatchFetch { get; set; }
     private readonly TimeProvider clock;
     private readonly DiagnosticJournal? journal;
     private readonly Channel<bool> wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
@@ -58,13 +61,15 @@ public sealed class Puller : IDisposable
 
     internal Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, int, CancellationToken, ValueTask<ReadOnlyMemory<byte>>> fetch,
-        FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots)
+        FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots,
+        IgnoreMatcher? ignore = null)
     {
         ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(fetch);
         this.index = index; this.rootPath = rootPath; this.fetch = fetch; own = ownDevice?.ToArray() ?? throw new ArgumentNullException(nameof(ownDevice));
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson()); clock = timeProvider ?? TimeProvider.System; this.journal = journal;
         needed = new(index, keys, own, this.settings, journal: journal);
-        scanner = new(rootPath, index, keys, own, timeProvider: clock, settings: this.settings, journal: journal) { StageDirectorySnapshots = directorySnapshots };
+        scanner = new(rootPath, index, keys, own, ignore: ignore, timeProvider: clock, settings: this.settings, journal: journal)
+            { StageDirectorySnapshots = directorySnapshots };
         if (directorySnapshots) publications = new(rootPath, index, keys, own, this.settings, clock, journal);
         metadata = new(rootPath, index, keys, own, clock, fetch, journal);
         files = new(rootPath, index, keys, own, this.settings, journal, clock);
@@ -77,6 +82,27 @@ public sealed class Puller : IDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this); wake.Writer.TryWrite(true);
     }
     public void RequestScan() { Volatile.Write(ref scanRequested, 1); NotifyWorkAvailable(); }
+
+    internal void RecordBlockRoute(string eventName, int attempts, int bytes, Guid? sessionId = null, Exception? error = null)
+        => journal?.TryWrite(new(eventName, "block-transfer")
+        {
+            SessionId = sessionId,
+            Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
+            Bytes = bytes,
+            ItemsVisited = attempts,
+            ErrorCode = error?.GetType().Name,
+            HResult = error?.HResult
+        });
+
+    internal void RecordIndexPush(string eventName, long targetSequence, Guid? sessionId = null, Exception? error = null)
+        => journal?.TryWrite(new(eventName, "index-push")
+        {
+            SessionId = sessionId,
+            Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
+            ItemsVisited = targetSequence,
+            ErrorCode = error?.GetType().Name,
+            HResult = error?.HResult,
+        });
 
     /// <summary>The caller must authenticate both the TLS device identity and
     /// folder membership before exposing this facade to a remote peer.</summary>
@@ -221,13 +247,13 @@ public sealed class Puller : IDisposable
                     outcome = result.Outcome; requiresScan = result.RequiresScan;
                     if (outcome == FileApplyOutcome.Deferred && !requiresScan)
                     {
-                        var transition = await files.ApplyScheduledAsync(row.PathKey, fetch, token).ConfigureAwait(false);
+                        var transition = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
                         outcome = transition.Outcome; requiresScan = transition.RequiresScan;
                     }
                 }
                 else
                 {
-                    var result = await files.ApplyScheduledAsync(row.PathKey, fetch, token).ConfigureAwait(false);
+                    var result = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
                     outcome = result.Outcome; requiresScan = result.RequiresScan;
                     if (outcome == FileApplyOutcome.Deferred && !requiresScan)
                     {

@@ -7,6 +7,8 @@ public sealed record DirectoryCaseProgress(string? LastKey, bool Exhausted);
 public sealed record DirectoryCaseMemberRow(byte[] SourceId, byte[] RootFileId, string MemberKey, byte[] RecordHash, int RecordLength,
     byte[] MemberSourceId, uint Type, string DestinationPath, byte[]? InstalledFileId, long TouchedTicks)
 { public override string ToString() => "Directory case member (redacted)"; }
+public sealed record CompletedDirectoryCaseMemberCopy(string SourcePathKey, string DestinationRoot, DirectoryCaseMemberRow Member)
+{ public override string ToString() => "Completed directory case member copy (redacted)"; }
 
 public sealed partial class FolderIndex
 {
@@ -19,6 +21,24 @@ public sealed partial class FolderIndex
     {
         FolderMaps.RequireBytes(sourceId, 32); FolderMaps.RequireBytes(rootFileId, 16);
         using var connection = database.OpenReader(); return ReadCaseMember(connection, null, sourceId, rootFileId, PathRules.Key(memberKey));
+    }
+    public IReadOnlyList<CompletedDirectoryCaseMemberCopy> ReadCompletedDirectoryCaseMemberCopies(string memberPath, int limit = 1000)
+    {
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        string key = PathRules.Key(memberPath); using var connection = database.OpenReader(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT c.path_key,c.destination_path,d.source_id,d.root_file_id,d.member_key,d.record_hash,d.record_length,d.member_source_id,d.type,d.destination_path,d.installed_file_id,d.touched_ticks "
+            + "FROM directory_case_members d JOIN case_preservations c ON c.source_id=d.source_id AND c.installed_file_id=d.root_file_id "
+            + "WHERE c.completed=1 AND c.destination_path IS NOT NULL AND d.installed_file_id IS NOT NULL AND d.member_key=$key "
+            + "AND d.member_key>=c.path_key || '/' AND d.member_key<c.path_key || '0' ORDER BY c.source_id LIMIT $limit;";
+        command.Parameters.AddWithValue("$key", key); command.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<CompletedDirectoryCaseMemberCopy>(); using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var member = new DirectoryCaseMemberRow(reader.GetFieldValue<byte[]>(2), reader.GetFieldValue<byte[]>(3), reader.GetString(4), reader.GetFieldValue<byte[]>(5),
+                reader.GetInt32(6), reader.GetFieldValue<byte[]>(7), checked((uint)reader.GetInt64(8)), reader.GetString(9), reader.GetFieldValue<byte[]>(10), reader.GetInt64(11));
+            rows.Add(new(reader.GetString(0), reader.GetString(1), member));
+        }
+        return rows.AsReadOnly();
     }
     // Engine authenticated the original envelope/projection and pinned all
     // native parents. Only the exact next graph member can acquire an intent.

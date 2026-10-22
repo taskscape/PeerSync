@@ -90,6 +90,23 @@ public sealed class FrameCodecTests
         finally { await frames.DisposeAsync(); await reader.CompleteAsync(); await pipe.Writer.CompleteAsync(); }
     }
 
+    [Fact]
+    public async Task MalformedPrefixSplitAcrossReadsKeepsTheProtocolError()
+    {
+        var pipe = new Pipe(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var frames = FrameCodec.ReadFramesAsync(pipe.Reader, deadline.Token).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        try
+        {
+            await pipe.Writer.WriteAsync(new byte[] { 0x80 }, deadline.Token);
+            Task<bool> pending = frames.MoveNextAsync().AsTask();
+            await Task.Delay(25, deadline.Token); pending.IsCompleted.ShouldBeFalse();
+            await pipe.Writer.WriteAsync(new byte[] { 0x00 }, deadline.Token);
+            var error = await Should.ThrowAsync<ProtocolException>(async () => await pending);
+            error.Code.ShouldBe(ProtocolError.InvalidLengthPrefix);
+        }
+        finally { await frames.DisposeAsync(); await pipe.Reader.CompleteAsync(); await pipe.Writer.CompleteAsync(); }
+    }
+
     [Theory]
     [InlineData(new byte[] { 128 })] [InlineData(new byte[] { 0 })]
     [InlineData(new byte[] { 2, 1, 1 })]

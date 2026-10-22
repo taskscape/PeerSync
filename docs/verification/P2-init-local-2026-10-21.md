@@ -1,0 +1,9 @@
+# P2 `--init` local verification — 2026-10-21
+
+`PeerSync.Service.exe --init` now has an elevated Windows setup path. It applies the P2.5.2 ACL layout to `%ProgramData%\PeerSync\config`, `state`, and `logs`; creates or reuses a machine certificate backed by a named, non-exportable ECDSA P-256 CNG key; chooses a port in 20000–60000 after checking active TCP and UDP listeners and attempting both binds; records the setup process SID; and registers the `PeerSync` source in the Application log.
+
+Existing valid settings are retained, including custom listener ports in the full 1024–65535 range. The installer path only updates settings if it creates a new device certificate because the saved thumbprint no longer resolves. If it reuses a persisted ECDSA CNG certificate, it reapplies the service SID's key-read ACL. New settings are serialized to a write-through temporary file and atomically moved into place; updates retain `settings.json.bak`.
+
+The focused `PeerSync.Service.Tests` suite now passes 22 tests with zero failures or skips. Its init cases verify generated defaults and ranges, stable bytes on a second run, retention of user-edited settings, repair of a stale certificate thumbprint, elevation and argument guards, backup creation, recovery from a corrupt primary settings file, and a real TCP+UDP bind for the selected port. The latest canonical `./build/Verify.ps1` run completed in 677.8646527 seconds with zero build warnings, 1,663 tests, 14 simulation cases, native probes, probe publishing, and 600.0004276 seconds of fuzzing across 190,095 seeds with zero crashes.
+
+The local tests use a fake machine platform. This run does not execute elevated initialization against the host, write to `LocalMachine\My`, alter machine ACLs, register an Event Log source, or exercise the created key through Schannel/QUIC. Those native Windows checks remain required before P2.5.2 is complete.

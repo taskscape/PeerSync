@@ -69,7 +69,9 @@ public static class FrameCodec
         {
             ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
             var remaining = result.Buffer;
-            var examined = remaining.Start;
+            // Keep examined monotonic if parsing throws after an earlier
+            // incomplete read examined this same prefix.
+            var examined = remaining.End;
             try
             {
                 if (result.IsCanceled) throw new OperationCanceledException(cancellationToken);

@@ -21,7 +21,7 @@ public sealed class PeerIndexSession
     private readonly DiagnosticJournal? journal;
     private readonly Guid session;
     private readonly object displayGate = new();
-    private PeerClockStatus? closedClockReason;
+    private PeerClockStatus? closedClockStatus;
     private bool disconnected;
 
     internal PeerIndexSession(Puller owner, FolderIndex index, NeededSet needed, byte[] peer, ClockGuard clock, DiagnosticJournal? journal, Guid session)
@@ -33,7 +33,7 @@ public sealed class PeerIndexSession
     {
         lock (displayGate)
         {
-            var status = clock.ObserveHello(hello); disconnected = false; closedClockReason = null; return status;
+            var status = clock.ObserveHello(hello); disconnected = false; closedClockStatus = null; return status;
         }
     }
     public void Disconnect()
@@ -43,7 +43,7 @@ public sealed class PeerIndexSession
             if (!disconnected)
             {
                 var status = clock.GetStatus();
-                closedClockReason = status.State is PeerClockState.Skewed or PeerClockState.InvalidTimestamp or PeerClockState.InvalidElapsed ? status : null;
+                closedClockStatus = status.State is PeerClockState.AwaitingHello ? null : status;
             }
             disconnected = true; clock.Reset();
         }
@@ -51,7 +51,7 @@ public sealed class PeerIndexSession
     internal Guid CorrelationId => session;
     internal PeerSessionClockStatus ReadDisplayClockStatus()
     {
-        lock (displayGate) return new(session, peer, disconnected && closedClockReason is { } reason ? reason : clock.GetStatus(), !disconnected);
+        lock (displayGate) return new(session, peer, disconnected && closedClockStatus is { } status ? status : clock.GetStatus(), !disconnected);
     }
     internal void RequireClock() => clock.RequireIndexExchangeAllowed();
 

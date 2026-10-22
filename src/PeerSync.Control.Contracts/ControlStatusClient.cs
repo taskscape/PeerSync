@@ -33,6 +33,47 @@ public sealed class ControlStatusClient : IDisposable
         using var call = client.GetStatusAsync(new(), deadline: DateTime.UtcNow.AddSeconds(5), cancellationToken: cancellationToken);
         return ControlStatusWire.Decode(await call.ResponseAsync.ConfigureAwait(false));
     }
+    public async Task<Wire.ListFoldersResponse> ListFoldersAsync(CancellationToken cancellationToken = default)
+    {
+        using var call = client.ListFoldersAsync(new(), deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.SetPredefinedHostsResponse> SetPredefinedHostsAsync(string folder,
+        IEnumerable<string> hosts, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        ArgumentNullException.ThrowIfNull(hosts);
+        using var call = client.SetPredefinedHostsAsync(new() { Folder = folder, Hosts = { hosts } },
+            deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.FolderInfo> AddFolderAsync(string path, CancellationToken cancellationToken = default)
+    {
+        using var call = client.AddFolderAsync(new() { Path = path }, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.FolderInfo> JoinFolderAsync(string key, string path, CancellationToken cancellationToken = default)
+    {
+        using var call = client.JoinFolderAsync(new() { Key = key, Path = path }, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.GetFolderKeysResponse> GetFolderKeysAsync(string folder, CancellationToken cancellationToken = default)
+    {
+        using var call = client.GetFolderKeysAsync(new() { Folder = folder }, deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.ListPeersResponse> ListPeersAsync(string folder, CancellationToken cancellationToken = default)
+    {
+        using var call = client.ListPeersAsync(new() { Folder = folder }, deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async IAsyncEnumerable<Wire.IndexEntry> DumpIndexAsync(string folder,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        using var call = client.DumpIndex(new() { Folder = folder }, cancellationToken: cancellationToken);
+        await foreach (Wire.IndexEntry row in call.ResponseStream.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            yield return row;
+    }
     public async IAsyncEnumerable<ControlStatusSnapshot> WatchEventsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         using var call = client.WatchEvents(new(), cancellationToken: cancellationToken);

@@ -250,7 +250,8 @@
       "psp": {
         "type": "Project",
         "dependencies": {
-          "PeerSync.Control.Contracts": "[1.0.0, )"
+          "PeerSync.Control.Contracts": "[1.0.0, )",
+          "PeerSync.Core": "[1.0.0, )"
         }
       },
       "Google.Protobuf": {

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Principal;
 using System.IO.Pipes;
+using System.Net.NetworkInformation;
 using System.Security.AccessControl;
 using Grpc.Core;
 using PeerSync.Control.Contracts;
@@ -11,6 +12,8 @@ using PeerSync.Engine.Sync;
 using PeerSync.Net;
 using PeerSync.Net.InMemory;
 using PeerSync.Service.Control;
+using PeerSync.Service.Events;
+using PeerSync.Service.Hosting;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
 using Xunit;
@@ -41,6 +44,111 @@ public sealed class ControlStatusPipeTests : IDisposable
     }
 
     [Fact]
+    public async Task FolderManagementRpcsAddJoinListPeersAndStreamIndexOverTheVerifiedPipe()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string statePath = Path.Combine(fixture, "state", "peersync.db");
+        string addPath = Path.Combine(fixture, "add"); string joinPath = Path.Combine(fixture, "join");
+        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!); Directory.CreateDirectory(addPath); Directory.CreateDirectory(joinPath);
+        await File.WriteAllTextAsync(Path.Combine(addPath, "sample.txt"), "indexed", Token);
+        var runtime = new ControlStatusRuntime();
+        await using var folderHost = await InstalledFolderHost.StartForTestAsync(statePath, Device(10), identity.User!.Value,
+            runtime, cancellationToken: Token);
+        runtime.AttachFolderHost(folderHost);
+        string pipe = Pipe;
+        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
+        using var client = Client(pipe, identity.User!);
+
+        var added = await client.AddFolderAsync(addPath, Token);
+        var configuredHosts = await client.SetPredefinedHostsAsync(added.FolderId, ["peer.example:47821"], Token);
+        configuredHosts.FolderId.ShouldBe(added.FolderId);
+        configuredHosts.Hosts.ShouldBe(["peer.example:47821"]);
+        folderHost.ResolveFolder(added.FolderId).Settings.PredefinedHosts.ShouldBe(["peer.example:47821"]);
+        var invalidHosts = await Should.ThrowAsync<RpcException>(() => client.SetPredefinedHostsAsync(
+            added.FolderId, ["https://peer.example:47821"], Token));
+        invalidHosts.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        folderHost.ResolveFolder(added.FolderId).Settings.PredefinedHosts.ShouldBe(["peer.example:47821"]);
+        var clearedHosts = await client.SetPredefinedHostsAsync(added.FolderId, [], Token);
+        clearedHosts.Hosts.ShouldBeEmpty();
+        folderHost.ResolveFolder(added.FolderId).Settings.PredefinedHosts.ShouldBeEmpty();
+        var share = await client.GetFolderKeysAsync(added.FolderId, Token);
+        using (var parsedKey = FolderKeys.FromText(share.Key))
+            Convert.ToHexString(parsedKey.FolderId()).ShouldBe(added.FolderId);
+        var joinedKeys = FolderKeys.CreateNew();
+        string key = joinedKeys.ExportText(); joinedKeys.Dispose();
+        var joined = await client.JoinFolderAsync(key, joinPath, Token);
+        key.ShouldNotBeNullOrWhiteSpace();
+        folderHost.Completion.IsCompleted.ShouldBeFalse();
+        added.FolderId.ShouldNotBe(joined.FolderId);
+        var folders = await client.ListFoldersAsync(Token);
+        folders.Folders.Count.ShouldBe(2);
+        folders.Folders.Select(folder => folder.Path).ShouldContain(Path.GetFullPath(addPath));
+        var peers = await client.ListPeersAsync(added.FolderId, Token);
+        peers.FolderId.ShouldBe(added.FolderId);
+        peers.Peers.ShouldBeEmpty();
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var dumped = new List<string>();
+        await foreach (var row in client.DumpIndexAsync(added.FolderId, timeout.Token)) dumped.Add(row.Path);
+        dumped.ShouldContain("sample.txt");
+    }
+
+    [Fact]
+    public void ProductionAvailabilityTracksOnlySupervisedPeerSessions()
+    {
+        var runtime = new ControlStatusRuntime();
+        Guid session = Guid.NewGuid();
+        runtime.ReadStatus().ProductionSyncAvailable.ShouldBeFalse();
+
+        runtime.SetPeerSessionActive(session, true);
+        runtime.ReadStatus().ProductionSyncAvailable.ShouldBeTrue();
+        runtime.SetPeerSessionActive(session, false);
+        runtime.ReadStatus().ProductionSyncAvailable.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task HostRoutesPowerEventsAndStopsWithinTheServiceDeadline()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var runtime = new ControlStatusRuntime();
+        int suspends = 0, resumes = 0;
+        runtime.Suspending += () => suspends++;
+        runtime.Resumed += () => resumes++;
+        await using var host = await ControlApiHost.StartFixtureAsync(Pipe, runtime, [identity.User!], cancellationToken: Token);
+        host.ShutdownTimeout.ShouldBe(TimeSpan.FromSeconds(15));
+
+        host.Power.RaiseSuspending();
+        host.Power.RaiseResumed();
+        suspends.ShouldBe(1); resumes.ShouldBe(1);
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        await host.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15), Token);
+        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
+    }
+
+    [Fact]
+    public async Task HostRoutesAddressAndAvailabilityChangesAndUnsubscribesOnStop()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var runtime = new ControlStatusRuntime();
+        var source = new FakeNetworkChangeSource();
+        var notifications = 0;
+        runtime.NetworkChanged += () => notifications++;
+        await using var host = await ControlApiHost.StartFixtureAsync(Pipe, runtime, [identity.User!],
+            networkSource: source, cancellationToken: Token);
+
+        source.RaiseAddressChanged();
+        source.RaiseAvailabilityChanged(isAvailable: false);
+        notifications.ShouldBe(2);
+
+        await host.DisposeAsync();
+        source.RaiseAddressChanged();
+        notifications.ShouldBe(2);
+        source.Disposed.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task EveryRpcIdentifiesAndRejectsAnUnauthorizedCallerBeforeReadingRuntime()
     {
         using var identity = WindowsIdentity.GetCurrent(); string pipe = Pipe; var runtime = new ControlStatusRuntime(); var before = runtime.ReadStatus();
@@ -49,6 +157,14 @@ public sealed class ControlStatusPipeTests : IDisposable
         (await Should.ThrowAsync<RpcException>(() => client.GetStatusAsync(Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
         await using var events = client.WatchEventsAsync(Token).GetAsyncEnumerator(Token);
         (await Should.ThrowAsync<RpcException>(() => events.MoveNextAsync().AsTask())).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.ListFoldersAsync(Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.SetPredefinedHostsAsync("unknown", ["peer.example:47821"], Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.AddFolderAsync("C:\\", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.JoinFolderAsync("invalid", "C:\\", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.GetFolderKeysAsync("unknown", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.ListPeersAsync("unknown", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        await using var index = client.DumpIndexAsync("unknown", Token).GetAsyncEnumerator(Token);
+        (await Should.ThrowAsync<RpcException>(() => index.MoveNextAsync().AsTask())).StatusCode.ShouldBe(StatusCode.PermissionDenied);
         host.ActiveSubscriptions.ShouldBe(0); runtime.ReadStatus().Sequence.ShouldBe(before.Sequence + 1);
     }
 
@@ -100,7 +216,7 @@ public sealed class ControlStatusPipeTests : IDisposable
         Directory.CreateDirectory(fixture); using var identity = WindowsIdentity.GetCurrent(); string pipe = Pipe;
         var group = new SecurityIdentifier(WellKnownSidType.BuiltinGuestsSid, null);
         using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "control", debugEnabled: true);
-        await using var host = await ControlApiHost.StartFixtureAsync(pipe, new(), [group], journal, Token);
+        await using var host = await ControlApiHost.StartFixtureAsync(pipe, new(), [group], journal, cancellationToken: Token);
         await using (var connection = await ControlPipeConnector.ConnectVerifiedAsync(new(pipe, identity.User!, (uint)Environment.ProcessId), Token))
         {
             var security = ((NamedPipeClientStream)connection).GetAccessControl();
@@ -198,5 +314,15 @@ public sealed class ControlStatusPipeTests : IDisposable
         if (Path.GetDirectoryName(resolved) != Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)
             || !Path.GetFileName(resolved).StartsWith("PeerSync-ControlHost-", StringComparison.Ordinal)) throw new IOException("Unexpected fixture root.");
         Directory.Delete(fixture, true);
+    }
+
+    private sealed class FakeNetworkChangeSource : INetworkChangeSource
+    {
+        public event EventHandler? AddressChanged;
+        public event Action<bool>? AvailabilityChanged;
+        public bool Disposed { get; private set; }
+        public void RaiseAddressChanged() => AddressChanged?.Invoke(this, EventArgs.Empty);
+        public void RaiseAvailabilityChanged(bool isAvailable) => AvailabilityChanged?.Invoke(isAvailable);
+        public void Dispose() => Disposed = true;
     }
 }

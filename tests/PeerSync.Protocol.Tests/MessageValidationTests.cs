@@ -22,12 +22,18 @@ public sealed class MessageValidationTests
     public void ExactRecordLimitAndCompleteReviewedRangesAreAcceptedWithoutResigning()
     {
         using var keys = FolderKeys.CreateNew(); var update = Update(keys);
-        var record = SignedRecordFactory.Create(Body(), keys);
-        for (ulong sequence = 1; sequence <= 1000; sequence++) update.Records.Add(SignedRecordFactory.ToWire(record.WithLocalSequence(sequence)));
+        var firstBody = Body(); firstBody.Path = "nested/1.txt";
+        var firstRecord = SignedRecordFactory.Create(firstBody, keys);
+        update.Records.Add(SignedRecordFactory.ToWire(firstRecord.WithLocalSequence(1)));
+        for (ulong sequence = 2; sequence <= 1000; sequence++)
+        {
+            var body = Body(); body.Path = $"nested/{sequence}.txt";
+            update.Records.Add(SignedRecordFactory.ToWire(SignedRecordFactory.Create(body, keys).WithLocalSequence(sequence)));
+        }
         update.LastSeq = 1200; // Valid unpublished gaps after the last record.
         MessageValidator.Validate(update, keys);
-        update.Records[0].Body.Span.SequenceEqual(record.Body).ShouldBeTrue();
-        update.Records[0].Signature.Span.SequenceEqual(record.Signature).ShouldBeTrue();
+        update.Records[0].Body.Span.SequenceEqual(firstRecord.Body).ShouldBeTrue();
+        update.Records[0].Signature.Span.SequenceEqual(firstRecord.Signature).ShouldBeTrue();
     }
 
     [Fact]
@@ -53,6 +59,39 @@ public sealed class MessageValidationTests
         Should.Throw<MessageValidationException>(() => MessageValidator.Validate(update, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
         update.AfterSeq = 0; update.LastSeq = ulong.MaxValue;
         Should.Throw<MessageValidationException>(() => MessageValidator.Validate(update, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
+    }
+
+    [Fact]
+    public void DuplicateNormalizedPathsAndEmptyIndexLimitsAreRejectedAtIngress()
+    {
+        using var keys = FolderKeys.CreateNew(); var update = Update(keys); update.LastSeq = 2;
+        var body = Body();
+        update.Records.Add(SignedRecordFactory.ToWire(SignedRecordFactory.Create(body, keys).WithLocalSequence(1)));
+        body.Path = body.Path.ToUpperInvariant();
+        update.Records.Add(SignedRecordFactory.ToWire(SignedRecordFactory.Create(body, keys).WithLocalSequence(2)));
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(update, keys)).Failure.ShouldBe(MessageFailure.InvalidRecord);
+
+        var zero = new IndexRequest { FolderId = ByteString.CopyFrom(keys.FolderId()), Limit = 0, RequestId = 1 };
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(zero, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
+        var omitted = new IndexRequest { FolderId = ByteString.CopyFrom(keys.FolderId()), RequestId = 1 };
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(omitted, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
+    }
+
+    [Fact]
+    public void IndexMessagesRequireCorrelationIds()
+    {
+        using var keys = FolderKeys.CreateNew();
+        var folderId = ByteString.CopyFrom(keys.FolderId());
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(
+            new IndexSummary { FolderId = folderId }, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(
+            new IndexRequest { FolderId = folderId, Limit = 1 }, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(
+            new IndexUpdate { FolderId = folderId }, keys)).Failure.ShouldBe(MessageFailure.InvalidSequence);
+        MessageValidator.Validate(new IndexSummary { FolderId = folderId, HighestSeq = 4, Request = false, RequestId = 0, Notification = true }, keys);
+        Should.Throw<MessageValidationException>(() => MessageValidator.Validate(
+            new IndexSummary { FolderId = folderId, HighestSeq = 4, Request = true, RequestId = 0 }, keys))
+            .Failure.ShouldBe(MessageFailure.InvalidSequence);
     }
 
     [Theory]
@@ -108,6 +147,16 @@ public sealed class MessageValidationTests
     }
 
     [Fact]
+    public void ExcessiveUnknownFieldsAreRejectedBeforeGeneratedParserRetention()
+    {
+        byte[] body = new byte[1_000_000 * 3];
+        for (int offset = 0; offset < body.Length; offset += 3)
+        { body[offset] = 0xA0; body[offset + 1] = 0x06; body[offset + 2] = 0; }
+        var frame = new ProtocolFrame((byte)WireType.Ping, new ReadOnlySequence<byte>(body));
+        Should.Throw<MessageValidationException>(() => WireMessageCodec.Decode(frame)).Failure.ShouldBe(MessageFailure.InvalidMessage);
+    }
+
+    [Fact]
     public void BlockLimitsDigestsAndErrorOneofAreEnforced()
     {
         using var keys = FolderKeys.CreateNew(); byte[] bytes = [1, 2, 3]; var hash = ByteString.CopyFrom(Blake3.Hasher.Hash(bytes).AsSpan());
@@ -130,7 +179,9 @@ public sealed class MessageValidationTests
         MessageValidator.Validate(hello); hello.UtcTicks = 0; Should.Throw<MessageValidationException>(() => MessageValidator.Validate(hello));
         hello.UtcTicks = 1; hello.DeviceName = new string('é', 65); Should.Throw<MessageValidationException>(() => MessageValidator.Validate(hello));
         hello.DeviceName = "peer\nspoof"; Should.Throw<MessageValidationException>(() => MessageValidator.Validate(hello));
-        var auth = new FolderAuth { FolderId = ByteString.CopyFrom(new byte[32]), Proof = ByteString.CopyFrom(new byte[32]), ReadOnlyProof = ByteString.CopyFrom(new byte[32]), Access = FolderAccess.ReadOnly };
+        hello.DeviceName = "peer\u2028spoof"; Should.Throw<MessageValidationException>(() => MessageValidator.Validate(hello));
+        hello.DeviceName = "peer"; hello.ClientVersion = "1\u2029spoof"; Should.Throw<MessageValidationException>(() => MessageValidator.Validate(hello));
+        var auth = new FolderAuth { FolderId = ByteString.CopyFrom(new byte[32]), Proof = ByteString.CopyFrom(new byte[32]), ReadOnlyProof = ByteString.CopyFrom(new byte[32]), Access = FolderAccess.ReadOnly, RequestId = 1 };
         MessageValidator.Validate(auth); auth.Access = FolderAccess.ReadWrite;
         Should.Throw<MessageValidationException>(() => MessageValidator.Validate(auth));
         auth.Signature = ByteString.CopyFrom(new byte[64]); MessageValidator.Validate(auth);
@@ -210,7 +261,7 @@ public sealed class MessageValidationTests
     }
 
     private static ProtocolFrame Frame(WireType type, IMessage message) => new((byte)type, new ReadOnlySequence<byte>(message.ToByteArray()));
-    private static IndexUpdate Update(FolderKeys keys) => new() { FolderId = ByteString.CopyFrom(keys.FolderId()) };
+    private static IndexUpdate Update(FolderKeys keys) => new() { FolderId = ByteString.CopyFrom(keys.FolderId()), RequestId = 1 };
     private static FileRecordBody Body()
     {
         byte[] device = new byte[32]; BinaryPrimitives.WriteUInt64LittleEndian(device, 1);

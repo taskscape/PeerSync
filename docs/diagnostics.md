@@ -26,10 +26,15 @@ requires a release signing identity.
 
 ## Deployment status
 
-The product is in P1. The engine is exercised through connected in-memory
-transport with real Windows files and SQLite indexes. Production service,
-tracker, relay, CLI and installer integration is incomplete. The P0 probes
-below are deployable test executables, not a v1 release.
+The product is in P2. The installed service now loads its device certificate
+and registered folder engines and runs local watcher/periodic scans. Production
+peer supervision and authenticated production folder synchronization, tracker,
+relay and installer remain incomplete. The P0 probes below are deployable test
+executables, not a v1 release.
+
+The installed folder host has [local verification evidence](verification/P2-installed-folder-host-local-2026-10-21.md).
+Its smoke test proves registered-folder startup scan and orderly local drain;
+it does not prove installed SCM operation or production peer synchronization.
 
 Structured events use UTC timestamps, component, process/run ID, session ID,
 trace ID when present, transport, operation, byte counts, elapsed milliseconds,
@@ -42,22 +47,119 @@ containing network addresses expire at 24 hours on the next write. Collection
 also filters events to the last 24 hours. Debug disk writes are synchronous;
 only emit progress at bounded intervals rather than for every transferred chunk.
 
-Run `build/Collect-Diagnostics.ps1 -Logs <log-directory> -Destination <new-zip>`
-on both machines immediately after reproducing. It collects only structured
-debug JSONL and environment metadata. Add `-IncludeNetworkAddresses` when
-investigating routing. It excludes settings, databases, certificates, keys,
-arbitrary logs and crash dumps. Review the bundle before sharing it.
-The collector prints the number of included files/events and refuses to create
-an archive with no recent valid debug events. If it reports no files, use the
-exact `LOGS` directory printed by the probe, including its process-ID child
-directory. Collect after the failed run, not before it. Check both PCs' clocks
-if every event is filtered as expired.
+Run `psp diagnostics --logs <log-directory> --output <new-zip>` on both
+machines immediately after reproducing. The command retains only an explicit
+allowlist of structured fields, filters events to the last 24 hours, excludes
+network addresses and ports by default, and includes environment metadata. It excludes
+settings, databases, certificates, keys, arbitrary logs, crash dumps, unknown
+JSON fields, FolderIds and file contents. Review the bundle before sharing it.
+Add `--include-network-addresses` only when routing details are needed. The
+collector prints included, expired and invalid event counts and refuses to
+create an archive with no recent valid events. If it reports no events, use
+the exact `LOGS` directory printed by the service or probe, including any
+process-ID child directory. Collect after the failed run, not before it.
+Check both PCs' clocks if every event is filtered as expired.
+
+`build/Collect-Diagnostics.ps1` remains a legacy development-probe collector.
+It copies source event lines and does not apply the CLI's strict field
+allowlist; do not share its archive when logs may contain untrusted or
+unexpected fields.
 
 Compare timestamps and session IDs. A transport failure before folder auth is
 different from a rejected folder proof, approval wait, missing block, or failed
 filesystem apply. Keep the original error code when reporting a failure.
-Those production-stage event hooks are added with their implementing phases;
-the QUIC probe already records start, TLS authentication, completion and errors.
+Service startup records certificate loading, folder-engine readiness/failure,
+listener readiness and host shutdown. Resume/network changes queue a follow-up
+recovery pass when another signal arrives mid-pass, and queue a follow-up scan
+when a new signal arrives during a scan. `service.network_recovery_started`
+and `service.network_recovery_complete` bracket recovery passes; `operation`
+is the fixed trigger category. Scan events include the
+trigger in `operation`, elapsed time, item counts and deferred count without
+folder paths or identifiers. `service.network_recovery_complete.itemsSkipped`
+counts additional signals coalesced into that recovery cycle.
+The installed peer runtime records discovery, endpoint dialing, reconnect,
+folder authorization outcome, session supervision, sync-pass counts and
+failures. The QUIC probe separately records start, TLS authentication,
+completion and errors.
+
+Normal file block requests rotate across connected authenticated peers. The
+`transfer.block_peer_unavailable` event records a bounded attempt number,
+byte count and safe error category; `transfer.block_peer_failover` means a
+later peer supplied bytes that passed the requested BLAKE3 digest check. The
+events carry the shared authenticated QUIC session ID so they can be matched
+with the serving endpoint's block-request events. The log contains no peer ID,
+file path or block hash.
+`transfer.download_rate_limited` records a block that waited over 10 ms for
+the device-wide download bucket; its byte count and shared session ID identify
+the affected transfer. `transfer.upload_rate_limited` records a server-side
+wait and byte count. It has no session ID because the request handler does not
+own the QUIC session identity; match it by timestamp with the serving peer's
+`transport.block_stream_accepted` event. The client-side download event keeps
+the shared session ID for direct cross-endpoint matching.
+
+## P2: installed service peer runtime
+
+For the experimental self-contained service package, use the step-by-step
+[P2 two-PC deployment runbook](peersync-service-two-pc-runbook.md). It covers
+the service virtual account, `--init`, per-folder ACLs, same-LAN UDP/TCP setup,
+share pairing, sanitized bundle collection and event-based failure triage.
+Direct routed endpoints can be configured with `psp hosts`; actual cross-network
+service interoperability and the full installed SCM matrix remain open gates.
+The P0 `QuicBasics` retry procedure below is a separate probe.
+
+For a service failure, collect diagnostics from both devices after reproducing
+the issue. Use the exact service or CLI `LOGS` directory, then run
+`psp diagnostics --logs <logs-directory> --output <bundle.zip>` on each device. Keep the
+two bundles separate so each preserves its run ID and local timestamps. Match
+peers by `sessionId`; the address is useful for routing diagnosis but the
+bundle omits addresses unless explicitly requested. Do not send state databases,
+folder keys or raw index records.
+
+After installation, `psp add <path>` registers a new local folder, starts its
+engine and prints its audited share key; `psp join <key> <path>` joins an
+existing share. Use `psp share <folder>` to retrieve the key again, `psp peers
+<folder>` to inspect known peers and `psp dump-index <folder>` to stream the
+local index. For routed peers, `psp hosts <folder> <host:port ...>` replaces
+the predefined endpoint list and dials immediately; `psp hosts <folder>
+--clear` removes the list. The listen port is in
+`%ProgramData%\PeerSync\config\settings.json`. The folder selector may be the
+full path or the hexadecimal ID shown by `psp add`/`psp join`. Append `--json`
+for machine-readable output.
+These commands use the owner- and PID-verified pipe as `psp status`, and the
+service checks caller identity on every RPC.
+
+Run `psp status` on the affected device to check the local service pipe,
+production-sync availability and current peer clock states. `psp status --json`
+returns the same snapshot for scripts; a failed owner/PID check or unavailable
+service exits nonzero with a short error category.
+
+| Event | What it tells you |
+| --- | --- |
+| `service.quic_listener_ready`, `service.tcp_listener_ready` | QUIC or TCP listener bound the configured device port. Both should be present and use the same number. If one is absent, inspect `service.start_failed` and the immediately preceding event. |
+| `service.lan_discovery_unavailable`, `discovery.lan_socket_unavailable`, `discovery.lan_send_failed` | Local multicast/broadcast discovery could not start or send. Compare firewall and active interface state on both devices; explicit predefined hosts bypass LAN discovery. |
+| `service.lan_peer_discovered` | A matching folder-tagged LAN announcement was received. If this appears on only one side, compare the LAN-enabled folder set and interface/firewall rules. |
+| `discovery.host_resolution_failed`, `discovery.host_dial_failed` | A configured host did not resolve or authenticate. Verify `host:port`, DNS and the remote service listeners. |
+| `control.predefined_hosts_updated` | An authorized local caller replaced a folder's configured direct endpoints; `itemsChanged` is the host count, and endpoint values are not logged. |
+| `connection.candidate_started`, `connection.candidate_failed`, `connection.reconnect_failed` | The `operation` identifies LAN/public/punch/relay source and QUIC/TCP transport; failed attempts retain the sanitized error category and HRESULT. The endpoint address and port are recorded locally but omitted from `psp diagnostics` unless `--include-network-addresses` is used. QUIC starts first and TCP follows after the 250 ms stagger, so TCP can win before a slow QUIC timeout. Reconnects back off from one second to five minutes. |
+| `service.peer_endpoint_expired`, `service.peer_endpoint_limit_reached` | Reconnect targets expire after 15 minutes without observation and are capped at 16 per peer. These events report only counts, so roaming and stale-address cleanup can be diagnosed without disclosing the peer identity or endpoint. Repeated observations refresh an endpoint and the strongest known source (LAN before public) is retained. |
+| `transport.tcp_connect_failed`, `transport.tcp_data_attach_failed` | TCP control or data-lane setup failed. `operation` gives the bounded connect/TLS/pin/ticket/admission stage; HRESULT and socket native error are recorded when available. Certificate names and exception text are omitted. |
+| `transport.authenticated`, `transport.handshake_failed`, `transport.stream_failed`, `transport.disconnected` | Authenticated session lifecycle across QUIC and TCP; compare the transport and session ID fields with both endpoints. |
+| `transport.folder_auth_allowed`, `transport.folder_auth_pending`, `transport.folder_auth_denied` | The local or remote folder approval decision. `local_policy_*` means this device's policy; `remote_policy_*` means the other device's policy. Approve the DeviceId on both sides when required. |
+| `service.folder_peer_ready` | The authenticated folder transport attached to the local sync engine. Both devices should report this for the same session. |
+| `service.folder_sync_pass`, `service.folder_sync_failed` | Repeated resumable index exchange and apply pass. Deferred/failed counts mean work remains; compare the session and timestamp with engine `apply.*`, `index.*` and filesystem events. |
+| `service.peer_session_failed`, `transport.stream_failed` | Session or stream closed after authentication. Check the earlier Hello, folder-auth and clock events before interpreting the transport error. |
+| `service.folder_scheduler_stopped`, `service.peer_accept_failed` | A host loop stopped unexpectedly; the service exits visibly rather than silently dropping scans or accepts. |
+| `control.folder_added`, `control.folder_joined`, `control.folders_listed`, `control.peers_listed`, `control.index_dumped` | A local control operation completed. Counts and session IDs are recorded; keys and folder paths are omitted. |
+| `control.folder_request_failed` | A local control operation failed. `errorCode` is the exception category; the RPC returns a sanitized status message. |
+| `control.folder_keys_read` | An authorized caller retrieved a key through the audited RPC. The key and folder ID are not logged. |
+
+The same authenticated session ID is recorded by both endpoints. A listener
+ready event without a peer-discovered event points to discovery/configuration;
+discovery without candidate/auth events points to the dial path; an allowed
+folder decision without `service.folder_peer_ready` points to folder-stream or
+clock admission; repeated sync failures after readiness point to index, block
+or filesystem handling. The local two-host loopback test is described in the
+[service peer-runtime verification](verification/P2-service-peer-runtime-local-2026-10-21.md).
 
 ## P1: directory reconstruction and case recovery
 

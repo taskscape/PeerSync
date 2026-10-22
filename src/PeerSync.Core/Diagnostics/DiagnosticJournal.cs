@@ -53,6 +53,8 @@ public sealed class DiagnosticJournal : IDisposable
         ValidateCode(entry.Event);
         ValidateCode(entry.Operation);
         if (entry.ErrorCode is not null) ValidateCode(entry.ErrorCode);
+        if (entry.RemotePort is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(entry), "A diagnostic remote port must be a valid TCP or UDP port.");
         byte[] line = JsonSerializer.SerializeToUtf8Bytes(new
         {
             timestampUtc = DateTimeOffset.UtcNow,
@@ -80,6 +82,7 @@ public sealed class DiagnosticJournal : IDisposable
             itemsSkipped = entry.ItemsSkipped,
             itemsDeferred = entry.ItemsDeferred,
             remoteAddress = entry.RemoteAddress?.ToString(),
+            remotePort = entry.RemotePort,
         }, Json);
         if (line.Length > 4095) throw new ArgumentException("Diagnostic event exceeds the record limit.", nameof(entry));
         lock (gate)
@@ -146,4 +149,5 @@ public sealed record DiagnosticEvent(string Event, string Operation)
     public long? ApplicationErrorCode { get; init; }
     public int? RetryInMilliseconds { get; init; }
     public System.Net.IPAddress? RemoteAddress { get; init; }
+    public int? RemotePort { get; init; }
 }

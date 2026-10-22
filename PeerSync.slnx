@@ -2,6 +2,7 @@
   <Folder Name="/spikes/">
     <Project Path="spikes/ControlPipe/ControlPipe.csproj" />
     <Project Path="spikes/DeviceCert/DeviceCert.csproj" />
+    <Project Path="spikes/InstalledServiceProbe/PeerSync.InstalledProbe.csproj" />
     <Project Path="spikes/PeerSync.SpikeSupport/PeerSync.SpikeSupport.csproj" />
     <Project Path="spikes/QuicBasics/QuicBasics.csproj" />
     <Project Path="spikes/QuicPunch/QuicPunch.csproj" />

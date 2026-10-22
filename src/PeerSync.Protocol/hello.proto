@@ -11,4 +11,7 @@ message Hello {
   uint64 capabilities = 5;
   bytes nonce = 6;
   int64 utc_ticks = 7;
+  uint64 request_id = 8;
+  bool response = 9;
+  repeated bytes folder_ids = 10;
 }

@@ -7,21 +7,40 @@ namespace PeerSync.Protocol.Validation;
 // collections. Signed bodies remain opaque until signature verification.
 internal static class ProtobufIngressLimits
 {
+    internal struct FieldBudget
+    {
+        private int count;
+
+        internal void Consume()
+        {
+            if (++count > MessageValidator.MaximumFieldOccurrences)
+                throw new MessageValidationException(MessageFailure.InvalidMessage);
+        }
+    }
+
     internal static void Validate(WireType type, byte[] bytes)
     {
         using var input = new CodedInputStream(bytes);
+        var budget = new FieldBudget();
         int count = 0;
         uint tag;
         while ((tag = input.ReadTag()) != 0)
         {
+            budget.Consume();
             RejectGroups(tag);
             bool records = type == WireType.IndexUpdate && tag == 18;
             bool requests = type == WireType.BlockRequestBatch && tag == 18;
-            if (records || requests)
+            if (type == WireType.Hello && tag == 82)
+            {
+                if (++count > MessageValidator.MaximumAnnouncedFolders) throw new MessageValidationException(MessageFailure.InvalidHello);
+                input.SkipLastField();
+            }
+            else if (type == WireType.FolderAuthResult && tag == 34) ValidateFlat(input.ReadBytes().ToByteArray(), ref budget);
+            else if (records || requests)
             {
                 int maximum = records ? MessageValidator.MaximumRecords : MessageValidator.MaximumBlockRequests;
                 if (++count > maximum) throw new MessageValidationException(records ? MessageFailure.TooManyRecords : MessageFailure.TooManyBlockRequests);
-                ValidateFlat(input.ReadBytes().ToByteArray());
+                ValidateFlat(input.ReadBytes().ToByteArray(), ref budget);
             }
             else input.SkipLastField();
         }
@@ -29,9 +48,15 @@ internal static class ProtobufIngressLimits
 
     internal static void ValidateFlat(byte[] bytes)
     {
+        var budget = new FieldBudget();
+        ValidateFlat(bytes, ref budget);
+    }
+
+    internal static void ValidateFlat(byte[] bytes, ref FieldBudget budget)
+    {
         using var input = new CodedInputStream(bytes);
         uint tag;
-        while ((tag = input.ReadTag()) != 0) { RejectGroups(tag); input.SkipLastField(); }
+        while ((tag = input.ReadTag()) != 0) { budget.Consume(); RejectGroups(tag); input.SkipLastField(); }
     }
 
     internal static void RejectGroups(uint tag)
