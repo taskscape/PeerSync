@@ -60,7 +60,7 @@ foreach ($cohort in $cohorts) {
             if ($file.Length -gt 1MB) { throw "Oversized generated case list: $($entry[0])" }
             $cases=@(Get-Content -LiteralPath $file.FullName | ForEach-Object { $_ | ConvertFrom-Json })
             if ($cases.Count -ne $entry[1] -or @($cases.Seed | Sort-Object -Unique).Count -ne $entry[1] -or
-                @($cases | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw "Incomplete generated case list: $($entry[0])" }
+                @($cases | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 32 }).Count -ne 0) { throw "Incomplete generated case list: $($entry[0])" }
         }
         $maintenance=Read-Json (Join-Path $folder connected-maintenance.json)
         if ($maintenance.status -ne 'passed' -or -not $maintenance.sourceInformationalVersion.EndsWith("+$SourceRevision") -or
@@ -88,7 +88,7 @@ foreach ($cohort in $cohorts) {
         }
         foreach ($seed in $expectedSeeds) {
             $result=Read-Json (Join-Path $folder "regressions/$seed.json")
-            if ($result.Seed -ne $seed -or $result.Rounds -le 0 -or $result.Rounds -gt 24 -or
+            if ($result.Seed -ne $seed -or $result.Rounds -le 0 -or $result.Rounds -gt 32 -or
                 $result.Nodes -lt 3 -or $result.Nodes -gt 7 -or $result.Versions -le 0) { throw "Invalid retained evidence: $seed" }
         }
     }

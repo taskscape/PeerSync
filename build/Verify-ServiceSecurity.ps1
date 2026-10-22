@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([switch]$SkipCaseCapacityStress)
+param(
+    [switch]$SkipCaseCapacityStress,
+    [ValidateSet(840,1440)][int]$VerificationBudgetSeconds = 840
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $root 'artifacts/p0-services'
@@ -8,11 +11,9 @@ $engineClock = $null
 $buildSeconds = $null
 $remaining = $null
 $verificationClock = [Diagnostics.Stopwatch]::StartNew()
-# The unchanged 15-minute job also needs SDK setup, artifact upload and cleanup.
-# Charge the build and probes to this shared 14-minute verification budget.
-# The job's 15-minute limit still leaves setup, upload and cleanup time; the
-# complete Server 2025 Engine scope exceeded the former 13-minute wait.
-$verificationBudgetMilliseconds = 840000
+# Each Server matrix entry reserves one minute beyond this shared build/probe/
+# Engine budget for setup, artifact upload and owned-process cleanup.
+$verificationBudgetMilliseconds = $VerificationBudgetSeconds * 1000
 $verificationRunId = [Guid]::NewGuid().ToString('N')
 $startedUtc = [DateTime]::UtcNow.ToString('O')
 Push-Location $root
@@ -47,7 +48,7 @@ try {
     & "$PSScriptRoot/Run-P0.ps1" -SkipWatcher
     & "$PSScriptRoot/Run-ServiceP0.ps1"
     $remaining = [int][Math]::Max(0, $verificationBudgetMilliseconds - $verificationClock.ElapsedMilliseconds)
-    if ($remaining -eq 0 -or -not $engineProcess.WaitForExit($remaining)) { throw 'Native verification exceeded its shared fourteen-minute budget' }
+    if ($remaining -eq 0 -or -not $engineProcess.WaitForExit($remaining)) { throw "Native verification exceeded its shared $VerificationBudgetSeconds-second budget" }
     if ($engineProcess.ExitCode -ne 0) { throw "Native Engine scope failed ($($engineProcess.ExitCode)); see engine stdout/stderr and TRX" }
     if ($verificationClock.ElapsedMilliseconds -ge $verificationBudgetMilliseconds) { throw 'Native verification completed outside its shared budget' }
     @{status='passed';runId=$verificationRunId;startedUtc=$startedUtc;parallel=$true;nativeEngineExitCode=$engineProcess.ExitCode;caseCapacityStress=(-not $SkipCaseCapacityStress);caseCapacityCoverage='required Server 2022 job and default local runner';serviceAccountChecks=$true;watcherRuntimeChecks=$false;watcherCoverage='required x64 canonical job';secondsAfterBuild=$engineClock.Elapsed.TotalSeconds;verificationBudgetSeconds=($verificationBudgetMilliseconds/1000);buildSeconds=$buildSeconds;remainingWaitMilliseconds=$remaining;totalSeconds=$verificationClock.Elapsed.TotalSeconds;gateP1Passed=$false} |

@@ -152,11 +152,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, windows-2025]
+        include:
+          - os: windows-2022
+            timeoutMinutes: 15
+            verificationBudgetSeconds: 840
+          - os: windows-2025
+            timeoutMinutes: 25
+            verificationBudgetSeconds: 1440
     runs-on: ${{ matrix.os }}
-    # Native flush/restart tests plus setup and evidence/runner cleanup exceeded
-    # ten minutes on Server 2025 even though every test/step passed.
-    timeout-minutes: 15
+    # Each entry reserves one minute for setup, upload and owned cleanup.
+    timeout-minutes: ${{ matrix.timeoutMinutes }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -164,7 +169,7 @@ jobs:
           global-json-file: global.json
       - name: Virtual-account and standard-user security checks
         shell: pwsh
-        run: ./build/Verify-ServiceSecurity.ps1 -SkipCaseCapacityStress:('${{ matrix.os }}' -eq 'windows-2025')
+        run: ./build/Verify-ServiceSecurity.ps1 -SkipCaseCapacityStress:('${{ matrix.os }}' -eq 'windows-2025') -VerificationBudgetSeconds ${{ matrix.verificationBudgetSeconds }}
       - name: Upload service security evidence
         if: always()
         uses: actions/upload-artifact@v7

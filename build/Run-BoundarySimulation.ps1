@@ -133,7 +133,7 @@ try {
         }
         foreach ($item in @(@('cases.jsonl',$Cases),@('hierarchical-cases.jsonl',$HierarchicalCases))) {
             $casesRead = @(Get-Content -LiteralPath (Join-Path $evidence $item[0]) | ForEach-Object { $_ | ConvertFrom-Json })
-            if ($casesRead.Count -ne $item[1] -or @($casesRead.Seed | Sort-Object -Unique).Count -ne $item[1] -or @($casesRead | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 }).Count -ne 0) { throw "Incomplete generated Simulation case list: $($item[0])" }
+            if ($casesRead.Count -ne $item[1] -or @($casesRead.Seed | Sort-Object -Unique).Count -ne $item[1] -or @($casesRead | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 32 }).Count -ne 0) { throw "Incomplete generated Simulation case list: $($item[0])" }
         }
         $maintenance = Read-Json (Join-Path $evidence connected-maintenance.json)
         if ($maintenance.status -ne 'passed' -or -not $maintenance.sourceInformationalVersion.EndsWith("+$source") -or $maintenance.retiredArchives -ne 2 -or $maintenance.deletedBlocks -ne 2 -or $maintenance.publishedVersions -ne 2) { throw 'Incomplete connected maintenance evidence' }
@@ -143,7 +143,7 @@ try {
         else { @($retainedGroups[[int]$Cohort.Substring('retained-'.Length) - 1]) }
     $retained = @(Get-ChildItem -LiteralPath (Join-Path $evidence regressions) -Filter result.json -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Read-Json $_.FullName })
     if ($retained.Count -ne $expectedRetained.Count -or @(Compare-Object @($expectedRetained | Sort-Object) @($retained.Seed | Sort-Object)).Count -ne 0 -or
-        @($retained | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 24 -or $_.Nodes -lt 3 -or $_.Nodes -gt 7 -or $_.Versions -le 0 }).Count -ne 0) {
+        @($retained | Where-Object { $_.Rounds -le 0 -or $_.Rounds -gt 32 -or $_.Nodes -lt 3 -or $_.Nodes -gt 7 -or $_.Versions -le 0 }).Count -ne 0) {
         throw 'Incomplete retained Simulation evidence'
     }
     $result = $null

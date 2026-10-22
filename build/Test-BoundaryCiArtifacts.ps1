@@ -38,7 +38,7 @@ foreach ($cohort in $cohorts) {
         $seeds=@(for ($i=$index; $i -lt 8; $i+=3) { [int]$registry.retainedSeeds[$i] })
         $methods=@($seeds | ForEach-Object { $registry.prefix+"RetainedHierarchicalRegressionsConvergeAndPreservePublishedPayloads(seed: $_)" })
         New-Item -ItemType Directory -Path (Join-Path $folder regressions) | Out-Null
-        foreach ($seed in $seeds) { Write-Json (Join-Path $folder "regressions/$seed.json") @{Seed=$seed;Rounds=1;Nodes=3;Versions=1} }
+        foreach ($seed in $seeds) { Write-Json (Join-Path $folder "regressions/$seed.json") @{Seed=$seed;Rounds=$(if ($seed -eq 1390180802) { 28 } else { 1 });Nodes=3;Versions=1} }
     }
     $results=@($methods | ForEach-Object { '<UnitTestResult testName="'+[Security.SecurityElement]::Escape($_)+'" outcome="Passed" />' }) -join ''
     $count=$methods.Count
@@ -69,6 +69,8 @@ $seedOriginal=Get-Content -LiteralPath $seedPath -Raw
 try { Remove-Item -LiteralPath $seedPath; Assert-Rejected missing-result { Read-Aggregate } }
 finally { Set-Content -LiteralPath $seedPath -Value $seedOriginal }
 try { $result=$seedOriginal | ConvertFrom-Json; $result.Versions=0; Write-Json $seedPath $result; Assert-Rejected empty-version-result { Read-Aggregate } }
+finally { Set-Content -LiteralPath $seedPath -Value $seedOriginal }
+try { $result=$seedOriginal | ConvertFrom-Json; $result.Rounds=33; Write-Json $seedPath $result; Assert-Rejected over-bound-result { Read-Aggregate } }
 finally { Set-Content -LiteralPath $seedPath -Value $seedOriginal }
 $extraPath=Join-Path $retainedFolder extra.trx
 try { Set-Content -LiteralPath $extraPath -Value '<TestRun />'; Assert-Rejected extra-report { Read-Aggregate } }
