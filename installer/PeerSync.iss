@@ -55,6 +55,8 @@ Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 ; NSec's libsodium DLL needs the Microsoft Visual C++ v14 runtime on clean PCs.
 ; Extract before installation so a reboot requirement leaves the old service intact.
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
+Source: "Update-Helper.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\service\*.exe"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
 Source: "{#StageRoot}\service\*.dll"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
@@ -87,11 +89,20 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\app\PeerSync.exe"; Description: "Open PeerSync"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\tools\Update-Helper.ps1"" -Unregister"; Flags: runhidden; RunOnceId: "DeleteUpdateTask"
 Filename: "{sys}\sc.exe"; Parameters: "delete PeerSync"; Flags: runhidden; RunOnceId: "DeleteService"; Check: ServiceExists
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync"""; Flags: runhidden; RunOnceId: "DeleteFirewallRule"
 Filename: "{sys}\net.exe"; Parameters: "localgroup ""PeerSync Users"" /delete"; Flags: runhidden; RunOnceId: "DeleteGroup"; Check: GroupExists
 
 [Code]
+var PostInstallSucceeded: Boolean;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  { Inno can return zero after a suppressed ssPostInstall script exception. }
+  if PostInstallSucceeded then Result := 0 else Result := 9;
+end;
+
 function ServiceExists: Boolean;
 begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PeerSync');
@@ -216,12 +227,16 @@ begin
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSync reset= 86400 actions= restart/60000/restart/60000/restart/300000');
   RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--init');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\tools\Update-Helper.ps1') + '" -Register');
   RunCommand(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall delete rule name="PeerSync"');
   RequireSuccess(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall add rule name="PeerSync" dir=in action=allow program="' +
     ExpandConstant('{app}\service\PeerSync.Service.exe') + '" enable=yes');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'start PeerSync');
+  PostInstallSucceeded := True;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

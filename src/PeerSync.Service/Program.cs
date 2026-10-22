@@ -4,11 +4,16 @@ using PeerSync.Service.Control;
 using PeerSync.Service.Hosting;
 using PeerSync.Service.Init;
 using PeerSync.Service.Settings;
+using PeerSync.Service.Update;
 
 if (args.Length > 0 && string.Equals(args[0], "--init", StringComparison.OrdinalIgnoreCase))
     return InitCommand.Run(args);
 if (args.Length > 0 && string.Equals(args[0], "--remove-data", StringComparison.OrdinalIgnoreCase))
     return RemoveDataCommand.Run(args);
+if (args.Length > 0 && string.Equals(args[0], "--verify-update", StringComparison.OrdinalIgnoreCase))
+    return UpdateVerificationCommand.Run(args,
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync"),
+        Console.Out, Console.Error);
 
 string logs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "logs", "service");
 DiagnosticJournal? journal = null;
@@ -32,6 +37,8 @@ try
     await using var folderHost = await InstalledFolderHost.StartAsync(statePath, settings.DeviceCertificateThumbprint,
         settings, runtime, journal);
     runtime.AttachFolderHost(folderHost);
+    await using var updates = UpdatePoller.Start(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync"), journal);
     while (true)
     {
         await using var host = await ControlApiHost.StartInstalledAsync(runtime, journal);

@@ -2603,8 +2603,9 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [ ] **P5.6 Device approval end to end** [WIP @Codex 2026-10-22]
   - Done when: with "Require approval" on, unknown devices wait in Pending until approved, and blocked devices can't reconnect.
   - Added an installed-host production transport test for pending, approval transfer and blocked reconnect; the focused and full Service suites passed. Physical two-PC validation remains open; see [P5 initial local verification](docs/verification/P5-initial-local-2026-10-22.md).
-- [ ] **P5.7 Signed auto-update** (`PeerSync.Service/Update/`)
+- [ ] **P5.7 Signed auto-update** (`PeerSync.Service/Update/`) [WIP @Codex 2026-10-22]
   - Done when: the service checks a signed manifest daily and downloads the new setup. A short-lived helper process verifies the Authenticode signature and runs `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`, because Setup stops the service. Updates can be turned off.
+  - [Implementation design](docs/proposals/P5-signed-auto-update-implementation.md) separates the service-writable pending package from an administrator-owned publisher pin and SYSTEM helper. Service polling, bounded signed download, manifest generation, administrator policy and installer/task integration are implemented. [Disposable VM evidence](docs/verification/P5-signed-update-vm-2026-10-23.md) covers the final signed package's scheduled upgrade, tamper rejection, disablement and ACLs. Live HTTPS feed, release signer and external review remain open.
 - [ ] **P5.8 Documentation** [WIP @Codex 2026-10-22]
   - Done when: user guide, admin guide (service account, ACLs, ports, logs, `--init`, `--remove-data`) and rendezvous operations guide are written.
   - Drafted the user/admin guides alongside the existing rendezvous operations guide; verify commands against the final installer before closing this task.
