@@ -50,6 +50,21 @@ closed candidate falling through to the live transport. This is local
 current-source evidence; the follow-up hosted PR and main runs remain
 required before P3 code may start.
 
+The first [follow-up PR #45 workflow](https://github.com/taskscape/PeerSync/actions/runs/39787315008)
+failed earlier than App: its x64 Net TRX has 49/50 passes. The sole failure
+was `CandidateAttemptsFollowSourcePriorityAndFallBackAfterFailure`, whose test
+supplied both a public and a relay candidate that could authenticate at once
+but asserted the public session must win. The manager promises the first
+authenticated candidate after source-staggered starts, so scheduling may
+select either session. That test now supplies only the failed LAN and live
+public candidate; separate tests retain all-source ordering and first-winner
+coverage. All 50 Net tests passed locally after this test-only change. The
+earlier 799.785-second canonical run predates only this fixture correction;
+it has not been represented as a full run of the amended PR head.
+The first PR #45 run's other eight jobs passed, including both Server jobs,
+Arm64, fuzz, all retained shards and the strict boundary aggregate. Its
+failure inventory contains this one Net assertion.
+
 The local x64 package
 `artifacts/deploy/PeerSync-win-x64-20261022T125442Z-c194ea93.zip` has SHA-256
 `BEE324C1F32F416556558B0923B6C029E520A7363B558437EDBCCC0B53543D50`.

@@ -20,7 +20,6 @@ public sealed class ConnectionManagerTests
         await using var manager = new ConnectionManager(local);
         var candidates = new[]
         {
-            new ConnectionCandidate(ConnectionSource.Relay, _ => ValueTask.FromResult<ManagedPeerConnection>(Session(local, remote, true))),
             new ConnectionCandidate(ConnectionSource.Public, _ =>
             {
                 attempted.Enqueue(ConnectionSource.Public);
