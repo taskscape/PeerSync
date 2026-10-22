@@ -11,6 +11,8 @@ internal sealed class TransferScheduler
     private const int MaximumRequestBytes = MaximumWindowBytes;
     private readonly object gate = new();
     private readonly Dictionary<string, PeerWindow> peers = new(StringComparer.Ordinal);
+    private int waiting;
+    internal int WaitingCount => Volatile.Read(ref waiting);
 
     internal async ValueTask<Lease> AcquireAsync(string peerId, int bytes, CancellationToken cancellationToken)
     {
@@ -35,7 +37,9 @@ internal sealed class TransferScheduler
                 }
                 changed = peer.Changed.Task;
             }
-            await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref waiting);
+            try { await changed.WaitAsync(cancellationToken).ConfigureAwait(false); }
+            finally { Interlocked.Decrement(ref waiting); }
         }
     }
 

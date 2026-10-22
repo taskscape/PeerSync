@@ -58,7 +58,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
 
     private PeerNetworkRuntime(X509Certificate2 certificate, byte[] localDeviceId,
         Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders, ControlStatusRuntime status,
-        DiagnosticJournal? diagnostics, TimeProvider? timeProvider)
+        Action<byte[], byte[]> recordPending, DiagnosticJournal? diagnostics, TimeProvider? timeProvider)
     {
         this.certificate = certificate;
         this.localDeviceId = localDeviceId.ToArray();
@@ -71,7 +71,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         {
             Certificate = certificate,
             CreateHello = () => new Hello { ProtocolVersion = 1, UtcTicks = this.timeProvider.GetUtcNow().UtcTicks },
-            Folders = new RegistrationList(getFolders),
+            Folders = new RegistrationList(getFolders, recordPending),
             IsDevicePinned = IsDevicePinned,
             Diagnostics = diagnostics,
             DeviceName = Environment.MachineName,
@@ -93,9 +93,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
 
     public static async Task<PeerNetworkRuntime> StartAsync(X509Certificate2 certificate, byte[] deviceId,
         Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders, DeviceSettings deviceSettings, ControlStatusRuntime status,
-        DiagnosticJournal? diagnostics, CancellationToken cancellationToken, TimeProvider? timeProvider = null)
+        Action<byte[], byte[]> recordPending, DiagnosticJournal? diagnostics, CancellationToken cancellationToken, TimeProvider? timeProvider = null)
     {
-        var runtime = new PeerNetworkRuntime(certificate, deviceId, getFolders, status, diagnostics, timeProvider);
+        var runtime = new PeerNetworkRuntime(certificate, deviceId, getFolders, status, recordPending, diagnostics, timeProvider);
         try
         {
             if (!QuicListener.IsSupported)
@@ -144,13 +144,16 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         }
     }
 
-    private static AuthDecision Authorize(InstalledFolderHost.FolderRuntime folder, byte[] deviceId)
+    private static AuthDecision Authorize(InstalledFolderHost.FolderRuntime folder, byte[] deviceId,
+        Action<byte[], byte[]> recordPending)
     {
         DeviceRow? row = folder.Index.Devices.Find(deviceId);
         if (row?.Approval == DeviceApproval.Blocked || row is { Approval: DeviceApproval.Approved, Pinned: false })
             return AuthDecision.Denied;
         if (row is { Approval: DeviceApproval.Approved, Pinned: true }) return AuthDecision.Allowed;
-        return folder.Settings.RequireApproval ? AuthDecision.Pending : AuthDecision.Allowed;
+        if (!folder.Settings.RequireApproval) return AuthDecision.Allowed;
+        recordPending(folder.Keys.FolderId(), deviceId);
+        return AuthDecision.Pending;
     }
 
     private bool IsDevicePinned(byte[] deviceId) => getFolders().Any(folder =>
@@ -306,6 +309,28 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     internal Task RefreshPredefinedHostsAsync(CancellationToken cancellationToken = default)
         => (predefinedHosts ?? throw new InvalidOperationException("Predefined host resolver is not running."))
             .RefreshNowAsync(cancellationToken);
+
+    internal async Task RefreshFolderMembershipAsync(CancellationToken cancellationToken)
+    {
+        foreach (var session in sessions.ToArray())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { await session.Value.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error)
+            {
+                diagnostics?.TryWrite(new("service.peer_session_reset_failed", "folder_membership")
+                    { Level = DiagnosticLevel.Warning, SessionId = session.Key,
+                        ErrorCode = error.GetType().Name, HResult = error.HResult });
+            }
+        }
+        try { await Task.WhenAll(sessionWorkers.Values.ToArray()).WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            diagnostics?.TryWrite(new("service.peer_session_worker_failed", "folder_membership")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+        }
+        RequestNetworkRecovery("folder_membership_change");
+    }
 
     private async Task RecoverNetworkLoopAsync()
     {
@@ -640,7 +665,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         if (acceptFailure is not null) ExceptionDispatchInfo.Capture(acceptFailure).Throw();
     }
 
-    private sealed class RegistrationList(Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders)
+    private sealed class RegistrationList(Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders,
+        Action<byte[], byte[]> recordPending)
         : IReadOnlyList<PeerFolderRegistration>
     {
         public int Count => getFolders().Count;
@@ -649,13 +675,13 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             get
             {
                 InstalledFolderHost.FolderRuntime folder = getFolders()[index];
-                return new(folder.Keys, peer => Authorize(folder, peer), peer => folder.Transport.CreateHandler(peer));
+                return new(folder.Keys, peer => Authorize(folder, peer, recordPending), peer => folder.Transport.CreateHandler(peer));
             }
         }
         public IEnumerator<PeerFolderRegistration> GetEnumerator()
         {
             foreach (InstalledFolderHost.FolderRuntime folder in getFolders())
-                yield return new(folder.Keys, peer => Authorize(folder, peer), peer => folder.Transport.CreateHandler(peer));
+                yield return new(folder.Keys, peer => Authorize(folder, peer, recordPending), peer => folder.Transport.CreateHandler(peer));
         }
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }

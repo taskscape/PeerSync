@@ -1477,6 +1477,14 @@ identity mismatch before sending RPC data. Fixture endpoints may supply their
 known process/SID directly; the production app resolves them through SCM and
 exposes no arbitrary endpoint/owner override.
 
+For a standard user's **Authorize this account** action, the elevated app
+helper submits `AuthorizeUser` through the administrator-only RPC, then stops
+and starts the Windows service through SCM and waits for RUNNING. This rebuilds
+the pipe ACL and per-RPC caller policy from the durable SID list without a
+sign-out. Recycling the control host inside the same Windows-service process
+ended that process on a clean Server 2025 guest, so the RPC no longer requests
+an in-process host restart.
+
 The app initially queries status, then consumes WatchEvents and reconnects after
 disconnect. Bind updates to the current client generation and service instance,
 ignore stale sequences, and never preserve an old success after a connection
@@ -1644,6 +1652,14 @@ Phase 6 options are independent of each other:
 
 The engine's correctness matters more than its speed: every phase gate includes a soak run with zero lost versions. Most of the logic is tested with many simulated nodes in one process over the in-memory transport, before any real network is involved.
 
+Directory-metadata tests that exercise rebase after receiving a root must
+allow the worker's bounded source deadline to defer one attempt on a loaded
+host. Use an injected clock to advance persisted backoff through bounded
+retries, then require the signed graph to be complete before the local child
+edit is rebased. Keep the production source deadline and graph checks intact;
+the Server 2025 P3 PR failure and focused repair are recorded in
+`docs/verification/P3-pr47-ci-repair-2026-10-22.md`.
+
 The engine exchanges Hello, bounded index pages/range targets and immutable
 blocks through `IPeerTransport`. The in-process fabric grants each registered
 node its identity and creates a separate handler for each connection; request
@@ -1805,25 +1821,25 @@ still requires all five jobs and actual Server 2022/2025 results.
 
 ## Packaging and deployment
 
-One signed Inno Setup 7 installer per architecture (`PeerSync-Setup-<version>-x64.exe` and `-arm64.exe`) installs the service and the app for all users. It needs administrator rights once, and none for daily use after that. Inno Setup has no built-in service support, so the script drives `sc.exe`, `netsh` and `icacls` itself, and stops the service before replacing files.
+One signed Inno Setup 7 installer per architecture (`PeerSync-Setup-<version>-x64.exe` and `-arm64.exe`) installs the service and the app for all users. It needs administrator rights once, and none for daily use after that. Inno Setup has no built-in service support, so the script drives `sc.exe` and `netsh` itself, while the app grants folder ACLs through the Windows security API; Setup stops the service before replacing files. Each self-contained publish has assemblies with overlapping filenames, so its files stay in a dedicated `{app}\service`, `{app}\app` or `{app}\cli` directory.
 
 ### What the installer does (Inno Setup)
 
 1. **`[Setup]`:** a fixed `AppId` GUID (never changed, so a newer setup upgrades in place), `PrivilegesRequired=admin`, `MinVersion=10.0.20348` (Server 2022; Windows 11 is 10.0.22000, so Windows 10 is refused), `ArchitecturesAllowed` and `ArchitecturesInstallIn64BitMode` set to `x64compatible and not arm64`, or `arm64` for the Arm64 build. `CloseApplications=yes` lets Restart Manager close the tray app.
-2. **`[Files]`:** self-contained, ReadyToRun builds of the service, app and CLI go to `{app}` (`%ProgramFiles%\PeerSync\`), each signed once with the `signonce` flag.
-3. **`PrepareToInstall` (Pascal Script):** if the service exists, run `sc.exe stop` and poll until it reports STOPPED, for up to 30 s. If it won't stop, Setup shows an error instead of replacing files in use.
+2. **`[Files]`:** self-contained, ReadyToRun builds of the service, app and CLI go to their dedicated subdirectories under `{app}` (`%ProgramFiles%\PeerSync\`). Only EXE/DLL payloads use `signonce`; non-PE files are copied without Authenticode signing.
+3. **`PrepareToInstall` (Pascal Script):** install the bundled Microsoft-signed Visual C++ v14 Redistributable for the target architecture before replacing service files. NSec's native libsodium requires `VCRUNTIME140.dll` on clean Windows. If the prerequisite requests a reboot, stop Setup and rerun it after restart. Then, if the service exists, run `sc.exe stop` and poll until it reports STOPPED, for up to 30 s. If it won't stop, Setup shows an error instead of replacing files in use.
 4. **`[Run]`, in order, hidden:**
    1. `sc.exe create` on first install only: start `auto`, account `NT SERVICE\PeerSync`. The installer switch `/SERVICEACCOUNT=LocalSystem` overrides it through `{param:ServiceAccount|...}`.
    2. `sc.exe failure`: restart after 60 s, 60 s, then 5 min.
    3. `net localgroup "PeerSync Users" /add`, then add the installing user (`{username}`) to it.
-   4. `PeerSync.Service.exe --init` (elevated): creates `config`, `state` and `logs` under `%ProgramData%\PeerSync` with their ACLs (by SID, so it works in any language), creates the device certificate and lets the service account use its private key, and writes default settings. It skips anything already done, so upgrades run it again safely.
-   5. `netsh advfirewall firewall add rule` for inbound traffic to `PeerSync.Service.exe`. A program rule covers the random listening port and LAN discovery in one rule.
+   4. `{app}\service\PeerSync.Service.exe --init` (elevated): creates `config`, `state` and `logs` under `%ProgramData%\PeerSync` with their ACLs (by SID, so it works in any language), creates the device certificate and lets the service account use its private key, and writes default settings. It skips anything already done, so upgrades run it again safely.
+   5. `netsh advfirewall firewall add rule` for inbound traffic to `{app}\service\PeerSync.Service.exe`. A program rule covers the random listening port and LAN discovery in one rule.
    6. `sc.exe start PeerSync`, then optionally open the app (`postinstall`, skipped in silent mode).
 5. **`[Dirs]`:** `{commonappdata}\PeerSync` with `uninsneveruninstall`, so settings and databases survive upgrades and uninstalls.
 6. **`[Tasks]` and `[Registry]`:** an optional "Start the tray app when I sign in" task writes the HKLM `Run` value. Phase 6 adds the `peersync://` URL handler under `Software\Classes`.
 7. **`[UninstallRun]`:** `sc.exe stop`, `sc.exe delete`, delete the firewall rule and the local group, each with a `RunOnceId`.
 
-**Script outline** (abridged, x64 build; `ISCC /DArch=arm64` switches the architecture lines and source folder):
+**Script outline** (abridged historical example; the authoritative, exit-code-checked script is `installer/PeerSync.iss`. `ISCC /DArch=arm64` switches the architecture and source folder):
 
 ```ini
 #define AppVer GetVersionNumbersString("..\publish\x64\PeerSync.Service.exe")

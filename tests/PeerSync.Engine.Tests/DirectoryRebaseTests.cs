@@ -181,9 +181,22 @@ public sealed partial class DirectorySnapshotCaptureTests
         (await new DirectoryApplier(MetadataRoot, receiver, keys, MetadataDevice).ApplyAsync("topic", Token)).Outcome.ShouldBe(FileApplyOutcome.Applied);
         long sequence = 1; foreach (string child in children) await AdmitRebaseChild(producer, receiver, child, ++sequence);
         using var published = new PublishedBlocks(Root, producer);
-        var metadata = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice, TimeProvider.System,
+        var source = DirectoryMetadataSources.FromVersion(VersionView.Open(original, keys, device))!;
+        var clock = new CompletionClock(DateTimeOffset.UtcNow);
+        var metadata = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice, clock,
             (_, hash, length, token) => ValueTask.FromResult<ReadOnlyMemory<byte>>(published.TryRead(hash.Span, length, token)!));
-        (await metadata.RunAsync(token: Token)).Deferred.ShouldBe(0);
+        // A loaded host may spend the per-source deadline before graph completion.
+        // The durable source must survive that deferral and finish on a bounded retry.
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            var pass = await metadata.RunAsync(token: Token);
+            var pending = receiver.ReadDirectoryMetadataSource(source.SourceId);
+            if (pending is null) { pass.Completed.ShouldBeGreaterThan(0); break; }
+            if (pass.Deferred > 0) { pending.Attempts.ShouldBeGreaterThan(0); pending.NextTicks.ShouldNotBeNull(); }
+            clock.AdvanceTo(pending.NextTicks ?? clock.GetUtcNow().UtcTicks);
+        }
+        receiver.ReadDirectoryMetadataSource(source.SourceId).ShouldBeNull();
+        receiver.ReadDirectoryGraph(source.SourceId)!.Complete.ShouldBeTrue();
         File.WriteAllText(Path.Combine(MetadataRoot, "topic", "a"), "local edit before reconstruction");
         using var scanner = new Scanner(MetadataRoot, receiver, keys, MetadataDevice) { StageDirectorySnapshots = true }; await scanner.ScanAsync(Token);
         receiver.ReadDirectoryPublication("topic")!.ReconstructionOnly.ShouldBeTrue();

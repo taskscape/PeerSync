@@ -43,9 +43,11 @@ public sealed class TransferSchedulerTests
 
         await Task.Delay(TimeSpan.FromMilliseconds(25), TestContext.Current.CancellationToken);
         waiting.IsCompleted.ShouldBeFalse();
+        scheduler.WaitingCount.ShouldBe(1);
         initial.Complete(succeeded: true);
 
         using TransferScheduler.Lease next = await waiting.WaitAsync(TestContext.Current.CancellationToken);
+        scheduler.WaitingCount.ShouldBe(0);
         next.Complete(succeeded: true);
     }
 
@@ -60,6 +62,7 @@ public sealed class TransferSchedulerTests
             cancellation.Token).AsTask();
         cancellation.Cancel();
         await Should.ThrowAsync<OperationCanceledException>(() => waiting);
+        scheduler.WaitingCount.ShouldBe(0);
 
         initial.Complete(succeeded: true);
         using var next = await scheduler.AcquireAsync("peer-a", TransferScheduler.InitialWindowBytes,

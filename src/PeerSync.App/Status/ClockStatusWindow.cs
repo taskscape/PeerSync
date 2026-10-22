@@ -3,6 +3,9 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using Binding = System.Windows.Data.Binding;
+using Brushes = System.Windows.Media.Brushes;
+using DataGrid = System.Windows.Controls.DataGrid;
 
 namespace PeerSync.App.Status;
 

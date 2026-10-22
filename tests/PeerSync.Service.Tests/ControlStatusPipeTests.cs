@@ -7,6 +7,7 @@ using Grpc.Core;
 using PeerSync.Control.Contracts;
 using PeerSync.Core.Sync;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Settings;
 using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
 using PeerSync.Net;
@@ -26,6 +27,25 @@ public sealed class ControlStatusPipeTests : IDisposable
     private readonly FolderKeys keys = FolderKeys.CreateNew();
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     private static string Pipe => "PeerSync.Control.HostTests-" + Guid.NewGuid().ToString("N");
+
+    [Fact]
+    public async Task ReconnectedControlStreamIncludesBoundedDiagnosticErrors()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "error-feed"), "service", debugEnabled: true);
+        var runtime = new ControlStatusRuntime(journal);
+        journal.Write(new("service.peer_failure", "peer_network")
+            { Level = DiagnosticLevel.Error, ErrorCode = "peer_timeout" });
+        string pipe = Pipe;
+        await using var host = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
+        using var client = Client(pipe, identity.User!);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        stop.CancelAfter(TimeSpan.FromSeconds(5));
+        await using var stream = client.WatchControlEventsAsync(stop.Token).GetAsyncEnumerator(stop.Token);
+        (await stream.MoveNextAsync()).ShouldBeTrue();
+        stream.Current.FullSnapshot.ShouldBeTrue();
+        stream.Current.Errors.ShouldContain(error => error.Code == "peer_timeout" && error.Source == "peer_network");
+    }
 
     [Fact]
     public async Task ActualPipeReturnsUnavailableEmptyRuntimeAndCancellationReleasesEvents()
@@ -86,12 +106,86 @@ public sealed class ControlStatusPipeTests : IDisposable
         var peers = await client.ListPeersAsync(added.FolderId, Token);
         peers.FolderId.ShouldBe(added.FolderId);
         peers.Peers.ShouldBeEmpty();
+        (await client.ListPendingDevicesAsync(Token)).Devices.ShouldBeEmpty();
+        string fingerprint = Convert.ToHexString(Device(12));
+        (await client.DecideDeviceAsync(added.FolderId, fingerprint, "approve", Token)).Completed.ShouldBeTrue();
+        (await client.ListPeersAsync(added.FolderId, Token)).Peers.Single().Approval.ShouldBe("Approved");
+        (await client.DecideDeviceAsync(added.FolderId, fingerprint, "block", Token)).Completed.ShouldBeTrue();
+        (await client.ListPeersAsync(added.FolderId, Token)).Peers.Single().Approval.ShouldBe("Blocked");
+        (await Should.ThrowAsync<RpcException>(() => client.DecideDeviceAsync(
+            added.FolderId, "bad", "approve", Token))).StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        (await client.GetFolderSettingsAsync(added.FolderId, Token)).Json.ShouldContain("rescanIntervalSeconds");
+        var originalSettings = FolderSettings.FromJson((await client.GetFolderSettingsAsync(added.FolderId, Token)).Json);
+        var update = await client.UpdateFolderSettingsAsync(added.FolderId,
+            (originalSettings with { RequireApproval = true, ArchiveDays = 7 }).ToJson(), Token);
+        update.RestartRequired.ShouldBeTrue();
+        FolderSettings.FromJson((await client.GetFolderSettingsAsync(added.FolderId, Token)).Json).RequireApproval.ShouldBeTrue();
+        folderHost.ResolveFolder(added.FolderId).Settings.RequireApproval.ShouldBeFalse();
+        (await Should.ThrowAsync<RpcException>(() => client.UpdateFolderSettingsAsync(
+            added.FolderId, "{\"archiveDays\":0}", Token))).StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        FolderSettings.FromJson((await client.GetFolderSettingsAsync(added.FolderId, Token)).Json).ArchiveDays.ShouldBe(7);
+        (await client.ListArchiveAsync(added.FolderId, cancellationToken: Token)).Versions.ShouldBeEmpty();
+        (await Should.ThrowAsync<RpcException>(() => client.RestoreArchiveAsync(
+            added.FolderId, 999, cancellationToken: Token))).StatusCode.ShouldBe(StatusCode.NotFound);
+        using (var eventStop = CancellationTokenSource.CreateLinkedTokenSource(Token))
+        {
+            eventStop.CancelAfter(TimeSpan.FromSeconds(5));
+            await using var events = client.WatchControlEventsAsync(eventStop.Token).GetAsyncEnumerator(eventStop.Token);
+            (await events.MoveNextAsync()).ShouldBeTrue();
+            events.Current.FullSnapshot.ShouldBeTrue();
+            events.Current.Folders.Select(folder => folder.FolderId).ShouldContain(added.FolderId);
+            events.Current.Folders.Select(folder => folder.FolderId).ShouldContain(joined.FolderId);
+        }
+        using (var metricsStop = CancellationTokenSource.CreateLinkedTokenSource(Token))
+        {
+            metricsStop.CancelAfter(TimeSpan.FromSeconds(5));
+            await using var metrics = client.WatchMetricsAsync(metricsStop.Token).GetAsyncEnumerator(metricsStop.Token);
+            (await metrics.MoveNextAsync()).ShouldBeTrue();
+            metrics.Current.ActiveFolders.ShouldBe(2u);
+            metrics.Current.TransferMetricsAvailable.ShouldBeTrue();
+            metrics.Current.UploadBytesPerSecond.ShouldBe(0UL);
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         var dumped = new List<string>();
         await foreach (var row in client.DumpIndexAsync(added.FolderId, timeout.Token)) dumped.Add(row.Path);
         dumped.ShouldContain("sample.txt");
+    }
+
+    [Fact]
+    public async Task PauseResumeTimedPauseAndRemovePreserveUserFiles()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string statePath = Path.Combine(fixture, "state", "peersync.db");
+        string root = Path.Combine(fixture, "keep-files");
+        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+        Directory.CreateDirectory(root);
+        string userFile = Path.Combine(root, "untouched.txt");
+        await File.WriteAllTextAsync(userFile, "keep", Token);
+        var runtime = new ControlStatusRuntime();
+        await using var folderHost = await InstalledFolderHost.StartForTestAsync(
+            statePath, Device(10), identity.User!.Value, runtime, cancellationToken: Token);
+        runtime.AttachFolderHost(folderHost);
+        string pipe = Pipe;
+        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
+        using var client = Client(pipe, identity.User!);
+        var added = await client.AddFolderAsync(root, Token);
+        (await client.SetIgnoreRulesAsync(added.FolderId, "untouched.txt", Token)).RestartRequired.ShouldBeTrue();
+        (await client.GetIgnoreRulesAsync(added.FolderId, Token)).Rules.ShouldBe("untouched.txt");
+        folderHost.ResolveFolder(added.FolderId).Settings.IgnoreRules.ShouldBe("");
+        (await client.PauseFolderAsync(added.FolderId, Token)).Paused.ShouldBeTrue();
+        (await client.ListFoldersAsync(Token)).Folders.Single().Paused.ShouldBeTrue();
+        (await client.GetFolderSettingsAsync(added.FolderId, Token)).Json.ShouldContain("archiveDays");
+        (await client.ResumeFolderAsync(added.FolderId, Token)).Paused.ShouldBeFalse();
+        folderHost.ResolveFolder(added.FolderId).Settings.IgnoreRules.ShouldBe("untouched.txt");
+        (await client.PauseAllAsync(1, Token)).Completed.ShouldBeTrue();
+        (await client.ListFoldersAsync(Token)).Folders.Single().Paused.ShouldBeTrue();
+        (await client.PauseAllAsync(1, Token)).Completed.ShouldBeTrue();
+        await Until(() => folderHost.ListFolders().Single().Paused == false);
+        (await client.RemoveFolderAsync(added.FolderId, Token)).Completed.ShouldBeTrue();
+        (await client.ListFoldersAsync(Token)).Folders.ShouldBeEmpty();
+        (await File.ReadAllTextAsync(userFile, Token)).ShouldBe("keep");
     }
 
     [Fact]
@@ -163,6 +257,14 @@ public sealed class ControlStatusPipeTests : IDisposable
         (await Should.ThrowAsync<RpcException>(() => client.JoinFolderAsync("invalid", "C:\\", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
         (await Should.ThrowAsync<RpcException>(() => client.GetFolderKeysAsync("unknown", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
         (await Should.ThrowAsync<RpcException>(() => client.ListPeersAsync("unknown", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.GetFolderSettingsAsync("unknown", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.UpdateFolderSettingsAsync("unknown", "{}", Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.RestoreArchiveAsync("unknown", 1, cancellationToken: Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.ListArchiveAsync("unknown", cancellationToken: Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.GetSettingsAsync(Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        (await Should.ThrowAsync<RpcException>(() => client.ListPendingDevicesAsync(Token))).StatusCode.ShouldBe(StatusCode.PermissionDenied);
+        await using var metrics = client.WatchMetricsAsync(Token).GetAsyncEnumerator(Token);
+        (await Should.ThrowAsync<RpcException>(() => metrics.MoveNextAsync().AsTask())).StatusCode.ShouldBe(StatusCode.PermissionDenied);
         await using var index = client.DumpIndexAsync("unknown", Token).GetAsyncEnumerator(Token);
         (await Should.ThrowAsync<RpcException>(() => index.MoveNextAsync().AsTask())).StatusCode.ShouldBe(StatusCode.PermissionDenied);
         host.ActiveSubscriptions.ShouldBe(0); runtime.ReadStatus().Sequence.ShouldBe(before.Sequence + 1);

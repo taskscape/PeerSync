@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using PeerSync.Core.Settings;
 
 namespace PeerSync.Service.Settings;
@@ -11,6 +12,27 @@ internal sealed class SettingsStore(string path)
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
+    private static readonly JsonSerializerOptions ControlJson = new(Json)
+    {
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        MaxDepth = 16,
+    };
+
+    internal static DeviceSettings ParseControlUpdate(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        if (json.Length > 65536) throw new ValidationException("Settings exceed size limit.");
+        using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 16 });
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ValidationException("Settings must be an object.");
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in document.RootElement.EnumerateObject())
+            if (!names.Add(property.Name)) throw new ValidationException("Duplicate device setting.");
+        var value = document.Deserialize<DeviceSettings>(ControlJson)
+            ?? throw new ValidationException("Settings are missing.");
+        Validate(value);
+        return value;
+    }
 
     public DeviceSettings? ReadIfPresent(TextWriter? warnings = null)
         => ReadIfPresent(out _, warnings);
@@ -68,8 +90,12 @@ internal sealed class SettingsStore(string path)
     {
         Validator.ValidateObject(settings, new ValidationContext(settings), validateAllProperties: true);
         if (settings.SchemaVersion != 1) throw new ValidationException("Unsupported settings schema version.");
-        if (settings.ControlUserSids.Any(sid => !IsSid(sid)))
+        if (settings.ControlUserSids is null || settings.ControlUserSids.Length > 64
+            || settings.ControlUserSids.Any(sid => !IsSid(sid)))
             throw new ValidationException("ControlUserSids must contain valid Windows SIDs.");
+        if (string.IsNullOrWhiteSpace(settings.DeviceName) || settings.DeviceName.Length > 128
+            || settings.RendezvousServers is null || settings.RendezvousServers.Length > 16)
+            throw new ValidationException("Invalid device settings.");
     }
 
     private void RestoreBackup(string backupPath)

@@ -36,6 +36,8 @@ public sealed class DiagnosticJournal : IDisposable
 
     public bool DebugEnabled { get; }
     public long DroppedEvents => Interlocked.Read(ref droppedEvents);
+    /// <summary>In-process, best-effort metadata feed for local status surfaces.</summary>
+    public event Action<DiagnosticEvent, DateTime>? EntryWritten;
 
     /// <summary>Best effort engine diagnostics. Strict Write remains available for validation tools.</summary>
     public bool TryWrite(DiagnosticEvent entry)
@@ -55,9 +57,10 @@ public sealed class DiagnosticJournal : IDisposable
         if (entry.ErrorCode is not null) ValidateCode(entry.ErrorCode);
         if (entry.RemotePort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(entry), "A diagnostic remote port must be a valid TCP or UDP port.");
+        DateTime occurredUtc = DateTime.UtcNow;
         byte[] line = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            timestampUtc = DateTimeOffset.UtcNow,
+            timestampUtc = new DateTimeOffset(occurredUtc),
             component,
             runId,
             processId = Environment.ProcessId,
@@ -94,6 +97,9 @@ public sealed class DiagnosticJournal : IDisposable
             output.Write(line);
             output.WriteByte((byte)'\n');
         }
+        foreach (Action<DiagnosticEvent, DateTime> observer in EntryWritten?.GetInvocationList() ?? [])
+            try { observer(entry, occurredUtc); }
+            catch (Exception error) when (error is not OutOfMemoryException) { }
     }
 
     private static void ValidateCode(string code)

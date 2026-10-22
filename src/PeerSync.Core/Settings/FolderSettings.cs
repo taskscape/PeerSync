@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using PeerSync.Core.Ignore;
 
 namespace PeerSync.Core.Settings;
 
@@ -22,6 +23,7 @@ public sealed record FolderSettings
     public bool UseTracker { get; init; } = true;
     public bool UseRelay { get; init; } = true;
     public string[] PredefinedHosts { get; init; } = [];
+    public string IgnoreRules { get; init; } = "";
     public bool RequireApproval { get; init; }
     public bool KeepBothCopies { get; init; }
     public bool OverwriteLocalChanges { get; init; }
@@ -36,6 +38,10 @@ public sealed record FolderSettings
             || ArchiveMaxFileBytes < 0 || ArchiveMaxPercentOfVolume is < 1 or > 100 || !Enum.IsDefined(Priority))
             throw new ValidationException("Invalid folder settings range.");
         if (PredefinedHosts is null || PredefinedHosts.Length > 256) throw new ValidationException("Invalid predefined host count.");
+        if (IgnoreRules is null || IgnoreRules.Length > IgnoreMatcher.MaxRuleTextLength)
+            throw new ValidationException("Invalid ignore rules.");
+        try { _ = new IgnoreMatcher(IgnoreRules); }
+        catch (ArgumentException error) { throw new ValidationException("Invalid ignore rules.", error); }
         foreach (string host in PredefinedHosts)
         {
             if (string.IsNullOrWhiteSpace(host) || host.Length > 512 || host.Contains('\\')

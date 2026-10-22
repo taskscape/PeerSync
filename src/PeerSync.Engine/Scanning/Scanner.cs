@@ -47,6 +47,8 @@ public sealed partial class Scanner : IDisposable
     private readonly int hashConcurrency;
     private readonly FolderSettings settings;
     internal Action<string>? Checkpoint { get; set; }
+    /// <summary>Bytes read by completed file-hash passes; best-effort status only.</summary>
+    public event Action<long>? BytesHashed;
     // Development integration gate. Remove before directory feature PR after
     // incoming-root/subtree convergence is proven; production remains inactive.
     internal bool StageDirectorySnapshots { get; init; }
@@ -233,6 +235,10 @@ public sealed partial class Scanner : IDisposable
                     var result = await FileHasher.HashRelativeAsync(root, entry.Path, cancellationToken: token,
                         capture: keys.CanWrite ? (bytes, hash) => blocks.Put(bytes, hash, token) : null).ConfigureAwait(false);
                     Interlocked.Increment(ref hashed);
+                    if (result is { Length: > 0 })
+                        foreach (Action<long> observer in BytesHashed?.GetInvocationList() ?? [])
+                            try { observer(result.Length); }
+                            catch (Exception error) when (error is not OutOfMemoryException) { }
                     if (result is null || result.Length != entry.Native.Length || result.MtimeUtc.Ticks != entry.Native.MtimeTicks
                         || result.ChangeFileTime != entry.Native.ChangeFileTime
                         || result.Attributes != entry.Native.Attributes || result.Volume != root.Volume
