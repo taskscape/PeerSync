@@ -38,7 +38,12 @@ public sealed class StateStore : IAsyncDisposable
             ?? throw new InvalidOperationException("Missing state schema resource.");
         using var reader = new StreamReader(resource);
         string sql = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var database = await Db.OpenAsync(path, [new(1, sql)], cancellationToken).ConfigureAwait(false);
+        using var controlAuditResource = typeof(StateStore).Assembly.GetManifestResourceStream(
+            "PeerSync.Storage.StateDb.Migrations.0002_control_user_audit.sql")
+            ?? throw new InvalidOperationException("Missing control audit migration resource.");
+        using var controlAuditReader = new StreamReader(controlAuditResource);
+        string auditSql = await controlAuditReader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        var database = await Db.OpenAsync(path, [new(1, sql), new(2, auditSql)], cancellationToken).ConfigureAwait(false);
         try { return new(database, timeProvider ?? TimeProvider.System); }
         catch { await database.DisposeAsync().ConfigureAwait(false); throw; }
     }
@@ -166,10 +171,86 @@ public sealed class StateStore : IAsyncDisposable
     {
         using var connection = database.OpenReader();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,occurred_ticks,action,actor_sid,folder_id,device_id FROM audit_log ORDER BY id;";
+        command.CommandText = "SELECT id,occurred_ticks,action,actor_sid,folder_id,device_id,target_sid FROM audit_log ORDER BY id;";
         using var reader = command.ExecuteReader();
         while (reader.Read()) yield return new(reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetFieldValue<byte[]>(4), reader.IsDBNull(5) ? null : reader.GetFieldValue<byte[]>(5));
+            reader.IsDBNull(4) ? null : reader.GetFieldValue<byte[]>(4), reader.IsDBNull(5) ? null : reader.GetFieldValue<byte[]>(5),
+            reader.IsDBNull(6) ? null : reader.GetString(6));
+    }
+
+    public Task<int> AuditControlUserAuthorizationAsync(string actorSid, string targetSid,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateActor(actorSid); ValidateActor(targetSid);
+        return database.WriteAsync((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO audit_log (occurred_ticks,action,actor_sid,target_sid) "
+                + "VALUES ($time,'control-user-authorize-request',$actor,$target);";
+            command.Parameters.AddWithValue("$time", time.GetUtcNow().UtcTicks);
+            command.Parameters.AddWithValue("$actor", actorSid);
+            command.Parameters.AddWithValue("$target", targetSid);
+            return command.ExecuteNonQuery();
+        }, cancellationToken);
+    }
+
+    public Task<int> AuditDeviceSettingsUpdateRequestAsync(string actorSid,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateActor(actorSid);
+        return database.WriteAsync((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO audit_log (occurred_ticks,action,actor_sid) "
+                + "VALUES ($time,'device-settings-update-request',$actor);";
+            command.Parameters.AddWithValue("$time", time.GetUtcNow().UtcTicks);
+            command.Parameters.AddWithValue("$actor", actorSid);
+            return command.ExecuteNonQuery();
+        }, cancellationToken);
+    }
+
+    public Task<int> RecordDeviceDecisionAsync(byte[] folderId, byte[] deviceId, string action,
+        string actorSid, CancellationToken cancellationToken = default)
+    {
+        FolderMaps.RequireBytes(folderId, 32); FolderMaps.RequireBytes(deviceId, 32); ValidateActor(actorSid);
+        if (action is not ("device-approve" or "device-deny" or "device-block"))
+            throw new ArgumentException("Unsupported device decision.", nameof(action));
+        byte[] folder = folderId.ToArray(), device = deviceId.ToArray();
+        return database.WriteAsync((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO audit_log (occurred_ticks,action,actor_sid,folder_id,device_id) "
+                + "VALUES ($time,$action,$actor,$folder,$device);";
+            command.Parameters.AddWithValue("$time", time.GetUtcNow().UtcTicks);
+            command.Parameters.AddWithValue("$action", action); command.Parameters.AddWithValue("$actor", actorSid);
+            command.Parameters.AddWithValue("$folder", folder); command.Parameters.AddWithValue("$device", device);
+            command.ExecuteNonQuery();
+            command.CommandText = "DELETE FROM pending_approvals WHERE folder_id=$folder AND device_id=$device;";
+            command.ExecuteNonQuery();
+            return 1;
+        }, cancellationToken);
+    }
+
+    /// <summary>Bound unauthenticated approval prompts even when a peer repeats a valid folder proof.</summary>
+    public Task<bool> RecordPendingApprovalAsync(byte[] folderId, byte[] deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        FolderMaps.RequireBytes(folderId, 32); FolderMaps.RequireBytes(deviceId, 32);
+        byte[] folder = folderId.ToArray(), device = deviceId.ToArray();
+        return database.WriteAsync((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.Parameters.AddWithValue("$folder", folder); command.Parameters.AddWithValue("$device", device);
+            command.CommandText = "SELECT 1 FROM pending_approvals WHERE folder_id=$folder AND device_id=$device;";
+            if (command.ExecuteScalar() is not null) return true;
+            command.CommandText = "SELECT count(*) FROM pending_approvals WHERE folder_id=$folder;";
+            if ((long)command.ExecuteScalar()! >= 256) return false;
+            command.CommandText = "INSERT INTO pending_approvals (folder_id,device_id,name,requested_ticks) "
+                + "VALUES ($folder,$device,NULL,$time);";
+            command.Parameters.AddWithValue("$time", time.GetUtcNow().UtcTicks);
+            command.ExecuteNonQuery();
+            return true;
+        }, cancellationToken);
     }
 
     public ValueTask DisposeAsync() => database.DisposeAsync();

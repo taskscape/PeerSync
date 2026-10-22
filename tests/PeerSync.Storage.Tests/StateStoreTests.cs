@@ -22,6 +22,33 @@ public sealed class StateStoreTests : IDisposable
     public StateStoreTests() => Directory.CreateDirectory(root);
 
     [Fact]
+    public async Task ControlUserAuthorizationRecordsActorAndTargetInProtectedAudit()
+    {
+        await using var state = await StateStore.OpenAsync(DatabasePath,
+            cancellationToken: TestContext.Current.CancellationToken);
+        const string target = "S-1-5-21-1-2-3-1002";
+        (await state.AuditControlUserAuthorizationAsync(Actor, target,
+            TestContext.Current.CancellationToken)).ShouldBe(1);
+        var row = state.ReadAudit().Single();
+        row.Action.ShouldBe("control-user-authorize-request");
+        row.ActorSid.ShouldBe(Actor);
+        row.TargetSid.ShouldBe(target);
+    }
+
+    [Fact]
+    public async Task DeviceSettingsUpdateRequestRecordsTheAuthorizedActor()
+    {
+        await using var state = await StateStore.OpenAsync(DatabasePath,
+            cancellationToken: TestContext.Current.CancellationToken);
+        (await state.AuditDeviceSettingsUpdateRequestAsync(Actor,
+            TestContext.Current.CancellationToken)).ShouldBe(1);
+        var row = state.ReadAudit().Single();
+        row.Action.ShouldBe("device-settings-update-request");
+        row.ActorSid.ShouldBe(Actor);
+        row.FolderId.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task OversizedSettingsCannotReplaceReadablePersistedStateOrCommitAnAudit()
     {
         using var keys = FolderKeys.CreateNew();

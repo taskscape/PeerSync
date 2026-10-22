@@ -1,1 +1,17 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" /><InternalsVisibleTo Include="PeerSync.App.Tests" /><InternalsVisibleTo Include="PeerSync.InstalledProbe" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>PeerSync</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="QRCoder" />
+    <ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
+    <ProjectReference Include="../PeerSync.Crypto/PeerSync.Crypto.csproj" />
+    <InternalsVisibleTo Include="PeerSync.App.Tests" />
+    <InternalsVisibleTo Include="PeerSync.InstalledProbe" />
+  </ItemGroup>
+</Project>

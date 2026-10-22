@@ -35,6 +35,9 @@ public sealed class TransportFolder : IAsyncDisposable
     private readonly TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int disposed;
 
+    /// <summary>Verified payload bytes served to or received from an authenticated peer.</summary>
+    public event Action<long, bool>? BytesTransferred;
+
     public TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         FolderSettings? settings = null, TimeProvider? timeProvider = null, DiagnosticJournal? journal = null)
         : this(rootPath, index, keys, ownDevice, settings, timeProvider, journal, directorySnapshots: true, ignore: null) { }
@@ -51,9 +54,9 @@ public sealed class TransportFolder : IAsyncDisposable
 
     internal TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal,
-        TransferThrottle? uploadThrottle, TransferThrottle? downloadThrottle)
+        TransferThrottle? uploadThrottle, TransferThrottle? downloadThrottle, IgnoreMatcher? ignore = null)
         : this(rootPath, index, keys, ownDevice, settings, timeProvider, journal, directorySnapshots: true,
-            uploadThrottle: uploadThrottle, downloadThrottle: downloadThrottle, ignore: null) { }
+            uploadThrottle: uploadThrottle, downloadThrottle: downloadThrottle, ignore: ignore) { }
 
     private TransportFolder(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
         FolderSettings? settings, TimeProvider? timeProvider, DiagnosticJournal? journal, bool directorySnapshots,
@@ -82,6 +85,7 @@ public sealed class TransportFolder : IAsyncDisposable
     internal void RecordIndexPush(string eventName, long targetSequence, Guid? sessionId = null, Exception? error = null)
         => puller.RecordIndexPush(eventName, targetSequence, sessionId, error);
     public byte[] FolderId { get { RequireOpen(); return folderId.ToArray(); } }
+    public int PendingTransferRequests => transferScheduler.WaitingCount;
 
     /// <summary>Active authenticated-session clocks and bounded recent closed
     /// failures, for service status. Truncation is explicit; this grants no admission.</summary>
@@ -164,6 +168,7 @@ public sealed class TransportFolder : IAsyncDisposable
                 windowLease.Complete(succeeded: true);
                 if (attempt != 0)
                     puller.RecordBlockRoute("transfer.block_peer_failover", attempt, length, peer.SharedSessionId);
+                ReportBytesTransferred(response.Length, download: true);
                 return response.ToArray();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -252,7 +257,7 @@ public sealed class TransportFolder : IAsyncDisposable
                 }
             }
             token.ThrowIfCancellationRequested();
-            if (unresolved.Count == 0) return results.Select(item => item!).ToArray();
+            if (unresolved.Count == 0) return CompleteBatch(results);
         }
 
         for (int attempt = fallbackStart; attempt < candidates.Length && unresolved.Count != 0; attempt++)
@@ -291,7 +296,23 @@ public sealed class TransportFolder : IAsyncDisposable
                 ? peerError.ErrorCode : PeerSync.Protocol.Wire.BlockError.Unavailable;
             results[index] = new(ReadOnlyMemory<byte>.Empty, errorCode);
         }
-        return results.Select(item => item ?? throw new InvalidDataException("A block batch completed with a missing result.")).ToArray();
+        return CompleteBatch(results);
+    }
+
+    private PeerBlockResult[] CompleteBatch(PeerBlockResult?[] results)
+    {
+        PeerBlockResult[] complete = results.Select(item =>
+            item ?? throw new InvalidDataException("A block batch completed with a missing result.")).ToArray();
+        foreach (var item in complete)
+            if (item.ErrorCode is null) ReportBytesTransferred(item.Data.Length, download: true);
+        return complete;
+    }
+
+    private void ReportBytesTransferred(long bytes, bool download)
+    {
+        foreach (Action<long, bool> subscriber in BytesTransferred?.GetInvocationList() ?? [])
+            try { subscriber(bytes, download); }
+            catch (Exception error) when (error is not OutOfMemoryException) { }
     }
 
     private void RequirePublishedPath(ReadOnlyMemory<byte> hash, int length, Guid sessionId, CancellationToken token)
@@ -473,7 +494,7 @@ public sealed class TransportFolder : IAsyncDisposable
                 using var blocks = new PublishedBlocks(folder.rootPath, folder.index);
                 return blocks.TryRead(frozen, length, cancellationToken) ?? throw new FileNotFoundException("Published block is unavailable.");
             }, cancellationToken).ConfigureAwait(false);
-            session.RequireClock(); return bytes;
+            session.RequireClock(); folder.ReportBytesTransferred(bytes.Length, download: false); return bytes;
         }
         public ValueTask DisposeAsync() { session.Disconnect(); folder.RetireClockSession(session); return ValueTask.CompletedTask; }
     }

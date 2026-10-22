@@ -24,6 +24,13 @@ public sealed class TransportFolderTests : IDisposable
     public async Task RealSignedIndexAndVerifiedChunksTransferThroughInterfaceAndForwardToThirdNode()
     {
         await using var a = await NodeAsync(1); await using var b = await NodeAsync(2); await using var c = await NodeAsync(3);
+        long aUploaded = 0, aDownloaded = 0, bUploaded = 0, cDownloaded = 0;
+        a.Engine.BytesTransferred += (bytes, download) =>
+        { if (download) Interlocked.Add(ref aDownloaded, bytes); else Interlocked.Add(ref aUploaded, bytes); };
+        b.Engine.BytesTransferred += (bytes, download) =>
+        { if (!download) Interlocked.Add(ref bUploaded, bytes); };
+        c.Engine.BytesTransferred += (bytes, download) =>
+        { if (download) Interlocked.Add(ref cDownloaded, bytes); };
         byte[] data = new byte[2 * 1024 * 1024 + 37]; new Random(813).NextBytes(data);
         Directory.CreateDirectory(Path.Combine(b.Root, "nested")); File.WriteAllBytes(Path.Combine(b.Root, "nested", "file.bin"), data);
         File.WriteAllText(Path.Combine(b.Root, "empty"), ""); await Scan(b);
@@ -36,6 +43,10 @@ public sealed class TransportFolderTests : IDisposable
         a.Index.LocalFiles.Find("nested/file.bin")!.Record!.Body.ToArray().ShouldBe(original.Body.ToArray());
         await using var ca = await c.Engine.ConnectAsync(ec.Connect(a.Id), Token); await ca.SynchronizeAsync(cancellationToken: Token); await c.Engine.RunPassAsync(Token);
         File.ReadAllBytes(Path.Combine(c.Root, "nested", "file.bin")).ShouldBe(data);
+        aDownloaded.ShouldBeGreaterThanOrEqualTo(data.Length);
+        bUploaded.ShouldBeGreaterThanOrEqualTo(data.Length);
+        aUploaded.ShouldBeGreaterThanOrEqualTo(data.Length);
+        cDownloaded.ShouldBeGreaterThanOrEqualTo(data.Length);
     }
 
     [Fact]

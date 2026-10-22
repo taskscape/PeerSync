@@ -12,10 +12,60 @@ service PeerSyncControl {
   rpc GetFolderKeys(GetFolderKeysRequest) returns (GetFolderKeysResponse);
   rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
   rpc DumpIndex(DumpIndexRequest) returns (stream IndexEntry);
+  rpc WatchMetrics(StatusRequest) returns (stream ControlMetrics);
+  rpc RemoveFolder(FolderRequest) returns (OperationResult);
+  rpc PauseFolder(FolderRequest) returns (FolderInfo);
+  rpc ResumeFolder(FolderRequest) returns (FolderInfo);
+  rpc PauseAll(PauseAllRequest) returns (OperationResult);
+  rpc ListPendingDevices(StatusRequest) returns (ListPendingDevicesResponse);
+  rpc ApproveDevice(DeviceActionRequest) returns (OperationResult);
+  rpc DenyDevice(DeviceActionRequest) returns (OperationResult);
+  rpc BlockDevice(DeviceActionRequest) returns (OperationResult);
+  rpc GetFolderSettings(FolderRequest) returns (SettingsResponse);
+  rpc UpdateFolderSettings(UpdateFolderSettingsRequest) returns (SettingsResponse);
+  rpc GetIgnoreRules(FolderRequest) returns (IgnoreRulesResponse);
+  rpc SetIgnoreRules(SetIgnoreRulesRequest) returns (IgnoreRulesResponse);
+  rpc GetSettings(StatusRequest) returns (SettingsResponse);
+  rpc UpdateSettings(UpdateSettingsRequest) returns (SettingsResponse);
+  rpc ListOverwritten(FolderRequest) returns (ListArchiveResponse);
+  rpc RestoreOverwritten(RestoreArchiveRequest) returns (OperationResult);
+  rpc ListArchive(FolderRequest) returns (ListArchiveResponse);
+  rpc RestoreArchived(RestoreArchiveRequest) returns (OperationResult);
+  rpc AuthorizeUser(AuthorizeUserRequest) returns (OperationResult);
 }
 
 message StatusRequest {}
-message ControlEvent { ServiceStatus status = 1; }
+message ControlEvent {
+  ServiceStatus status = 1;
+  bool full_snapshot = 2;
+  repeated FolderInfo folders = 3;
+  repeated FolderPeerInfo peers = 4;
+  repeated ArchiveInfo overwrites = 5;
+  repeated ControlError errors = 6;
+  bool truncated = 7;
+  repeated PendingDeviceInfo pending_devices = 8;
+  repeated ControlTransferProgress progress = 9;
+}
+message ControlError { string code = 1; string source = 2; int64 occurred_utc_ticks = 3; }
+message ControlTransferProgress {
+  string folder_id = 1;
+  uint64 uploaded_bytes = 2;
+  uint64 downloaded_bytes = 3;
+}
+message ControlMetrics {
+  string instance_id = 1;
+  uint64 sequence = 2;
+  int64 sampled_utc_ticks = 3;
+  uint32 active_peer_sessions = 4;
+  uint32 active_folders = 5;
+  uint32 pending_devices = 6;
+  uint64 upload_bytes_per_second = 7;
+  uint64 download_bytes_per_second = 8;
+  // Requests waiting for per-peer transfer-window capacity.
+  uint32 queue_depth = 9;
+  uint64 hashing_bytes_per_second = 10;
+  bool transfer_metrics_available = 11;
+}
 message ListFoldersRequest {}
 message SetPredefinedHostsRequest { string folder = 1; repeated string hosts = 2; }
 message SetPredefinedHostsResponse { string folder_id = 1; repeated string hosts = 2; }
@@ -39,6 +89,7 @@ message PeerInfo {
   optional int64 last_seen_utc_ticks = 5;
 }
 message ListPeersResponse { string folder_id = 1; repeated PeerInfo peers = 2; }
+message FolderPeerInfo { string folder_id = 1; PeerInfo peer = 2; }
 message DumpIndexRequest { string folder = 1; }
 message IndexEntry {
   string path = 1;
@@ -46,6 +97,28 @@ message IndexEntry {
   int64 modified_utc_ticks = 3;
   bool deleted = 4;
 }
+message FolderRequest { string folder = 1; }
+message OperationResult { bool completed = 1; string detail = 2; }
+message PauseAllRequest { int64 duration_seconds = 1; }
+message DeviceActionRequest { string folder = 1; string device_id = 2; }
+message PendingDeviceInfo { string folder_id = 1; string device_id = 2; string name = 3; int64 requested_utc_ticks = 4; }
+message ListPendingDevicesResponse { repeated PendingDeviceInfo devices = 1; bool truncated = 2; }
+message SettingsResponse { string json = 1; bool restart_required = 2; }
+message UpdateFolderSettingsRequest { string folder = 1; string json = 2; }
+message UpdateSettingsRequest { string json = 1; }
+message IgnoreRulesResponse { string folder_id = 1; string rules = 2; bool restart_required = 3; }
+message SetIgnoreRulesRequest { string folder = 1; string rules = 2; }
+message ArchiveInfo {
+  int64 id = 1;
+  string original_path = 2;
+  int64 archived_utc_ticks = 3;
+  int64 size = 4;
+  bool overwritten = 5;
+  string folder_id = 6;
+}
+message ListArchiveResponse { string folder_id = 1; repeated ArchiveInfo versions = 2; bool truncated = 3; }
+message RestoreArchiveRequest { string folder = 1; int64 archive_id = 2; bool as_copy = 3; string copy_path = 4; }
+message AuthorizeUserRequest { string sid = 1; }
 
 message ServiceStatus {
   // Canonical Guid N format. Sequence is scoped to this service instance.

@@ -62,16 +62,17 @@ Plan created 2026-10-18. Target: PeerSync v1.0 (phases P0 to P5), optional extra
 | --- | --- | --- | --- |
 | P0 Foundations and spikes | 1-3 | Passed; physical LAN/NAT validation remains mandatory at P2/P4 under the user's deferral | 2026-10-19 |
 | P1 Local sync engine | 4-8 | Accepted with the explicit CI timing exception: all correctness, two actual campaign dates and the repaired 100000-file corpus are accepted. PR #42 is merged; hosted timeout/incomplete scope stays visible and full current-source verification remains required before release. Installed-service/production clock integration remains mandatory at P2.5.7/Gate P2. | 2026-10-21, qualified timing exception |
-| P2 LAN sync as a service | 9-13 | PRs #44 and #45 merged after green nine-job PR checks. The first main run exposed and repaired an installed-host connection race; the second main run passed that test but its generated hierarchical seed `1718992307` found a descendant-tombstone/ancestor-publication deadlock. A subsequent local batch found seven-node publication-backlog seed `1994764809`. Both exact seeds now pass locally within the unchanged 32-round bound and are retained in the existing CI shards; the [merge audit](docs/verification/P2-code-merge-2026-10-22.md) keeps the failed runs and remaining checks. Current-head local and hosted acceptance remain open. The self-contained package runs under local SCM; its verified client observed authenticated skew/recovery and a SHA-256-verified transfer. The second installed PC, authenticated external session, physical LAN corpus/throughput, recovery soak and remaining P2 gate evidence remain open. | - |
-| P3 WPF app and installer | 14-17 | Not started | - |
+| P2 LAN sync as a service | 9-13 | Merged code and current-head nine-job main CI passed [run 39812526107](https://github.com/taskscape/PeerSync/actions/runs/39812526107), permitting P3 implementation under the approved phasing. The [merge audit](docs/verification/P2-code-merge-2026-10-22.md) retains earlier failed seeds and their repairs. The self-contained package runs under local SCM; its verified client observed authenticated skew/recovery and a SHA-256-verified transfer. The second installed PC, authenticated external session, physical LAN corpus/throughput, recovery soak and remaining P2 gate evidence remain open. | - |
+| P3 WPF app and installer | 14-17 | In progress: control RPCs/streams, WPF dashboard and signed local x64/Arm64 installer builds are implemented on a branch. Focused local checks pass; full PR/main CI, clean Windows VM and two-PC gates remain open. | - |
 | P4 Internet sync | 18-22 | Not started | - |
 | P5 Hardening and v1.0 | 23-26 | Not started | - |
 | P6 After v1.0 (optional) | 2-8 per feature | Not started | - |
 
 The 2026-10-22 implementation-order exception allows later phase code to
 proceed while physical gates remain open, but it does not change these gate
-statuses or permit a beta/release claim. P3 has not started while the P2
-main-run hierarchical follow-up and required current-head CI are unresolved.
+statuses or permit a beta/release claim. P2 current-head CI passed on main
+before P3 began; P3 code and CI are in progress, and the physical P2 gate
+remains open.
 
 ---
 
@@ -81,6 +82,7 @@ Newest first. Every row is also reflected in the design doc.
 
 | Date | Decision | Design doc section |
 | --- | --- | --- |
+| 2026-10-22 | Start P3 app/installer implementation after green P2 main CI. Keep overlapping self-contained publish files in three install subdirectories, sign PE payloads/setup/uninstaller with Inno 7.1, and add one sequential x64/Arm64 CI packaging job with ephemeral test signing and small evidence manifests. Retain physical P2/P3 checks before beta. | Packaging and deployment; P3 app and installer |
 | 2026-10-22 | User approves a narrow Server 2025 native CI exception after PR #44 run 39774850407 stopped 631 passing Engine cases at its 840-second internal deadline. Keep the entire native/Engine scope and Server 2022 at 15/14 minutes; set only Server 2025 to a 25-minute Actions cap and 24-minute shared script budget, retaining one minute for upload/cleanup. The prior P1 15-minute requirement is superseded only for Server 2025; actual current-head PR/main CI must still pass. | Testing strategy; docs/proposals/P2-server2025-ci-budget.md |
 | 2026-10-22 | User approves a narrow exception to the earlier five-job/no-new-jobs boundary-CI design. Isolate the ten-minute fuzz/seven baseline methods and three exact retained-seed cohorts on four Windows runners, then require one same-run/attempt, same-source/binary, 15-method aggregate evidence job. Preserve each shard's 45-minute internal/50-minute hosted limit, all cases/seeds/oracles, failed historical runs and actual green PR/main CI before P3. | Testing strategy; docs/proposals/P2-boundary-ci-runner-isolation.md |
 | 2026-10-22 | User approves a narrow implementation-order exception for P2–P5: after each phase's merged code, local checks and required CI are green, begin the next phase while physical/network/elapsed-time gates stay unchecked and mandatory before any beta or release. Keep P0.2.1 at P2 and P0.2.2 at P4; complete P2.2.4 punch/relay source integration with P4.2 without marking P2.2.4 done early. Gate P2 MITM/reflection CI remains a prerequisite to P3. | Implementation validation phasing; docs/proposals/P2-P5-implementation-phasing.md |
@@ -2274,54 +2276,52 @@ Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
 
 ### P3.1 Control API completion
 
-- [ ] **P3.1.1 Remaining RPCs** (`control.proto`)
+- [ ] **P3.1.1 Remaining RPCs** (`control.proto`) [WIP @Codex 2026-10-22]
   - Done when: every RPC in the design doc's control API table exists, including `ListOverwritten`, `RestoreOverwritten`, `GetFolderKeys` (audited), `ApproveDevice`, `DenyDevice`, `BlockDevice`, `UpdateFolderSettings`, `Get/SetIgnoreRules`, `PauseAll` and `AuthorizeUser`. Every sensitive RPC is covered by the identity interceptor.
-  - Local progress: the audited `GetFolderKeys` RPC is implemented early for the CLI share flow. It checks the caller identity on each request and uses the state-store's audit transaction with the caller SID. The other phase-3 RPCs remain open.
-- [ ] **P3.1.2 Event and metrics streams**
+  - Branch progress: all listed RPCs and the per-request identity check are implemented; `GetFolderKeys` and authorization decisions have durable actor-SID audit records. They remain unchecked until merged code and CI pass.
+- [ ] **P3.1.2 Event and metrics streams** [WIP @Codex 2026-10-22]
   - Done when: `WatchEvents` delivers folder state, progress, peers, overwrites and errors. `WatchMetrics` sends a snapshot every second. A client that reconnects gets a full snapshot first.
 
 ### P3.2 WPF app
 
-- [ ] **P3.2.1 App skeleton** (`PeerSync.App/`)
+- [ ] **P3.2.1 App skeleton** (`PeerSync.App/`) [WIP @Codex 2026-10-22]
   - Done when: it uses the generic host, `CommunityToolkit.Mvvm` and the Fluent theme. A single instance is enforced (a named mutex, and a second launch activates the first). `--tray` starts minimized to the tray. The pipe client reconnects with backoff and shows the "Service not running" banner.
-- [ ] **P3.2.2 Folders screen and Add / Join / Share**
+- [ ] **P3.2.2 Folders screen and Add / Join / Share** [WIP @Codex 2026-10-22]
   - Done when: Add runs the folder-access grant (5.3) with progress and the elevation fallback, then `AddFolder`. Join validates the key checksum live. Share shows the keys with copy buttons and a QR code (`QRCoder`), with the RW key hidden until clicked.
-- [ ] **P3.2.3 Folder details**
+- [ ] **P3.2.3 Folder details** [WIP @Codex 2026-10-22]
   - Done when: the Peers, Activity, Overwritten (restore my version) and Settings tabs work, including the ignore-rule editor.
-- [ ] **P3.2.4 Pending devices and preferences**
+- [ ] **P3.2.4 Pending devices and preferences** [WIP @Codex 2026-10-22]
   - Done when: approve, deny and block show the DeviceId fingerprint. Preferences edit `DeviceSettings` through `UpdateSettings`.
-- [ ] **P3.2.5 Tray and toasts**
+- [ ] **P3.2.5 Tray and toasts** [WIP @Codex 2026-10-22]
   - Done when: the icon reflects the overall state, the menu offers Pause for 30 min, 1 h or until resumed, and toasts appear for overwritten edits, errors and pending devices.
-- [ ] **P3.2.6 "Authorize this account"**
+- [ ] **P3.2.6 "Authorize this account"** [WIP @Codex 2026-10-22]
   - Done when: a user outside `PeerSync Users` is offered elevation. Afterwards the app connects without signing out (5, rule 7).
 
 ### P3.3 Installer (Inno Setup)
 
-- [ ] **P3.3.1 `installer/PeerSync.iss`**
+- [ ] **P3.3.1 `installer/PeerSync.iss`** [WIP @Codex 2026-10-22]
   - Done when: it implements the design doc's script outline (service creation, `--init`, firewall, local group, autostart task, uninstall entries), and `ISCC /DArch=arm64` builds the Arm64 variant.
-- [ ] **P3.3.2 Upgrade path**
+- [ ] **P3.3.2 Upgrade path** [WIP @Codex 2026-10-22]
   - Done when: installing v(n+1) over v(n) stops the service in `PrepareToInstall`, replaces files, re-runs `--init` (a no-op), restarts the service, and keeps all folders and settings. A downgrade is refused in `InitializeSetup`.
-- [ ] **P3.3.3 Uninstall with data prompt**
+- [ ] **P3.3.3 Uninstall with data prompt** [WIP @Codex 2026-10-22]
   - Done when: an interactive uninstall asks whether to remove data (default: keep). Yes runs `--remove-data`. A silent uninstall keeps data.
   - Code: 9.1.
-- [ ] **P3.3.4 Signing and silent install**
+- [ ] **P3.3.4 Signing and silent install** [WIP @Codex 2026-10-22]
   - Done when: the setup, uninstaller and EXEs are signed (or BLOCKED on the certificate). `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"` installs unattended and leaves a log with `/LOG`.
 
 ### 9.1 Code: uninstall data prompt (P3.3.3)
 
-**Tricky:** ask at `usUninstall`, before files are removed. At `usPostUninstall` the service EXE that performs the cleanup is already gone.
+**Tricky:** stop the service and ask at `usUninstall`, before files are removed. At `usPostUninstall` the service EXE that performs the cleanup is already gone. The implementation polls for a stopped service, then uses the checked `RequireSuccess` helper; silent uninstall skips the prompt and keeps data.
 
 ```pascal
 // installer/PeerSync.iss, [Code] section
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  Code: Integer;
 begin
   if (CurUninstallStep = usUninstall) and (not UninstallSilent) then
     if MsgBox('Also remove PeerSync settings, databases, logs and the device certificate?' + #13#10 +
               'Your synced folders and their files are not touched.',
               mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-      Exec(ExpandConstant('{app}\PeerSync.Service.exe'), '--remove-data', '', SW_HIDE, ewWaitUntilTerminated, Code);
+      RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--remove-data');
 end;
 ```
 

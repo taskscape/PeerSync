@@ -10,6 +10,19 @@ public sealed class DiagnosticJournalTests : IDisposable
     private readonly string directory = Path.Combine(Path.GetTempPath(), "PeerSync-test-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void LocalObserverReceivesOnlyPersistedMetadataAndCannotBreakTheJournal()
+    {
+        using var log = new DiagnosticJournal(directory, "test");
+        var seen = new List<DiagnosticEvent>();
+        log.EntryWritten += (entry, _) => seen.Add(entry);
+        log.EntryWritten += (_, _) => throw new InvalidOperationException("observer failure");
+        log.Write(new("transfer.failed", "download") { Level = DiagnosticLevel.Error, ErrorCode = "timeout" });
+        seen.Count.ShouldBe(1);
+        seen[0].ErrorCode.ShouldBe("timeout");
+        File.ReadAllLines(Path.Combine(directory, "debug.jsonl")).Length.ShouldBe(1);
+    }
+
+    [Fact]
     public void BestEffortWritesCountUnavailableOrDisposedOutputWithoutChangingStrictWrite()
     {
         using var log = new DiagnosticJournal(directory, "test");

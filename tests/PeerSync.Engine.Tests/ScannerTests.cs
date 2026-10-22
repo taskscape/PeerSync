@@ -30,8 +30,11 @@ public sealed class ScannerTests : IDisposable
         await Write("dir/é.txt", "content"); await Write("empty", "");
         await using var index = await FolderIndex.OpenAsync(Database, Token);
         using var scanner = new Scanner(Root, index, keys, Device);
+        long hashedBytes = 0;
+        scanner.BytesHashed += bytes => Interlocked.Add(ref hashedBytes, bytes);
         var first = await scanner.ScanAsync(Token);
         first.Problems.ShouldBeEmpty(); first.Hashed.ShouldBe(2); first.Updated.ShouldBe(3);
+        hashedBytes.ShouldBe(7);
         foreach (var row in index.LocalFiles.ReadAll())
         {
             SignedRecordFactory.TryOpen(row.Record!, keys, out var body).ShouldBeTrue();
@@ -42,12 +45,14 @@ public sealed class ScannerTests : IDisposable
         long sequence = index.ReadIndexBatch(0).LastSequence;
         var second = await scanner.ScanAsync(Token);
         second.Unchanged.ShouldBe(3); second.Hashed.ShouldBe(0); second.Updated.ShouldBe(0);
+        hashedBytes.ShouldBe(7);
         index.ReadIndexBatch(0).LastSequence.ShouldBe(sequence);
         // Child changes touch the directory's timestamp but must not create a directory version.
         var directory = index.LocalFiles.Find("dir")!;
         await Write("dir/new", "new child");
         var third = await scanner.ScanAsync(Token);
         third.Hashed.ShouldBe(1); third.Updated.ShouldBe(1);
+        hashedBytes.ShouldBe(16);
         index.LocalFiles.Find("dir")!.LocalSequence.ShouldBe(directory.LocalSequence);
     }
 

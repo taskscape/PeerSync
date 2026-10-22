@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using PeerSync.Service.Init;
 using PeerSync.Service.Settings;
+using PeerSync.Service.Control;
 using Shouldly;
 using Xunit;
 
@@ -108,6 +109,30 @@ public sealed class InitCommandTests : IDisposable
 
         settings.ShouldBeNull();
         wasRecovered.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ControlSettingsAuthorizeUserIsDurableAndNormalUpdatesCannotChangeIdentity()
+    {
+        string path = Path.Combine(root, "config", "settings.json");
+        var store = new SettingsStore(path);
+        var current = new PeerSync.Core.Settings.DeviceSettings
+        {
+            ListenPort = 47821, DeviceCertificateThumbprint = FakePlatform.Thumbprint,
+            ControlUserSids = [FakePlatform.UserSid.Value],
+        };
+        store.Save(current);
+        var control = new ControlSettingsRuntime(path);
+        const string secondSid = "S-1-5-21-1-2-3-1002";
+        control.AuthorizeUser(secondSid).ShouldBeTrue();
+        control.AuthorizeUser(secondSid).ShouldBeFalse();
+        store.ReadIfPresent()!.ControlUserSids.ShouldBe([FakePlatform.UserSid.Value, secondSid]);
+        Should.Throw<ArgumentException>(() => control.Update(
+            ControlSettingsRuntime.Serialize(current)));
+        var update = control.Update(ControlSettingsRuntime.Serialize(
+            store.ReadIfPresent()! with { UploadLimitBytesPerSec = 1024 }));
+        update.RestartRequired.ShouldBeTrue();
+        store.ReadIfPresent()!.UploadLimitBytesPerSec.ShouldBe(1024);
     }
 
     [Fact]

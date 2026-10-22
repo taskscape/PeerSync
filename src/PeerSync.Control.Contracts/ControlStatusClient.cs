@@ -57,6 +57,31 @@ public sealed class ControlStatusClient : IDisposable
         using var call = client.JoinFolderAsync(new() { Key = key, Path = path }, deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
         return await call.ResponseAsync.ConfigureAwait(false);
     }
+    public async Task<Wire.FolderInfo> PauseFolderAsync(string folder, CancellationToken cancellationToken = default)
+    {
+        using var call = client.PauseFolderAsync(new() { Folder = folder },
+            deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.FolderInfo> ResumeFolderAsync(string folder, CancellationToken cancellationToken = default)
+    {
+        using var call = client.ResumeFolderAsync(new() { Folder = folder },
+            deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.OperationResult> RemoveFolderAsync(string folder, CancellationToken cancellationToken = default)
+    {
+        using var call = client.RemoveFolderAsync(new() { Folder = folder },
+            deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.OperationResult> PauseAllAsync(long durationSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        using var call = client.PauseAllAsync(new() { DurationSeconds = durationSeconds },
+            deadline: DateTime.UtcNow.AddSeconds(60), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
     public async Task<Wire.GetFolderKeysResponse> GetFolderKeysAsync(string folder, CancellationToken cancellationToken = default)
     {
         using var call = client.GetFolderKeysAsync(new() { Folder = folder }, deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
@@ -65,6 +90,89 @@ public sealed class ControlStatusClient : IDisposable
     public async Task<Wire.ListPeersResponse> ListPeersAsync(string folder, CancellationToken cancellationToken = default)
     {
         using var call = client.ListPeersAsync(new() { Folder = folder }, deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.SettingsResponse> GetFolderSettingsAsync(string folder, CancellationToken cancellationToken = default)
+    {
+        using var call = client.GetFolderSettingsAsync(new() { Folder = folder },
+            deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.SettingsResponse> UpdateFolderSettingsAsync(string folder, string json,
+        CancellationToken cancellationToken = default)
+    {
+        using var call = client.UpdateFolderSettingsAsync(new() { Folder = folder, Json = json },
+            deadline: DateTime.UtcNow.AddSeconds(30), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.IgnoreRulesResponse> GetIgnoreRulesAsync(string folder,
+        CancellationToken cancellationToken = default)
+    {
+        using var call = client.GetIgnoreRulesAsync(new() { Folder = folder },
+            deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.IgnoreRulesResponse> SetIgnoreRulesAsync(string folder, string rules,
+        CancellationToken cancellationToken = default)
+    {
+        using var call = client.SetIgnoreRulesAsync(new() { Folder = folder, Rules = rules },
+            deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.OperationResult> RestoreArchiveAsync(string folder, long archiveId,
+        bool overwrittenOnly = false, string? copyPath = null, CancellationToken cancellationToken = default)
+    {
+        var request = new Wire.RestoreArchiveRequest { Folder = folder, ArchiveId = archiveId,
+            AsCopy = copyPath is not null, CopyPath = copyPath ?? "" };
+        using var call = overwrittenOnly
+            ? client.RestoreOverwrittenAsync(request, deadline: DateTime.UtcNow.AddMinutes(5), cancellationToken: cancellationToken)
+            : client.RestoreArchivedAsync(request, deadline: DateTime.UtcNow.AddMinutes(5), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.SettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        using var call = client.GetSettingsAsync(new(), deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.ListPendingDevicesResponse> ListPendingDevicesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var call = client.ListPendingDevicesAsync(new(), deadline: DateTime.UtcNow.AddSeconds(10),
+            cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.OperationResult> DecideDeviceAsync(string folder, string deviceId,
+        string decision, CancellationToken cancellationToken = default)
+    {
+        var request = new Wire.DeviceActionRequest { Folder = folder, DeviceId = deviceId };
+        using var call = decision switch
+        {
+            "approve" => client.ApproveDeviceAsync(request, deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: cancellationToken),
+            "deny" => client.DenyDeviceAsync(request, deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: cancellationToken),
+            "block" => client.BlockDeviceAsync(request, deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: cancellationToken),
+            _ => throw new ArgumentException("Unknown device decision.", nameof(decision)),
+        };
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.OperationResult> AuthorizeUserAsync(string sid,
+        CancellationToken cancellationToken = default)
+    {
+        using var call = client.AuthorizeUserAsync(new() { Sid = sid },
+            deadline: DateTime.UtcNow.AddSeconds(15), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.SettingsResponse> UpdateSettingsAsync(string json, CancellationToken cancellationToken = default)
+    {
+        using var call = client.UpdateSettingsAsync(new() { Json = json },
+            deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
+        return await call.ResponseAsync.ConfigureAwait(false);
+    }
+    public async Task<Wire.ListArchiveResponse> ListArchiveAsync(string folder, bool overwrittenOnly = false,
+        CancellationToken cancellationToken = default)
+    {
+        using var call = overwrittenOnly
+            ? client.ListOverwrittenAsync(new() { Folder = folder }, deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken)
+            : client.ListArchiveAsync(new() { Folder = folder }, deadline: DateTime.UtcNow.AddSeconds(10), cancellationToken: cancellationToken);
         return await call.ResponseAsync.ConfigureAwait(false);
     }
     public async IAsyncEnumerable<Wire.IndexEntry> DumpIndexAsync(string folder,
@@ -81,6 +189,30 @@ public sealed class ControlStatusClient : IDisposable
         {
             if (update.Status is null) throw new InvalidDataException("Control event has no status.");
             yield return ControlStatusWire.Decode(update.Status);
+        }
+    }
+    public async IAsyncEnumerable<Wire.ControlEvent> WatchControlEventsAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        using var call = client.WatchEvents(new(), cancellationToken: cancellationToken);
+        await foreach (var update in call.ResponseStream.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (update.Status is null || update.CalculateSize() > ControlStatusSnapshot.MaximumMessageBytes)
+                throw new InvalidDataException("Invalid control event frame.");
+            _ = ControlStatusWire.Decode(update.Status);
+            yield return update;
+        }
+    }
+    public async IAsyncEnumerable<Wire.ControlMetrics> WatchMetricsAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        using var call = client.WatchMetrics(new(), cancellationToken: cancellationToken);
+        await foreach (var sample in call.ResponseStream.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (!Guid.TryParseExact(sample.InstanceId, "N", out var instance) || instance == Guid.Empty
+                || sample.Sequence == 0 || sample.SampledUtcTicks < 0 || sample.SampledUtcTicks > DateTime.MaxValue.Ticks)
+                throw new InvalidDataException("Invalid control metrics frame.");
+            yield return sample;
         }
     }
     public void Dispose() => channel.Dispose();

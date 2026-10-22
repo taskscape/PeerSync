@@ -32,15 +32,25 @@ try
     await using var folderHost = await InstalledFolderHost.StartAsync(statePath, settings.DeviceCertificateThumbprint,
         settings, runtime, journal);
     runtime.AttachFolderHost(folderHost);
-    await using var host = await ControlApiHost.StartInstalledAsync(runtime, journal);
-    journal.TryWrite(new("service.control_ready", "startup") { Transport = DiagnosticTransport.NamedPipe });
-    Task controlShutdown = host.WaitForShutdownAsync();
-    if (await Task.WhenAny(controlShutdown, folderHost.Completion).ConfigureAwait(false) == folderHost.Completion)
+    while (true)
     {
-        await folderHost.Completion.ConfigureAwait(false);
-        throw new InvalidOperationException("The installed folder scheduler stopped unexpectedly.");
+        await using var host = await ControlApiHost.StartInstalledAsync(runtime, journal);
+        journal.TryWrite(new("service.control_ready", "startup") { Transport = DiagnosticTransport.NamedPipe });
+        Task controlShutdown = host.WaitForShutdownAsync();
+        Task finished = await Task.WhenAny(controlShutdown, folderHost.Completion, host.RestartRequested).ConfigureAwait(false);
+        if (finished == folderHost.Completion)
+        {
+            await folderHost.Completion.ConfigureAwait(false);
+            throw new InvalidOperationException("The installed folder scheduler stopped unexpectedly.");
+        }
+        if (finished == host.RestartRequested)
+        {
+            journal.TryWrite(new("service.control_restarting", "control") { Transport = DiagnosticTransport.NamedPipe });
+            continue;
+        }
+        await controlShutdown.ConfigureAwait(false);
+        break;
     }
-    await controlShutdown.ConfigureAwait(false);
     journal.TryWrite(new("service.stopped", "shutdown"));
     return 0;
 }

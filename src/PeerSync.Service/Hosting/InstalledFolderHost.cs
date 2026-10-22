@@ -6,7 +6,9 @@ using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
 using PeerSync.Engine.Scanning;
 using PeerSync.Engine.Sync;
+using PeerSync.Engine.Archive;
 using PeerSync.Core.Settings;
+using PeerSync.Core.Ignore;
 using PeerSync.Net.Connections;
 using PeerSync.Net.Discovery;
 using PeerSync.Net.Quic;
@@ -25,8 +27,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
     private readonly List<FolderRuntime> folders;
     private readonly object folderGate;
     private readonly SemaphoreSlim addGate = new(1, 1);
-    private readonly List<Task> additionalSchedulerTasks = [];
-    private readonly RescanScheduler scheduler;
+    private readonly Dictionary<FolderRuntime, (CancellationTokenSource Stop, Task Task)> folderSchedulers = [];
     private readonly CancellationTokenSource stopping = new();
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ControlStatusRuntime status;
@@ -38,19 +39,22 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
     private readonly string statePath;
     private readonly string actorSid;
     private readonly byte[] deviceId;
-    private readonly Task schedulerTask;
     private readonly object rescanGate = new();
     private Task? rescanTask;
     private long requestedRescanGeneration;
     private string pendingRescanReason = "network_change";
+    private readonly object pauseGate = new();
+    private CancellationTokenSource? autoResumeStop;
+    private Task? autoResumeTask;
+    private string[] autoResumeIds = [];
     private int disposed;
 
-    private InstalledFolderHost(StateStore state, List<FolderRuntime> folders, RescanScheduler scheduler,
+    private InstalledFolderHost(StateStore state, List<FolderRuntime> folders,
         ControlStatusRuntime status, DiagnosticJournal? diagnostics, PeerNetworkRuntime? network,
         string statePath, string actorSid, byte[] deviceId, X509Certificate2? certificate, DeviceSettings? deviceSettings,
         TransferThrottle? uploadThrottle, TransferThrottle? downloadThrottle, object folderGate)
     {
-        this.state = state; this.folders = folders; this.scheduler = scheduler;
+        this.state = state; this.folders = folders;
         this.status = status; this.diagnostics = diagnostics; this.network = network;
         this.statePath = statePath; this.actorSid = actorSid; this.deviceId = deviceId.ToArray();
         this.certificate = certificate; this.deviceSettings = deviceSettings;
@@ -58,8 +62,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         this.folderGate = folderGate;
         status.Resumed += OnResumed;
         status.NetworkChanged += OnNetworkChanged;
-        schedulerTask = scheduler.RunAsync(stopping.Token);
-        _ = ObserveComponentAsync(schedulerTask, "service.folder_scheduler_stopped", allowEmptyCompletion: folders.Count == 0);
+        foreach (var folder in folders) StartFolderScheduler(folder);
         if (network is not null) _ = ObserveComponentAsync(network.Completion, "service.peer_accept_failed");
     }
 
@@ -162,10 +165,13 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     keys = await state.ReadFolderKeysAsync(descriptor.Id, actorSid, cancellationToken).ConfigureAwait(false);
                     EnsureFolderMarker(descriptor.Path, descriptor.Id);
                     if (!keys.CanRead) throw new InvalidOperationException("Encrypted-only folders require the opaque engine.");
-                    scanner = new Scanner(descriptor.Path, index, keys, ownDevice, journal: diagnostics, settings: descriptor.Settings);
+                    var ignore = new IgnoreMatcher(descriptor.Settings.IgnoreRules);
+                    scanner = new Scanner(descriptor.Path, index, keys, ownDevice, ignore: ignore,
+                        journal: diagnostics, settings: descriptor.Settings);
                     transport = new TransportFolder(descriptor.Path, index, keys, ownDevice, descriptor.Settings,
-                        timeProvider: timeProvider, journal: diagnostics, uploadThrottle: uploadThrottle, downloadThrottle: downloadThrottle);
-                    registration = status.RegisterFolder(transport);
+                        timeProvider: timeProvider, journal: diagnostics, uploadThrottle: uploadThrottle,
+                        downloadThrottle: downloadThrottle, ignore: ignore);
+                    registration = status.RegisterFolder(transport, scanner);
                     folders.Add(new(index, keys, scanner, transport, registration, descriptor.Settings, descriptor.Path));
                     index = null; keys = null; scanner = null; transport = null; registration = null;
                     diagnostics?.TryWrite(new("service.folder_engine_ready", "folder_host") { ItemsChanged = folders.Count });
@@ -185,12 +191,12 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     keys?.Dispose();
                 }
             }
-            var scheduler = new RescanScheduler(folders.Select(folder => new ScheduledFolder(folder.Scanner, folder.Interval)), journal: diagnostics);
             if (certificate is not null && deviceSettings is not null && folders.Count != 0)
                 network = await PeerNetworkRuntime.StartAsync(certificate, ownDevice, () => { lock (folderGate) return folders.ToArray(); }, deviceSettings,
-                    status, diagnostics, cancellationToken, timeProvider).ConfigureAwait(false);
+                    status, (folderId, remoteDevice) => RecordPending(state, folderId, remoteDevice, diagnostics),
+                    diagnostics, cancellationToken, timeProvider).ConfigureAwait(false);
             diagnostics?.TryWrite(new("service.folder_host_ready", "folder_host") { ItemsChanged = folders.Count });
-            InstalledFolderHost host = new(state, folders, scheduler, status, diagnostics, network, statePath, actorSid,
+            InstalledFolderHost host = new(state, folders, status, diagnostics, network, statePath, actorSid,
                 ownDevice, certificate, deviceSettings, uploadThrottle, downloadThrottle, folderGate);
             uploadThrottle = null; downloadThrottle = null;
             return host;
@@ -229,6 +235,288 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
 
     internal IReadOnlyList<FolderDescriptor> ListFolders() => state.ListFolders().ToArray();
 
+    private FolderDescriptor FindDescriptor(string selector)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(selector);
+        var descriptors = state.ListFolders().ToArray();
+        var byId = descriptors.FirstOrDefault(item =>
+            string.Equals(Convert.ToHexString(item.Id), selector.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (byId is not null) return byId;
+        string path;
+        try { path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(selector)); }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+        { throw new KeyNotFoundException("Unknown folder selector."); }
+        return descriptors.FirstOrDefault(item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase))
+            ?? throw new KeyNotFoundException("Unknown folder selector.");
+    }
+
+    internal FolderDescriptor GetFolderDescriptor(string selector) => FindDescriptor(selector);
+
+    internal async Task<FolderDescriptor> PauseFolderAsync(string selector, string requestingActorSid,
+        CancellationToken cancellationToken)
+    {
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopping.Token);
+        await addGate.WaitAsync(requestStop.Token).ConfigureAwait(false);
+        try
+        {
+            FolderDescriptor descriptor = FindDescriptor(selector);
+            if (descriptor.Paused) return descriptor;
+            await state.UpdateFolderAsync(descriptor.Id, descriptor.Settings, true, requestingActorSid,
+                requestStop.Token).ConfigureAwait(false);
+            FolderRuntime folder = ResolveFolder(selector);
+            lock (folderGate) folders.Remove(folder);
+            try
+            {
+                if (network is not null) await network.RefreshFolderMembershipAsync(stopping.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                try { await StopFolderSchedulerAsync(folder).ConfigureAwait(false); }
+                finally
+                {
+                    Task? pendingRescans;
+                    lock (rescanGate) pendingRescans = rescanTask;
+                    try { if (pendingRescans is not null) await pendingRescans.ConfigureAwait(false); }
+                    finally { await folder.DisposeAsync().ConfigureAwait(false); }
+                }
+            }
+            diagnostics?.TryWrite(new("service.folder_paused", "folder_host") { ItemsChanged = 1 });
+            return descriptor with { Paused = true };
+        }
+        finally { addGate.Release(); }
+    }
+
+    internal async Task<FolderDescriptor> ResumeFolderAsync(string selector, string requestingActorSid,
+        CancellationToken cancellationToken)
+    {
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopping.Token);
+        await addGate.WaitAsync(requestStop.Token).ConfigureAwait(false);
+        FolderRuntime? folder = null;
+        bool attached = false;
+        try
+        {
+            FolderDescriptor descriptor = FindDescriptor(selector);
+            if (!descriptor.Paused) return descriptor;
+            folder = await OpenFolderRuntimeAsync(descriptor, null, requestStop.Token).ConfigureAwait(false);
+            await state.UpdateFolderAsync(descriptor.Id, descriptor.Settings, false, requestingActorSid,
+                requestStop.Token).ConfigureAwait(false);
+            lock (folderGate) folders.Add(folder);
+            attached = true;
+            StartFolderScheduler(folder);
+            if (network is null && certificate is not null && deviceSettings is not null)
+            {
+                network = await PeerNetworkRuntime.StartAsync(certificate, deviceId, () => SnapshotFolders(),
+                    deviceSettings, status, (folderId, remoteDevice) => RecordPending(state, folderId, remoteDevice, diagnostics),
+                    diagnostics, requestStop.Token).ConfigureAwait(false);
+                _ = ObserveComponentAsync(network.Completion, "service.peer_accept_failed");
+            }
+            else network?.RequestNetworkRecovery("folder_resumed");
+            diagnostics?.TryWrite(new("service.folder_resumed", "folder_host") { ItemsChanged = 1 });
+            folder = null;
+            return descriptor with { Paused = false };
+        }
+        catch
+        {
+            if (folder is not null)
+            {
+                if (attached) { lock (folderGate) folders.Remove(folder); }
+                await StopFolderSchedulerAsync(folder).ConfigureAwait(false);
+                await folder.DisposeAsync().ConfigureAwait(false);
+                var descriptor = FindDescriptor(selector);
+                if (!descriptor.Paused)
+                    await state.UpdateFolderAsync(descriptor.Id, descriptor.Settings, true, requestingActorSid,
+                        CancellationToken.None).ConfigureAwait(false);
+            }
+            throw;
+        }
+        finally { addGate.Release(); }
+    }
+
+    internal async Task RemoveFolderAsync(string selector, string requestingActorSid,
+        CancellationToken cancellationToken)
+    {
+        FolderDescriptor descriptor = FindDescriptor(selector);
+        if (!descriptor.Paused)
+            descriptor = await PauseFolderAsync(selector, requestingActorSid, cancellationToken).ConfigureAwait(false);
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopping.Token);
+        await addGate.WaitAsync(requestStop.Token).ConfigureAwait(false);
+        try
+        {
+            await state.RemoveFolderAsync(descriptor.Id, requestingActorSid, requestStop.Token).ConfigureAwait(false);
+            RemoveFolderMarkerIfOwned(descriptor.Path, descriptor.Id);
+            diagnostics?.TryWrite(new("service.folder_removed", "folder_host") { ItemsChanged = 1 });
+        }
+        finally { addGate.Release(); }
+    }
+
+    internal async Task<int> PauseAllAsync(long durationSeconds, string requestingActorSid,
+        CancellationToken cancellationToken)
+    {
+        if (durationSeconds is < 0 or > 30 * 86400) throw new ArgumentOutOfRangeException(nameof(durationSeconds));
+        string[] active = state.ListFolders().Where(item => !item.Paused)
+            .Select(item => Convert.ToHexString(item.Id)).ToArray();
+        foreach (string id in active)
+            await PauseFolderAsync(id, requestingActorSid, cancellationToken).ConfigureAwait(false);
+        lock (pauseGate)
+        {
+            string[] pending = autoResumeIds;
+            autoResumeStop?.Cancel();
+            if (durationSeconds > 0)
+            {
+                var stop = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
+                string[] resume = active.Concat(pending).Distinct(StringComparer.Ordinal).ToArray();
+                autoResumeStop = stop;
+                autoResumeIds = resume;
+                autoResumeTask = ResumeAfterDelayAsync(resume, durationSeconds, requestingActorSid, stop);
+            }
+            else { autoResumeStop = null; autoResumeTask = null; autoResumeIds = []; }
+        }
+        return active.Length;
+    }
+
+    private async Task ResumeAfterDelayAsync(string[] ids, long seconds, string actor, CancellationTokenSource stop)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(seconds), stop.Token).ConfigureAwait(false);
+            foreach (string id in ids)
+            {
+                stop.Token.ThrowIfCancellationRequested();
+                try { await ResumeFolderAsync(id, actor, stop.Token).ConfigureAwait(false); }
+                catch (KeyNotFoundException) { }
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            diagnostics?.TryWrite(new("service.auto_resume_failed", "folder_host")
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+        }
+        finally
+        {
+            lock (pauseGate)
+                if (ReferenceEquals(autoResumeStop, stop))
+                { autoResumeStop = null; autoResumeTask = null; autoResumeIds = []; }
+            stop.Dispose();
+        }
+    }
+
+    internal IReadOnlyList<PendingApproval> ListPendingDevices()
+        => state.PendingApprovals.ReadAll().OrderBy(row => Convert.ToHexString(row.FolderId), StringComparer.Ordinal)
+            .ThenBy(row => Convert.ToHexString(row.DeviceId), StringComparer.Ordinal).ToArray();
+
+    internal Task<int> AuditControlUserAuthorizationAsync(string actorSid, string targetSid,
+        CancellationToken cancellationToken)
+        => state.AuditControlUserAuthorizationAsync(actorSid, targetSid, cancellationToken);
+
+    internal Task<int> AuditDeviceSettingsUpdateRequestAsync(string actorSid, CancellationToken cancellationToken)
+        => state.AuditDeviceSettingsUpdateRequestAsync(actorSid, cancellationToken);
+
+    internal async Task DecideDeviceAsync(string selector, byte[] remoteDevice, DeviceApproval decision,
+        string requestingActorSid, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(remoteDevice);
+        if (remoteDevice.Length != 32 || decision is not (DeviceApproval.Approved or DeviceApproval.Blocked or DeviceApproval.Unknown))
+            throw new ArgumentException("Invalid device decision.");
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopping.Token);
+        await addGate.WaitAsync(requestStop.Token).ConfigureAwait(false);
+        try
+        {
+            var folder = ResolveFolder(selector);
+            byte[] folderId = folder.Keys.FolderId();
+            string action = decision switch
+            {
+                DeviceApproval.Approved => "device-approve",
+                DeviceApproval.Blocked => "device-block",
+                _ => "device-deny",
+            };
+            await state.RecordDeviceDecisionAsync(folderId, remoteDevice, action, requestingActorSid,
+                requestStop.Token).ConfigureAwait(false);
+            try
+            {
+                if (decision is not DeviceApproval.Unknown)
+                {
+                    DeviceRow row = folder.Index.Devices.Find(remoteDevice)
+                        ?? new DeviceRow(remoteDevice.ToArray());
+                    await folder.Index.Devices.UpsertAsync([row with { Approval = decision, Pinned = true }],
+                        requestStop.Token).ConfigureAwait(false);
+                    network?.RequestNetworkRecovery("device_decision");
+                }
+            }
+            catch
+            {
+                await state.RecordPendingApprovalAsync(folderId, remoteDevice, CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+            diagnostics?.TryWrite(new("service.device_decision", "folder_host")
+                { ErrorCode = action });
+        }
+        finally { addGate.Release(); }
+    }
+
+    private static void RecordPending(StateStore state, byte[] folderId, byte[] remoteDevice,
+        DiagnosticJournal? diagnostics)
+    {
+        try
+        {
+            if (state.PendingApprovals.Find(folderId, remoteDevice) is not null) return;
+            if (!state.RecordPendingApprovalAsync(folderId, remoteDevice).GetAwaiter().GetResult())
+                diagnostics?.TryWrite(new("service.pending_device_limit", "peer_network")
+                    { Level = DiagnosticLevel.Warning });
+        }
+        catch (Exception error)
+        {
+            diagnostics?.TryWrite(new("service.pending_device_record_failed", "peer_network")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+        }
+    }
+
+    internal FolderSettings GetFolderSettings(string selector)
+    {
+        return FindDescriptor(selector).Settings;
+    }
+
+    internal async Task<(FolderSettings Settings, bool RestartRequired)> UpdateFolderSettingsAsync(
+        string selector, FolderSettings updated, string requestingActorSid, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(updated);
+        updated.Validate();
+        using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stopping.Token);
+        await addGate.WaitAsync(requestStop.Token).ConfigureAwait(false);
+        try
+        {
+            FolderDescriptor descriptor = FindDescriptor(selector);
+            FolderRuntime? folder = descriptor.Paused ? null : ResolveFolder(selector);
+            FolderSettings prior = folder?.Settings ?? descriptor.Settings;
+            bool restart = folder is not null && !string.Equals((prior with { PredefinedHosts = updated.PredefinedHosts }).ToJson(),
+                updated.ToJson(), StringComparison.Ordinal);
+            await state.UpdateFolderAsync(descriptor.Id, updated, descriptor.Paused, requestingActorSid,
+                requestStop.Token).ConfigureAwait(false);
+            folder?.UpdateSettings(restart ? prior with { PredefinedHosts = updated.PredefinedHosts } : updated);
+            if (network is not null && folder is not null
+                && !prior.PredefinedHosts.SequenceEqual(updated.PredefinedHosts, StringComparer.OrdinalIgnoreCase))
+                await network.RefreshPredefinedHostsAsync(requestStop.Token).ConfigureAwait(false);
+            diagnostics?.TryWrite(new("service.folder_settings_updated", "folder_host")
+                { ItemsChanged = 1 });
+            return (updated, restart);
+        }
+        finally { addGate.Release(); }
+    }
+
+    internal async Task<FileApplyOutcome> RestoreArchivedAsync(string selector, long archiveId,
+        bool asCopy, string copyPath, CancellationToken cancellationToken)
+    {
+        FolderRuntime folder = ResolveFolder(selector);
+        var applier = new FileApplier(folder.Path, folder.Index, folder.Keys, deviceId,
+            folder.Settings, diagnostics);
+        var restorer = new ArchiveRestorer(applier);
+        FileApplyOutcome outcome = asCopy
+            ? await restorer.RestoreAsCopyAsync(archiveId, copyPath, cancellationToken).ConfigureAwait(false)
+            : await restorer.RestoreAsync(archiveId, cancellationToken).ConfigureAwait(false);
+        if (outcome == FileApplyOutcome.Applied) RequestRescans("archive_restore");
+        return outcome;
+    }
+
     internal async Task<string[]> SetPredefinedHostsAsync(string selector, IEnumerable<string> hosts,
         string requestingActorSid, CancellationToken cancellationToken = default)
     {
@@ -240,19 +528,19 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         {
             FolderRuntime runtime = ResolveFolder(selector);
             string[] hostArray = hosts.ToArray();
-            FolderSettings updated = runtime.Settings with { PredefinedHosts = hostArray };
-            updated.Validate();
             byte[] folderId = runtime.Keys.FolderId();
             try
             {
                 FolderDescriptor descriptor = state.ListFolders().Single(item =>
                     CryptographicOperations.FixedTimeEquals(item.Id, folderId));
+                FolderSettings updated = descriptor.Settings with { PredefinedHosts = hostArray };
+                updated.Validate();
                 await state.UpdateFolderAsync(folderId, updated, descriptor.Paused, requestingActorSid,
                     requestStop.Token).ConfigureAwait(false);
             }
             finally { CryptographicOperations.ZeroMemory(folderId); }
 
-            runtime.UpdateSettings(updated);
+            runtime.UpdateSettings(runtime.Settings with { PredefinedHosts = hostArray });
             if (network is not null)
                 await network.RefreshPredefinedHostsAsync(requestStop.Token).ConfigureAwait(false);
             return hostArray;
@@ -319,13 +607,11 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             if (network is null && certificate is not null && deviceSettings is not null)
             {
                 network = await PeerNetworkRuntime.StartAsync(certificate, deviceId, () => SnapshotFolders(),
-                    deviceSettings, status, diagnostics, cancellationToken).ConfigureAwait(false);
+                    deviceSettings, status, (folderId, remoteDevice) => RecordPending(state, folderId, remoteDevice, diagnostics),
+                    diagnostics, cancellationToken).ConfigureAwait(false);
                 _ = ObserveComponentAsync(network.Completion, "service.peer_accept_failed");
             }
-            var perFolderScheduler = new RescanScheduler([new(runtime.Scanner, runtime.Interval)], journal: diagnostics);
-            Task schedulerTask = perFolderScheduler.RunAsync(stopping.Token);
-            additionalSchedulerTasks.Add(schedulerTask);
-            _ = ObserveComponentAsync(schedulerTask, "service.folder_scheduler_stopped");
+            StartFolderScheduler(runtime);
             diagnostics?.TryWrite(new("service.folder_added", "folder_host") { ItemsChanged = 1 });
             runtime = null;
             return descriptor;
@@ -340,7 +626,11 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     added = folders.FirstOrDefault(folder => folder.Keys.FolderId().AsSpan().SequenceEqual(descriptor.Id));
                     if (added is not null) folders.Remove(added);
                 }
-                if (added is not null) await added.DisposeAsync().ConfigureAwait(false);
+                if (added is not null)
+                {
+                    await StopFolderSchedulerAsync(added).ConfigureAwait(false);
+                    await added.DisposeAsync().ConfigureAwait(false);
+                }
                 else if (runtime is not null) await runtime.DisposeAsync().ConfigureAwait(false);
                 await state.RemoveFolderAsync(descriptor.Id, requestingActorSid ?? actorSid, CancellationToken.None).ConfigureAwait(false);
             }
@@ -364,10 +654,13 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             index = await FolderIndex.OpenAsync(indexPath, cancellationToken).ConfigureAwait(false);
             keys ??= await state.ReadFolderKeysAsync(descriptor.Id, actorSid, cancellationToken).ConfigureAwait(false);
             if (!keys.CanRead) throw new InvalidOperationException("Encrypted-only folders require the opaque engine.");
-            scanner = new Scanner(descriptor.Path, index, keys, deviceId, journal: diagnostics, settings: descriptor.Settings);
+            var ignore = new IgnoreMatcher(descriptor.Settings.IgnoreRules);
+            scanner = new Scanner(descriptor.Path, index, keys, deviceId, ignore: ignore,
+                journal: diagnostics, settings: descriptor.Settings);
             transport = new TransportFolder(descriptor.Path, index, keys, deviceId, descriptor.Settings,
-                timeProvider: null, journal: diagnostics, uploadThrottle: uploadThrottle, downloadThrottle: downloadThrottle);
-            registration = status.RegisterFolder(transport);
+                timeProvider: null, journal: diagnostics, uploadThrottle: uploadThrottle,
+                downloadThrottle: downloadThrottle, ignore: ignore);
+            registration = status.RegisterFolder(transport, scanner);
             var result = new FolderRuntime(index, keys, scanner, transport, registration, descriptor.Settings, descriptor.Path);
             index = null; keys = null; scanner = null; transport = null; registration = null;
             return result;
@@ -436,20 +729,38 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (UnauthorizedAccessException) { }
     }
 
-    private async Task ObserveComponentAsync(Task component, string eventName, bool allowEmptyCompletion = false)
+    private void StartFolderScheduler(FolderRuntime folder)
+    {
+        var stop = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
+        var scheduler = new RescanScheduler([new(folder.Scanner, folder.Interval)], journal: diagnostics);
+        Task task = scheduler.RunAsync(stop.Token);
+        folderSchedulers.Add(folder, (stop, task));
+        _ = ObserveComponentAsync(task, "service.folder_scheduler_stopped", stop.Token);
+    }
+
+    private async Task StopFolderSchedulerAsync(FolderRuntime folder)
+    {
+        if (!folderSchedulers.Remove(folder, out var entry)) return;
+        entry.Stop.Cancel();
+        try { await entry.Task.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        finally { entry.Stop.Dispose(); }
+    }
+
+    private async Task ObserveComponentAsync(Task component, string eventName, CancellationToken? expectedStop = null)
     {
         try
         {
             await component.ConfigureAwait(false);
-            if (!stopping.IsCancellationRequested && !allowEmptyCompletion)
+            if (!stopping.IsCancellationRequested && expectedStop?.IsCancellationRequested != true)
                 completion.TrySetException(new InvalidOperationException("A supervised service component stopped unexpectedly."));
         }
-        catch (OperationCanceledException) when (stopping.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested || expectedStop?.IsCancellationRequested == true) { }
         catch (Exception error)
         {
             diagnostics?.TryWrite(new(eventName, "folder_host")
                 { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
-            if (!stopping.IsCancellationRequested) completion.TrySetException(error);
+            if (!stopping.IsCancellationRequested && expectedStop?.IsCancellationRequested != true) completion.TrySetException(error);
         }
     }
 
@@ -527,6 +838,9 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         status.Resumed -= OnResumed;
         status.NetworkChanged -= OnNetworkChanged;
         stopping.Cancel();
+        Task? pendingAutoResume;
+        lock (pauseGate) { autoResumeStop?.Cancel(); pendingAutoResume = autoResumeTask; }
+        if (pendingAutoResume is not null) await pendingAutoResume.ConfigureAwait(false);
         await addGate.WaitAsync().ConfigureAwait(false);
         Exception? networkFailure = null;
         try
@@ -535,15 +849,13 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (Exception error) { networkFailure = error; }
         Task? pendingRescans;
         lock (rescanGate) pendingRescans = rescanTask;
-        try { await schedulerTask.ConfigureAwait(false); }
-        catch (OperationCanceledException) { }
-        catch (Exception error)
-        {
-            diagnostics?.TryWrite(new("service.folder_scheduler_failed", "shutdown")
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
-        }
-        try { await Task.WhenAll(additionalSchedulerTasks).ConfigureAwait(false); }
-        catch (OperationCanceledException) { }
+        foreach (var folder in folderSchedulers.Keys.ToArray())
+            try { await StopFolderSchedulerAsync(folder).ConfigureAwait(false); }
+            catch (Exception error)
+            {
+                diagnostics?.TryWrite(new("service.folder_scheduler_failed", "shutdown")
+                    { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            }
         if (pendingRescans is not null)
             try { await pendingRescans.ConfigureAwait(false); }
             catch (OperationCanceledException) { }

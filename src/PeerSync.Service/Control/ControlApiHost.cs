@@ -31,12 +31,17 @@ public sealed class ControlApiHost : IAsyncDisposable
     internal TimeSpan ShutdownTimeout => application.Services.GetRequiredService<IOptions<HostOptions>>().Value.ShutdownTimeout;
     internal IReadOnlyCollection<string> BoundAddresses => application.Urls.ToArray();
     internal PowerEvents Power => power;
+    internal Task RestartRequested => lifetime.RestartRequested;
 
     public static Task<ControlApiHost> StartInstalledAsync(ControlStatusRuntime runtime, DiagnosticJournal? diagnostics = null, CancellationToken cancellationToken = default)
     {
         var group = (SecurityIdentifier)new NTAccount(Environment.MachineName, ControlServiceNames.UsersGroup).Translate(typeof(SecurityIdentifier));
         var settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "config", "settings.json");
-        return StartAsync(ControlServiceNames.PipeName, runtime, [group], true, settingsPath, diagnostics, null, cancellationToken);
+        var current = new SettingsStore(settingsPath).ReadIfPresent()
+            ?? throw new InvalidOperationException("Device settings are unavailable.");
+        var allowed = new List<SecurityIdentifier> { group };
+        allowed.AddRange(current.ControlUserSids.Select(sid => new SecurityIdentifier(sid)));
+        return StartAsync(ControlServiceNames.PipeName, runtime, allowed, true, settingsPath, diagnostics, null, cancellationToken);
     }
     internal static Task<ControlApiHost> StartFixtureAsync(string pipe, ControlStatusRuntime runtime, IReadOnlyList<SecurityIdentifier> allowed,
         DiagnosticJournal? diagnostics = null, INetworkChangeSource? networkSource = null, CancellationToken cancellationToken = default)
@@ -73,10 +78,12 @@ public sealed class ControlApiHost : IAsyncDisposable
         if (OperatingSystem.IsWindows() && WindowsServiceHelpers.IsWindowsService())
             builder.Services.AddSingleton<IHostLifetime, PeerSyncServiceLifetime>();
         builder.Services.AddSingleton(runtime); builder.Services.AddSingleton(new ControlCallerPolicy(allowed, administrators));
+        builder.Services.AddSingleton<ControlIdentityInterceptor>();
+        builder.Services.AddSingleton(new ControlSettingsRuntime(settingsPath));
         var shutdown = new ControlServerLifetime(); var budget = new ControlSubscriptionBudget();
         builder.Services.AddSingleton(shutdown); builder.Services.AddSingleton(budget);
         if (diagnostics is not null) builder.Services.AddSingleton(diagnostics);
-        builder.Services.AddGrpc(options => { options.EnableDetailedErrors = false; options.MaxReceiveMessageSize = ControlStatusSnapshot.MaximumMessageBytes; options.MaxSendMessageSize = ControlStatusSnapshot.MaximumMessageBytes; });
+        builder.Services.AddGrpc(options => { options.EnableDetailedErrors = false; options.MaxReceiveMessageSize = ControlStatusSnapshot.MaximumMessageBytes; options.MaxSendMessageSize = ControlStatusSnapshot.MaximumMessageBytes; options.Interceptors.Add<ControlIdentityInterceptor>(); });
         builder.WebHost.UseNamedPipes(options => { options.CurrentUserOnly = false; options.PipeSecurity = security; });
         builder.WebHost.ConfigureKestrel(options => options.ListenNamedPipe(pipe, listen => listen.Protocols = HttpProtocols.Http2));
         var app = builder.Build(); var stopping = app.Lifetime.ApplicationStopping.Register(shutdown.Cancel);

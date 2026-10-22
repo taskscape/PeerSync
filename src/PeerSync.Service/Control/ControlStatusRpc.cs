@@ -30,11 +30,36 @@ internal sealed class ControlCallerPolicy(IReadOnlyList<SecurityIdentifier> allo
         if (!permitted) throw new RpcException(new(StatusCode.PermissionDenied, "Control caller is not authorized."));
         return actorSid ?? throw new RpcException(new(StatusCode.PermissionDenied, "Control caller cannot be identified."));
     }
+
+    internal static string RequireAdministrator(ServerCallContext context)
+    {
+        string? actorSid = null; bool administrator = false;
+        var pipe = context.GetHttpContext().Features.Get<IConnectionNamedPipeFeature>()?.NamedPipe;
+        if (pipe is not null) pipe.RunAsClient(() =>
+        {
+            using var identity = WindowsIdentity.GetCurrent(ifImpersonating: true);
+            actorSid = identity?.User?.Value;
+            administrator = identity is not null && new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        });
+        if (!administrator || actorSid is null)
+            throw new RpcException(new(StatusCode.PermissionDenied, "An administrator is required."));
+        return actorSid;
+    }
 }
 internal sealed class ControlServerLifetime : IDisposable
 {
     private readonly CancellationTokenSource source = new();
+    private readonly TaskCompletionSource restart = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal CancellationToken Token => source.Token;
+    internal Task RestartRequested => restart.Task;
+    internal void RequestRestartAfterResponse()
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500)).ConfigureAwait(false);
+            restart.TrySetResult();
+        });
+    }
     internal void Cancel() => source.Cancel();
     public void Dispose() => source.Dispose();
 }
@@ -51,8 +76,8 @@ internal sealed class ControlSubscriptionBudget
     internal void Exit() => Interlocked.Decrement(ref active);
 }
 
-internal sealed class ControlStatusRpc(ControlStatusRuntime runtime, ControlCallerPolicy callers, ControlSubscriptionBudget subscriptions,
-    ControlServerLifetime lifetime, DiagnosticJournal? diagnostics = null) : Wire.PeerSyncControl.PeerSyncControlBase
+internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, ControlCallerPolicy callers, ControlSubscriptionBudget subscriptions,
+    ControlServerLifetime lifetime, ControlSettingsRuntime settings, DiagnosticJournal? diagnostics = null) : Wire.PeerSyncControl.PeerSyncControlBase
 {
     public override Task<Wire.ServiceStatus> GetStatus(Wire.StatusRequest request, ServerCallContext context)
     {
@@ -196,7 +221,7 @@ internal sealed class ControlStatusRpc(ControlStatusRuntime runtime, ControlCall
             while (true)
             {
                 stop.Token.ThrowIfCancellationRequested();
-                await responseStream.WriteAsync(new() { Status = Read(session) }, stop.Token).ConfigureAwait(false);
+                await responseStream.WriteAsync(BuildEvent(session), stop.Token).ConfigureAwait(false);
                 await Task.Delay(TimeSpan.FromSeconds(1), stop.Token).ConfigureAwait(false);
             }
         }

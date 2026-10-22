@@ -14,4 +14,5 @@ public sealed record PendingApproval([property: JsonIgnore] byte[] FolderId,
     [property: JsonIgnore] byte[] DeviceId, string? Name, long RequestedTicks);
 
 public sealed record AuditEntry(long Id, long OccurredTicks, string Action, string ActorSid,
-    [property: JsonIgnore] byte[]? FolderId, [property: JsonIgnore] byte[]? DeviceId);
+    [property: JsonIgnore] byte[]? FolderId, [property: JsonIgnore] byte[]? DeviceId,
+    string? TargetSid = null);
