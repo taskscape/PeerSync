@@ -79,16 +79,36 @@ public sealed partial class DirectorySnapshotCaptureTests
         WriteFiles("a"); await using var producer = await FolderIndex.OpenAsync(Database, Token);
         var original = await PrepareProjection(producer, buildGraph: false);
         var source = DirectoryMetadataSources.FromVersion(VersionView.Open(original, keys, device))!;
+        var clock = new CompletionClock(DateTimeOffset.UtcNow);
         await using var receiver = await OpenMetadataReceiver(keys);
         await receiver.Devices.UpsertAsync([new([2, .. new byte[31]])], Token);
-        await receiver.AdmitDirectoryMetadataSourcesAsync(receiver.Meta.Find("_root-identity")!.Value!, [source], DateTime.UtcNow.Ticks, Token);
+        await receiver.AdmitDirectoryMetadataSourcesAsync(receiver.Meta.Find("_root-identity")!.Value!, [source], clock.GetUtcNow().UtcTicks, Token);
         using var published = new PublishedBlocks(Root, producer); int stalled = 0, forwarded = 0;
-        var worker = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice, TimeProvider.System, async (peer, hash, length, token) =>
+        bool interruptBeforeGraph = true;
+        var worker = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice, clock, async (peer, hash, length, token) =>
         {
             if (peer.Span[0] != 2) { stalled++; await Task.Delay(Timeout.InfiniteTimeSpan, token); }
             forwarded++; return published.TryRead(hash.Span, length, token)!;
-        });
-        (await worker.RunAsync(token: Token)).Completed.ShouldBe(1); stalled.ShouldBe(1); forwarded.ShouldBeGreaterThan(0);
+        }) { Checkpoint = stage =>
+        {
+            if (stage == "metadata-before-graph" && interruptBeforeGraph)
+            { interruptBeforeGraph = false; throw new OperationCanceledException("Exercise durable route retry."); }
+        } };
+        // A loaded host can spend the ten-second source deadline in native I/O
+        // before the working route completes. The source must survive its
+        // bounded retry and still fail over without waiting for wall time.
+        DirectoryMetadataPass? pass = null;
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            pass = await worker.RunAsync(token: Token);
+            if (pass.Completed == 1) break;
+            pass.Deferred.ShouldBe(1);
+            var pending = receiver.ReadDirectoryMetadataSource(source.SourceId)!;
+            pending.Attempts.ShouldBe(attempt + 1);
+            clock.AdvanceTo(pending.NextTicks!.Value);
+        }
+        interruptBeforeGraph.ShouldBeFalse(); pass!.Completed.ShouldBe(1);
+        stalled.ShouldBeGreaterThan(0); forwarded.ShouldBeGreaterThan(0);
         receiver.ReadDirectoryMetadataSource(source.SourceId).ShouldBeNull();
     }
 
