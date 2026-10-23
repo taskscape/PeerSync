@@ -18,6 +18,50 @@ native NAT result. Keep full local logs and share only the sanitized evidence
 bundle after review. Gate P5 needs the release candidate on physical LAN and
 WAN; development-signed packages cannot close it.
 
+Before running either unsigned helper, verify its SHA-256 against the
+field-kit README. If local execution policy blocks it, open a new PowerShell
+process with `powershell.exe -NoProfile -ExecutionPolicy Bypass` for this test
+session; do not change machine-wide execution policy.
+
+## Run random operations
+
+The kit's `tools/Invoke-PeerSyncSoakOperations.ps1` creates and changes files
+only under `PeerSync-Soak\<run-guid>\<machine-label>` inside the specified
+synchronized folder. Its per-machine ownership marker prevents a different
+run or label from taking over an existing workload folder. It never deletes
+other folders or files. Each invocation records a JSONL operation trail in an
+existing local directory **outside** the synchronized folder. Keep these
+trails, including any failed operation, with the gate evidence. The tool uses
+a bounded file count and random create, overwrite, append, rename and delete
+operations. Do not use it on irreplaceable data; the test subtree will sync
+and occupy space on all peers.
+
+From each physical PC, use the same run GUID but a distinct machine label.
+This example runs repeated short batches until 72 hours have elapsed while
+its PowerShell session remains open. Create the log directory first and use
+the same `$run` as in the hourly capture commands below:
+
+```powershell
+$run = [guid]'11111111-2222-3333-4444-555555555555' # replace once per soak
+$label = 'pc-a' # pc-b and pc-c on the other machines
+$root = 'C:\PeerSync-Test\Share'
+$logDirectory = 'C:\Temp\PeerSync-soak-operations'
+New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
+$end = (Get-Date).ToUniversalTime().AddHours(72)
+while ((Get-Date).ToUniversalTime() -lt $end) {
+  & .\tools\Invoke-PeerSyncSoakOperations.ps1 -Root $root -RunId $run `
+    -MachineLabel $label -LogDirectory $logDirectory -Count 5
+  if ($LASTEXITCODE -ne 0) { throw 'Operation batch failed; retain its JSONL.' }
+  Start-Sleep -Seconds 300
+}
+```
+
+If the console stops during a reboot, restart with the same GUID, label and
+root, and retain all batch logs; record the downtime. The script does not
+perform sleep/resume, Wi-Fi switches or permission changes. Do those
+deliberately and record their UTC times and outcomes separately. An
+unattended loop that stops or loses hours cannot by itself pass the gate.
+
 ## Capture each hour
 
 Choose a fresh run GUID and copy it to every PC. At each UTC hour, wait until
@@ -27,11 +71,6 @@ the same GUID and literal hour value copied from the first PC, a distinct
 label, and the PC's actual synchronized
 folder. The report directory must already exist and be outside that folder.
 Use a new output file for every hour:
-
-If local execution policy blocks an unsigned helper, open a new PowerShell
-process with `powershell.exe -NoProfile -ExecutionPolicy Bypass` for this test
-session. Verify the script SHA-256 against the field-kit README first; do not
-change machine-wide execution policy.
 
 ```powershell
 $run = [guid]'11111111-2222-3333-4444-555555555555' # replace once per soak

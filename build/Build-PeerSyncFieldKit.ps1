@@ -22,6 +22,7 @@ $entries = [ordered]@{
     "server/$central.cer" = Join-Path $installer "$central.cer"
     'tools/Allow-PeerSync-TestTraffic.ps1' = Join-Path $root 'build\Allow-PeerSync-TestTraffic.ps1'
     'tools/Measure-PeerSyncTree.ps1' = Join-Path $root 'build\Measure-PeerSyncTree.ps1'
+    'tools/Invoke-PeerSyncSoakOperations.ps1' = Join-Path $root 'build\Invoke-PeerSyncSoakOperations.ps1'
     'docs/rendezvous-operations.md' = Join-Path $root 'docs\rendezvous-operations.md'
     'docs/diagnostics.md' = Join-Path $root 'docs\diagnostics.md'
     'docs/user-guide.md' = Join-Path $root 'docs\user-guide.md'
@@ -43,6 +44,7 @@ if ((Get-FileHash $entries["client/$client"] -Algorithm SHA256).Hash -ne $client
 }
 $certificateHash = (Get-FileHash $entries["client/$client.cer"] -Algorithm SHA256).Hash
 $treeToolHash = (Get-FileHash $entries['tools/Measure-PeerSyncTree.ps1'] -Algorithm SHA256).Hash
+$operationToolHash = (Get-FileHash $entries['tools/Invoke-PeerSyncSoakOperations.ps1'] -Algorithm SHA256).Hash
 if ($certificateHash -ne $clientManifest.developmentCertificateSha256 -or
     $certificateHash -ne (Get-FileHash $entries["server/$central.cer"] -Algorithm SHA256).Hash) {
     throw 'Development signing certificates differ.'
@@ -64,6 +66,7 @@ Central setup SHA-256: $($centralManifest.installerSha256)
 Installer source revision: $($clientManifest.sourceRevision)
 Public development certificate SHA-256: $certificateHash
 Tree-measurement tool SHA-256: $treeToolHash
+Scoped operation tool SHA-256: $operationToolHash
 
 If an isolated test machine does not trust this development signer, review
 the .cer fingerprint above before importing that *public* certificate to its
@@ -93,9 +96,10 @@ firewall rules are needed before first listen. See the included operations,
 diagnostics and user guides. The virtual-machine validation and remaining
 physical gates are recorded in plan.md in the repository.
 
-For physical LAN/WAN soak evidence, use tools/Measure-PeerSyncTree.ps1 with
-docs/physical-soak.md. It does not close a gate without the required machines,
-elapsed time and operation/network evidence.
+For physical LAN/WAN soak evidence, use tools/Invoke-PeerSyncSoakOperations.ps1
+and tools/Measure-PeerSyncTree.ps1 with docs/physical-soak.md. Both tools keep
+the native synchronized root path out of their shareable reports. They do not
+close a gate without the required machines, elapsed time and network evidence.
 "@
 $stream = [IO.File]::Open($output, [IO.FileMode]::CreateNew)
 try {
