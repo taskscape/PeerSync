@@ -43,6 +43,7 @@ internal static class ScanningBenchmark
             ? Path.Combine(fixture, "logs-" + Guid.NewGuid().ToString("N")) : null;
         using var journal = diagnosticPath is null ? null : new DiagnosticJournal(diagnosticPath, "scale", debugEnabled: true);
         using var scanner = new Scanner(root, index, keys, new byte[32], journal: journal);
+        using var sampler = count == 1_000_000 ? new ProcessMemorySampler() : null;
         long hashedProgress = 0;
         string scanStage = "first-index";
         var stageElapsed = Stopwatch.StartNew();
@@ -80,6 +81,7 @@ internal static class ScanningBenchmark
         // ReadIndexBatch(0) is capped at 1000: use the persisted high-water metadata.
         long sequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
         var unchanged = await scanner.ScanAsync();
+        sampler?.Stop();
         long finalSequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
         long rows = index.LocalFiles.Count();
         bool changedPathsBounded = count <= 10_000 || initial.RequiresNeededRebuild && initial.ChangedPaths.Count == 0;
@@ -90,6 +92,9 @@ internal static class ScanningBenchmark
         long? idleWorkingSetBytes = null, idlePrivateBytes = null;
         long? peakWorkingSetBytes = null, managedIdleBytes = null;
         long? gcCommittedIdleBytes = null, sqliteMemoryIdleBytes = null;
+        long? sampledPeakWorkingSetBytes = sampler?.PeakWorkingSetBytes;
+        long? sampledPeakPrivateBytes = sampler?.PeakPrivateBytes;
+        int? memorySamples = sampler?.Samples;
         if (count == 1_000_000)
         {
             using Process process = Process.GetCurrentProcess();
@@ -108,10 +113,12 @@ internal static class ScanningBenchmark
             gcCommittedIdleBytes = GC.GetGCMemoryInfo().TotalCommittedBytes;
             sqliteMemoryIdleBytes = SQLitePCL.raw.sqlite3_memory_used();
         }
-        const long memoryLimit = 300L * 1024 * 1024;
+        const long memoryLimit = 300_000_000;
         bool targetMet = count == 1_000_000
             ? correct && firstIndex.Elapsed.TotalSeconds < 1200 && idleCpuPercent < 1
                 && idleWorkingSetBytes < memoryLimit && idlePrivateBytes < memoryLimit
+                && peakWorkingSetBytes < memoryLimit && sampledPeakWorkingSetBytes < memoryLimit
+                && sampledPeakPrivateBytes < memoryLimit && memorySamples > 0
             : correct && unchanged.Elapsed.TotalSeconds < 10;
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -123,7 +130,8 @@ internal static class ScanningBenchmark
             unchangedSeconds = unchanged.Elapsed.TotalSeconds, unchanged.Hashed, unchanged.Updated,
             unchanged.Unchanged, sequencePreserved = sequence == finalSequence, changedPathsBounded,
             idleCpuPercent, idleWorkingSetBytes, idlePrivateBytes,
-            peakWorkingSetBytes, managedIdleBytes, gcCommittedIdleBytes, sqliteMemoryIdleBytes,
+            peakWorkingSetBytes, sampledPeakWorkingSetBytes, sampledPeakPrivateBytes, memorySamples,
+            managedIdleBytes, gcCommittedIdleBytes, sqliteMemoryIdleBytes,
             targetSeconds = count == 1_000_000 ? 1200 : 10, correct, targetMet,
             scope = "real one-byte files in 1000-file directories, local SSD; first index includes database open and full hashing/signing/indexing, followed by unchanged walk",
         }));
@@ -144,5 +152,41 @@ internal static class ScanningBenchmark
             correct = await MillionPeerBenchmark.SyncAsync(fixture, root, index, keys, count);
         // Preserve the corpus and database for inspection; never delete a caller's directory.
         return targetMet && correct ? 0 : 1;
+    }
+
+    private sealed class ProcessMemorySampler : IDisposable
+    {
+        private readonly Timer timer;
+        private int stopped, samples;
+        private long peakWorkingSet, peakPrivate;
+        public long PeakWorkingSetBytes => Volatile.Read(ref peakWorkingSet);
+        public long PeakPrivateBytes => Volatile.Read(ref peakPrivate);
+        public int Samples => Volatile.Read(ref samples);
+        public ProcessMemorySampler() => timer = new Timer(_ => Sample(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(250));
+        private void Sample()
+        {
+            using var process = Process.GetCurrentProcess();
+            process.Refresh();
+            Raise(ref peakWorkingSet, process.WorkingSet64);
+            Raise(ref peakPrivate, process.PrivateMemorySize64);
+            Interlocked.Increment(ref samples);
+        }
+        private static void Raise(ref long peak, long value)
+        {
+            long before = Volatile.Read(ref peak);
+            while (value > before)
+            {
+                long observed = Interlocked.CompareExchange(ref peak, value, before);
+                if (observed == before) break;
+                before = observed;
+            }
+        }
+        public void Stop()
+        {
+            if (Interlocked.Exchange(ref stopped, 1) != 0) return;
+            using var drained = new ManualResetEvent(false);
+            timer.Dispose(drained); drained.WaitOne(); Sample();
+        }
+        public void Dispose() => Stop();
     }
 }

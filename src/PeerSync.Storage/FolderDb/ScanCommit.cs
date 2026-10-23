@@ -5,6 +5,17 @@ namespace PeerSync.Storage.FolderDb;
 
 public sealed partial class FolderIndex
 {
+    /// <summary>Stream only path spelling during a native scan. Callers can
+    /// fetch full signed rows for missing or changed paths after filtering.</summary>
+    public IEnumerable<string> ReadLocalPaths()
+    {
+        using var connection = database.OpenReader();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT path FROM local_files ORDER BY path_key;";
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) yield return reader.GetString(0);
+    }
+
     /// <summary>Commit a scanner's ordered, disposable update stream as one
     /// transaction. Cancellation or process interruption leaves no partial
     /// local index publication.</summary>

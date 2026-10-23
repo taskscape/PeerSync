@@ -234,12 +234,20 @@ public sealed partial class Scanner : IDisposable
             var updates = new ConcurrentBag<LocalFileRow>();
             int unchanged = 0, hashed = 0, renamed = 0, deleted = 0, unsyncable = 0;
             // Identity matching is restricted to paths absent from the successful walk.
-            var renameCandidates = index.LocalFiles.ReadAll().Where(r => !r.Deleted && r.Type == 0 && r.Record is not null
-                && r.Flags == LocalFileState.None && r.FileId is not null && !entries.ContainsKey(r.Path.ToUpperInvariant())
-                && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes)
-                && !ignore.IsIgnored(r.Path, false))
-                .GroupBy(r => Convert.ToHexString(r.FileId!), StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+            var renameBatch = new List<LocalFileRow>(RowRepository<LocalFileRow>.BatchSize);
+            foreach (string oldPath in index.ReadLocalPaths())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string key = oldPath.ToUpperInvariant();
+                if (entries.ContainsKey(key) || Under(key, protectedPrefixes) || Under(key, ignoredPrefixes)) continue;
+                var candidate = index.LocalFiles.Find(key);
+                if (candidate is not { Deleted: false, Type: 0, Record: not null, Flags: LocalFileState.None, FileId: not null }
+                    || ignore.IsIgnored(candidate.Path, false)) continue;
+                renameBatch.Add(candidate);
+                if (renameBatch.Count < RowRepository<LocalFileRow>.BatchSize) continue;
+                entries.StageRenameCandidates(renameBatch); renameBatch.Clear();
+            }
+            if (renameBatch.Count != 0) entries.StageRenameCandidates(renameBatch);
             var cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             try
             {
@@ -249,6 +257,7 @@ public sealed partial class Scanner : IDisposable
             var previousPage = hasPrevious
                 ? index.ReadLocalFilesByPaths(page.Select(entry => entry.Path).ToArray())
                 : new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+            var renameCandidates = entries.ReadRenameCandidates(page, index);
             await Parallel.ForEachAsync(page, new ParallelOptions
             {
                 MaxDegreeOfParallelism = hashConcurrency, CancellationToken = cancellationToken,
@@ -362,13 +371,15 @@ public sealed partial class Scanner : IDisposable
             }).ConfigureAwait(false);
             if (!updates.IsEmpty) entries.StageUpdates(updates);
             updates = new ConcurrentBag<LocalFileRow>();
+            if (!cacheUpdates.IsEmpty) entries.StageCacheUpdates(cacheUpdates);
+            cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             }
             }
             finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
 
             Checkpoint?.Invoke("after-hash");
             LogMemoryStage("scan.memory_hashed", session, entries.Count, stopwatch);
-            foreach (var old in index.LocalFiles.ReadAll())
+            foreach (string oldPath in index.ReadLocalPaths())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (updates.Count >= RowRepository<LocalFileRow>.BatchSize)
@@ -376,7 +387,9 @@ public sealed partial class Scanner : IDisposable
                     entries.StageUpdates(updates);
                     updates = new ConcurrentBag<LocalFileRow>();
                 }
-                string key = old.Path.ToUpperInvariant();
+                string key = oldPath.ToUpperInvariant();
+                if (!Under(key, ignoredPrefixes) && (entries.ContainsKey(key) || Under(key, protectedPrefixes) || IsInternal(oldPath))) continue;
+                var old = index.LocalFiles.Find(key) ?? throw new IOException("Local scan row disappeared during the operation gate.");
                 if (Under(key, ignoredPrefixes))
                 {
                     if ((old.Flags & LocalFileState.Ignored) == 0) updates.Add(old with { Flags = old.Flags | LocalFileState.Ignored });
@@ -438,7 +451,7 @@ public sealed partial class Scanner : IDisposable
             // before committing the newly collected local records.
             using (var currentRoot = new NativeRoot(rootPath))
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity)) throw new IOException("Sync root changed during history retention.");
-            foreach (var cacheBatch in cacheUpdates.Chunk(1000))
+            foreach (var cacheBatch in entries.ReadCacheUpdates().Chunk(1000))
                 await index.UpdateNativeChangeTimesAsync(cacheBatch, cancellationToken).ConfigureAwait(false);
             int written = await index.CommitScanRowsAsync(entries.ReadUpdates(), cancellationToken).ConfigureAwait(false);
             if (StageDirectorySnapshots)
@@ -452,9 +465,9 @@ public sealed partial class Scanner : IDisposable
             // A very large change set rebuilds needed work from the durable
             // index union; no million-path result list survives this scan.
             const int changedPathLimit = 10_000;
-            bool rebuildNeeded = requiresNeededRebuild || written + cacheUpdates.Count > changedPathLimit;
+            bool rebuildNeeded = requiresNeededRebuild || written + entries.CacheUpdateCount > changedPathLimit;
             IReadOnlyList<string> changedPaths = rebuildNeeded ? [] : Array.AsReadOnly(entries.ReadUpdates()
-                .Select(row => row.Path).Concat(cacheUpdates.Select(row => row.Path))
+                .Select(row => row.Path).Concat(entries.ReadCacheUpdates().Select(row => row.Path))
                 .Distinct(StringComparer.Ordinal).ToArray());
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())

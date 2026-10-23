@@ -61,6 +61,10 @@ public sealed partial class Scanner
                         + "change_time INTEGER, chunks BLOB, conflict_copy INTEGER NOT NULL); "
                         + "CREATE INDEX staged_order ON staged_updates(path_sort,id); "
                         + "CREATE INDEX staged_conflict ON staged_updates(file_id,file_hash,path_sort) WHERE conflict_copy=1; "
+                        + "CREATE TABLE rename_candidates (id INTEGER PRIMARY KEY, file_id BLOB NOT NULL, path TEXT NOT NULL); "
+                        + "CREATE INDEX rename_by_file ON rename_candidates(file_id,id); "
+                        + "CREATE TABLE staged_cache (id INTEGER PRIMARY KEY, path TEXT NOT NULL, sequence INTEGER NOT NULL, "
+                        + "file_id BLOB NOT NULL, change_time INTEGER NOT NULL); "
                         + "CREATE TABLE scan_owner(root_identity BLOB NOT NULL);";
                     schema.ExecuteNonQuery();
                 }
@@ -190,6 +194,82 @@ public sealed partial class Scanner
         }
 
         internal int UpdateCount { get; private set; }
+        internal int RenameCandidateCount { get; private set; }
+        internal int CacheUpdateCount { get; private set; }
+
+        internal void StageCacheUpdates(IEnumerable<NativeChangeTimeUpdate> rows)
+        {
+            using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO staged_cache(path,sequence,file_id,change_time) VALUES($path,$sequence,$file,$change);";
+            command.Parameters.Add("$path", SqliteType.Text); command.Parameters.Add("$sequence", SqliteType.Integer);
+            command.Parameters.Add("$file", SqliteType.Blob); command.Parameters.Add("$change", SqliteType.Integer);
+            command.Prepare();
+            foreach (var row in rows)
+            {
+                command.Parameters[0].Value = row.Path; command.Parameters[1].Value = row.ExpectedLocalSequence;
+                command.Parameters[2].Value = row.FileId; command.Parameters[3].Value = row.ChangeFileTime;
+                command.ExecuteNonQuery(); CacheUpdateCount = checked(CacheUpdateCount + 1);
+            }
+            transaction.Commit();
+        }
+
+        internal IEnumerable<NativeChangeTimeUpdate> ReadCacheUpdates()
+        {
+            using var readerConnection = OpenReader(); using var command = readerConnection.CreateCommand();
+            command.CommandText = "SELECT path,sequence,file_id,change_time FROM staged_cache ORDER BY id;";
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) yield return new(reader.GetString(0), reader.GetInt64(1),
+                reader.GetFieldValue<byte[]>(2), reader.GetInt64(3));
+        }
+
+        internal void StageRenameCandidates(IEnumerable<LocalFileRow> rows)
+        {
+            using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO rename_candidates(file_id,path) VALUES($file,$path);";
+            command.Parameters.Add("$file", SqliteType.Blob); command.Parameters.Add("$path", SqliteType.Text);
+            command.Prepare();
+            foreach (var row in rows)
+            {
+                command.Parameters[0].Value = row.FileId!;
+                command.Parameters[1].Value = row.Path;
+                command.ExecuteNonQuery(); RenameCandidateCount = checked(RenameCandidateCount + 1);
+            }
+            transaction.Commit();
+        }
+
+        internal Dictionary<string, LocalFileRow[]> ReadRenameCandidates(IReadOnlyList<WalkEntry> page, FolderIndex index)
+        {
+            if (RenameCandidateCount == 0) return new Dictionary<string, LocalFileRow[]>(StringComparer.Ordinal);
+            var ids = page.Where(entry => !entry.Native.IsDirectory && !entry.Unsyncable)
+                .Select(entry => Convert.ToHexString(entry.Native.FileId)).Distinct(StringComparer.Ordinal).ToArray();
+            if (ids.Length == 0) return new Dictionary<string, LocalFileRow[]>(StringComparer.Ordinal);
+            using var command = connection.CreateCommand();
+            var parameters = new string[ids.Length];
+            for (int i = 0; i < ids.Length; i++)
+            {
+                parameters[i] = "$id" + i;
+                command.Parameters.AddWithValue(parameters[i], Convert.FromHexString(ids[i]));
+            }
+            command.CommandText = "SELECT file_id,path FROM rename_candidates WHERE file_id IN ("
+                + string.Join(',', parameters) + ") ORDER BY id;";
+            var candidates = new List<(string File, string Path)>();
+            using (var reader = command.ExecuteReader())
+                while (reader.Read()) candidates.Add((Convert.ToHexString(reader.GetFieldValue<byte[]>(0)), reader.GetString(1)));
+            var rowsByPath = new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+            foreach (var paths in candidates.Select(candidate => candidate.Path).Chunk(RowRepository<LocalFileRow>.BatchSize))
+                foreach (var pair in index.ReadLocalFilesByPaths(paths)) rowsByPath.Add(pair.Key, pair.Value);
+            var groups = new Dictionary<string, List<LocalFileRow>>(StringComparer.Ordinal);
+            foreach (var candidate in candidates)
+            {
+                if (!rowsByPath.TryGetValue(candidate.Path.ToUpperInvariant(), out var row))
+                    throw new IOException("Rename candidate disappeared during the operation gate.");
+                if (!groups.TryGetValue(candidate.File, out var group)) groups.Add(candidate.File, group = []);
+                group.Add(row);
+            }
+            return groups.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.Ordinal);
+        }
 
         internal void StageUpdates(IEnumerable<LocalFileRow> rows)
         {
