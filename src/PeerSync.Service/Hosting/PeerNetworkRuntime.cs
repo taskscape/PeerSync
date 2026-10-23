@@ -132,22 +132,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             diagnostics?.TryWrite(new("service.tcp_listener_ready", "peer_network")
                 { Transport = DiagnosticTransport.Tcp, ItemsChanged = deviceSettings.ListenPort });
 
-            if (deviceSettings.LanDiscovery && getFolders().Any(folder => folder.Settings.UseLan))
-            {
-                try
-                {
-                    runtime.discovery = new LanDiscovery(deviceId, deviceSettings.ListenPort,
-                        () => getFolders().Where(folder => folder.Settings.UseLan)
-                            .Select(folder => (ReadOnlyMemory<byte>)folder.Keys.FolderId()).ToArray(), diagnostics);
-                    runtime.discovery.PeerDiscovered += runtime.OnLanPeerDiscovered;
-                    runtime.discovery.Start();
-                }
-                catch (Exception error) when (error is SocketException or InvalidOperationException or PlatformNotSupportedException)
-                {
-                    diagnostics?.TryWrite(new("service.lan_discovery_unavailable", "peer_network")
-                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
-                }
-            }
+            await runtime.RefreshLanDiscoveryAsync(deviceSettings, cancellationToken).ConfigureAwait(false);
 
             runtime.predefinedHosts = new PredefinedHosts(() => getFolders().SelectMany(folder => folder.Settings.PredefinedHosts)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), runtime.DialPredefinedHostAsync, diagnostics);
@@ -535,6 +520,51 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     internal Task RefreshPredefinedHostsAsync(CancellationToken cancellationToken = default)
         => (predefinedHosts ?? throw new InvalidOperationException("Predefined host resolver is not running."))
             .RefreshNowAsync(cancellationToken);
+
+    internal async Task<bool> RefreshFolderPolicyAsync(DeviceSettings deviceSettings, CancellationToken cancellationToken)
+    {
+        bool lanAvailable = await RefreshLanDiscoveryAsync(deviceSettings, cancellationToken).ConfigureAwait(false);
+        foreach (TrackerClient tracker in trackers) tracker.Refresh();
+        await RefreshPredefinedHostsAsync(cancellationToken).ConfigureAwait(false);
+        RequestNetworkRecovery("folder_policy_change");
+        return lanAvailable;
+    }
+
+    private async Task<bool> RefreshLanDiscoveryAsync(DeviceSettings deviceSettings, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        bool wanted = deviceSettings.LanDiscovery && getFolders().Any(folder => folder.Settings.UseLan);
+        if (!wanted)
+        {
+            LanDiscovery? old = discovery;
+            discovery = null;
+            if (old is not null)
+            {
+                old.PeerDiscovered -= OnLanPeerDiscovered;
+                await old.DisposeAsync().ConfigureAwait(false);
+            }
+            return true;
+        }
+        if (discovery is not null) return true;
+        var next = new LanDiscovery(localDeviceId, deviceSettings.ListenPort,
+            () => getFolders().Where(folder => folder.Settings.UseLan)
+                .Select(folder => (ReadOnlyMemory<byte>)folder.Keys.FolderId()).ToArray(), diagnostics, timeProvider);
+        try
+        {
+            next.PeerDiscovered += OnLanPeerDiscovered;
+            next.Start();
+            discovery = next;
+            return true;
+        }
+        catch (Exception error) when (error is SocketException or InvalidOperationException or PlatformNotSupportedException)
+        {
+            next.PeerDiscovered -= OnLanPeerDiscovered;
+            await next.DisposeAsync().ConfigureAwait(false);
+            diagnostics?.TryWrite(new("service.lan_discovery_unavailable", "peer_network")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            return false;
+        }
+    }
 
     internal async Task RefreshFolderMembershipAsync(CancellationToken cancellationToken)
     {

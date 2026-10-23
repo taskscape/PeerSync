@@ -122,10 +122,14 @@ Device settings are stored in
 `%ProgramData%\PeerSync\config\settings.json`. A registered folder has
 separate settings including `RequireApproval`, `ArchiveDays`, predefined
 hosts, tracker and relay switches. Make a backup before changing settings,
-validate JSON and restart the service if the dashboard reports that a change
-requires restart. Folder keys must never be placed in this file, logs or
-support bundles. Use the authenticated local control API or dashboard for
-normal folder changes.
+validate JSON and use the authenticated control API or dashboard to apply
+folder changes. A changed active folder briefly drains its sessions and
+reopens with the new policy; other folder engines stay registered, though
+shared peer sessions may reconnect. If reopening fails, the changed folder
+remains paused and can be resumed after fixing the cause.
+For folder changes, restart the service only if the dashboard reports that a
+network policy could not be refreshed. Folder keys must never be placed in
+this file, logs or support bundles.
 
 ## Health, logs and recovery
 

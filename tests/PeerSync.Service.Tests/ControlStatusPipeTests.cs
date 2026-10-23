@@ -119,11 +119,24 @@ public sealed class ControlStatusPipeTests : IDisposable
             added.FolderId, "bad", "approve", Token))).StatusCode.ShouldBe(StatusCode.InvalidArgument);
         (await client.GetFolderSettingsAsync(added.FolderId, Token)).Json.ShouldContain("rescanIntervalSeconds");
         var originalSettings = FolderSettings.FromJson((await client.GetFolderSettingsAsync(added.FolderId, Token)).Json);
+        var previousEngine = folderHost.ResolveFolder(added.FolderId);
         var update = await client.UpdateFolderSettingsAsync(added.FolderId,
-            (originalSettings with { RequireApproval = true, ArchiveDays = 7 }).ToJson(), Token);
-        update.RestartRequired.ShouldBeTrue();
+            (originalSettings with { RequireApproval = true, ArchiveDays = 7,
+                IgnoreRules = "private.hidden", RescanIntervalSeconds = 45, Priority = TransferPriority.SmallerFirst }).ToJson(), Token);
+        update.RestartRequired.ShouldBeFalse();
         FolderSettings.FromJson((await client.GetFolderSettingsAsync(added.FolderId, Token)).Json).RequireApproval.ShouldBeTrue();
-        folderHost.ResolveFolder(added.FolderId).Settings.RequireApproval.ShouldBeFalse();
+        var replacement = folderHost.ResolveFolder(added.FolderId);
+        replacement.ShouldNotBeSameAs(previousEngine);
+        replacement.Settings.RequireApproval.ShouldBeTrue();
+        replacement.Settings.ArchiveDays.ShouldBe(7);
+        replacement.Settings.RescanIntervalSeconds.ShouldBe(45);
+        replacement.Settings.Priority.ShouldBe(TransferPriority.SmallerFirst);
+        await File.WriteAllTextAsync(Path.Combine(addPath, "private.hidden"), "excluded", Token);
+        await File.WriteAllTextAsync(Path.Combine(addPath, "visible.txt"), "included", Token);
+        replacement.Transport.RequestScan();
+        await replacement.Transport.RunPassAsync(Token);
+        replacement.Index.LocalFiles.Find("private.hidden").ShouldBeNull();
+        replacement.Index.LocalFiles.Find("visible.txt").ShouldNotBeNull();
         (await Should.ThrowAsync<RpcException>(() => client.UpdateFolderSettingsAsync(
             added.FolderId, "{\"archiveDays\":0}", Token))).StatusCode.ShouldBe(StatusCode.InvalidArgument);
         FolderSettings.FromJson((await client.GetFolderSettingsAsync(added.FolderId, Token)).Json).ArchiveDays.ShouldBe(7);
@@ -180,9 +193,9 @@ public sealed class ControlStatusPipeTests : IDisposable
         await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
         using var client = Client(pipe, identity.User!);
         var added = await client.AddFolderAsync(root, Token);
-        (await client.SetIgnoreRulesAsync(added.FolderId, "untouched.txt", Token)).RestartRequired.ShouldBeTrue();
+        (await client.SetIgnoreRulesAsync(added.FolderId, "untouched.txt", Token)).RestartRequired.ShouldBeFalse();
         (await client.GetIgnoreRulesAsync(added.FolderId, Token)).Rules.ShouldBe("untouched.txt");
-        folderHost.ResolveFolder(added.FolderId).Settings.IgnoreRules.ShouldBe("");
+        folderHost.ResolveFolder(added.FolderId).Settings.IgnoreRules.ShouldBe("untouched.txt");
         (await client.PauseFolderAsync(added.FolderId, Token)).Paused.ShouldBeTrue();
         (await client.ListFoldersAsync(Token)).Folders.Single().Paused.ShouldBeTrue();
         (await client.GetFolderSettingsAsync(added.FolderId, Token)).Json.ShouldContain("archiveDays");

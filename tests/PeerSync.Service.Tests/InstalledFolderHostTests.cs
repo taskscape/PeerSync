@@ -86,7 +86,18 @@ public sealed class InstalledFolderHostTests
             await left.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, rightPort), timeout.Token);
             await UntilAsync(() => FileMatches(Path.Combine(rightShare, "approval.txt"), firstContent), timeout.Token);
 
-            await right.DecideDeviceAsync(Convert.ToHexString(keys.FolderId()), leftId, DeviceApproval.Blocked,
+            string folderId = Convert.ToHexString(keys.FolderId());
+            var oldRuntime = right.ResolveFolder(folderId);
+            var changed = await right.UpdateFolderSettingsAsync(folderId,
+                right.GetFolderSettings(folderId) with { ArchiveDays = 7 }, actorSid, timeout.Token);
+            changed.RestartRequired.ShouldBeFalse();
+            right.ResolveFolder(folderId).ShouldNotBeSameAs(oldRuntime);
+            right.ResolveFolder(folderId).Settings.ArchiveDays.ShouldBe(7);
+            File.WriteAllText(Path.Combine(leftShare, "after-policy.txt"), "transfer after live policy change");
+            await UntilAsync(() => FileMatches(Path.Combine(rightShare, "after-policy.txt"),
+                "transfer after live policy change"), timeout.Token);
+
+            await right.DecideDeviceAsync(folderId, leftId, DeviceApproval.Blocked,
                 actorSid, timeout.Token);
             await UntilAsync(() => !rightStatus.ReadStatus().ProductionSyncAvailable, timeout.Token);
             File.WriteAllText(Path.Combine(leftShare, "after-block.txt"), "must not cross a blocked connection");

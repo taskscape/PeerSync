@@ -29,6 +29,11 @@ support because the JSON also contains the key. Set **Require approval for
 new devices** in folder Settings if you want each newly seen identity to wait
 for a decision. Review the full device fingerprint in the dashboard's Pending
 list before approving. Blocking an identity prevents its future sessions.
+Changing folder policy in Settings briefly reconnects that folder's peers so
+the new approval, ignore, archive and scan rules take effect. Other folders
+stay registered, though shared peer sessions may reconnect. If the change
+leaves the folder paused, fix the reported folder error and select **Resume**;
+the saved policy is retained.
 
 ## Watch transfers and routes
 
