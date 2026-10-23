@@ -154,12 +154,16 @@ Get-Service PeerSync
 & 'C:\Program Files\PeerSync\cli\psp.exe' status --json
 & 'C:\Program Files\PeerSync\cli\psp.exe' probe sync.taskscape.com:99
 & 'C:\Program Files\PeerSync\cli\psp.exe' diagnostics --output 'C:\Temp\peersync-client.zip'
+& 'C:\Program Files\PeerSync\tools\Collect-DeploymentEvidence.ps1' -Role Client -ProbeHost sync.taskscape.com:99
 ```
 
 Structured logs are under `%ProgramData%\PeerSync\logs\service`; warning
 and error summaries also reach the Windows Application Event Log. The
 diagnostic command makes a new ZIP with bounded logs and environment
-metadata. Compare session IDs and UTC times across peers. If the service
+metadata. The field collector prints a new directory containing a sanitized
+JSON health/probe/signing summary and bundle; it exits nonzero with issue
+codes while retaining the successfully collected evidence. Compare session
+IDs and UTC times across peers. If the service
 fails during startup, inspect its Application event and the latest startup
 journal. `PeerSync.Service.exe` can run in the foreground after stopping the
 Windows service; never run both against the same database and listener.
