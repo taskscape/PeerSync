@@ -44,7 +44,27 @@ internal static class ScanningBenchmark
         using var journal = diagnosticPath is null ? null : new DiagnosticJournal(diagnosticPath, "scale", debugEnabled: true);
         using var scanner = new Scanner(root, index, keys, new byte[32], journal: journal);
         long hashedProgress = 0;
+        string scanStage = "first-index";
+        var stageElapsed = Stopwatch.StartNew();
         if (count == 1_000_000)
+        {
+            scanner.Checkpoint = checkpoint =>
+            {
+                if (checkpoint is not ("after-enumerate" or "after-hash" or "before-scan-commit" or "after-upsert")) return;
+                using Process current = Process.GetCurrentProcess();
+                current.Refresh();
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    target = "P5 scanner-stage-memory", scanStage, checkpoint,
+                    seconds = stageElapsed.Elapsed.TotalSeconds,
+                    workingSetBytes = current.WorkingSet64,
+                    privateBytes = current.PrivateMemorySize64,
+                    peakWorkingSetBytes = current.PeakWorkingSet64,
+                    managedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
+                    gcCommittedBytes = GC.GetGCMemoryInfo().TotalCommittedBytes,
+                    hashed = Interlocked.Read(ref hashedProgress),
+                }));
+            };
             scanner.BytesHashed += _ =>
             {
                 long completed = Interlocked.Increment(ref hashedProgress);
@@ -52,8 +72,11 @@ internal static class ScanningBenchmark
                     Console.WriteLine(JsonSerializer.Serialize(new
                     { stage = "first-index", hashed = completed, seconds = firstIndex.Elapsed.TotalSeconds }));
             };
+        }
         var initial = await scanner.ScanAsync();
         firstIndex.Stop();
+        scanStage = "unchanged";
+        stageElapsed.Restart();
         // ReadIndexBatch(0) is capped at 1000: use the persisted high-water metadata.
         long sequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
         var unchanged = await scanner.ScanAsync();

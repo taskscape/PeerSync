@@ -223,6 +223,7 @@ public sealed partial class Scanner : IDisposable
                 }
             }
 
+            Checkpoint?.Invoke("after-enumerate");
             var updates = new ConcurrentBag<LocalFileRow>();
             int unchanged = 0, hashed = 0, renamed = 0, deleted = 0, unsyncable = 0;
             // Identity matching is restricted to paths absent from the successful walk.
@@ -348,6 +349,7 @@ public sealed partial class Scanner : IDisposable
             }
             finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
 
+            Checkpoint?.Invoke("after-hash");
             foreach (var old in previous.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -413,6 +415,7 @@ public sealed partial class Scanner : IDisposable
             int written = await index.LocalFiles.UpsertAsync(ordered, cancellationToken).ConfigureAwait(false);
             if (StageDirectorySnapshots)
                 await StageDirectoriesAsync(root.Identity, entries, protectedPrefixes, ignoredPrefixes, problems, session, cancellationToken).ConfigureAwait(false);
+            Checkpoint?.Invoke("after-upsert");
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,

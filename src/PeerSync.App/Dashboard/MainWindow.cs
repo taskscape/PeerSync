@@ -87,7 +87,7 @@ internal sealed class MainWindow : Window, IDisposable
         menu.Items.Add("Pause for 1 hour", null, (_, _) => Dispatcher.InvokeAsync(() => _ = ExecuteAsync(() => PauseAllAsync(3600))));
         menu.Items.Add("Pause until resumed", null, (_, _) => Dispatcher.InvokeAsync(() => _ = ExecuteAsync(() => PauseAllAsync(0))));
         menu.Items.Add("Resume all", null, (_, _) => Dispatcher.InvokeAsync(() => _ = ExecuteAsync(ResumeAllAsync)));
-        menu.Items.Add("Exit app", null, (_, _) => Dispatcher.Invoke(() => { exiting = true; Close(); }));
+        menu.Items.Add("Exit app", null, (_, _) => Dispatcher.Invoke(Exit));
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowAndActivate);
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) Hide(); };
@@ -459,6 +459,12 @@ internal sealed class MainWindow : Window, IDisposable
     internal void ShowAndActivate()
     {
         ShowInTaskbar = true; Show(); WindowState = WindowState.Normal; Activate();
+    }
+
+    internal void Exit()
+    {
+        exiting = true;
+        Close();
     }
 
     private void OnClosing(object? sender, CancelEventArgs args)

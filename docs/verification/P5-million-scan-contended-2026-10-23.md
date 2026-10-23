@@ -70,3 +70,34 @@ Idle CPU was 0.2474%, working set 135,827,456 bytes and private bytes
 scanner and running fresh-peer evidence are in
 `artifacts/scale/p5-peer-20261022T234611-e6deecf51d6b416f8716ec5614bf42fe`.
 The million-file fresh-peer result is still pending.
+
+## Stage memory diagnostic
+
+A separate, instrumented reindex of the retained corpus used revision
+`3033e49a3c695ad7269bd7725fca891da2909ee5` plus uncommitted checkpoint
+logging. Its executable SHA-256 was
+`ED8AC5FD796DD78630151313619B133EA9C6E07980F5EE3F848BE52A9ED05FDE`.
+The evidence is in
+`artifacts/scale/p5-memory-stage-20261023T001548-e5fdd9280625487ea5d05b819b8da825/`.
+The fresh-peer run and 24-hour fuzz campaign were concurrent, and the
+diagnostic process ran at idle priority. This is a cause-finding run, not a
+committed-source gate result.
+
+| Checkpoint | Working set | Private bytes | Managed heap |
+| --- | ---: | ---: | ---: |
+| First index, after enumeration | 374,624,256 | 340,742,144 | 299,095,064 |
+| First index, after hashing 1,000,000 files | 1,222,303,744 | 1,185,042,432 | 1,146,017,432 |
+| First index, after database upsert | 1,281,318,912 | 1,236,910,080 | 1,135,500,512 |
+| Unchanged scan, after enumeration | 2,540,441,600 | 2,508,378,112 | 2,276,075,344 |
+| Unchanged scan, after upsert | 2,549,288,960 | 2,517,426,176 | 2,272,849,504 |
+| 30-second idle sample | 136,654,848 | 87,638,016 | 56,844,136 |
+
+The first index took 259.846 seconds and the unchanged walk 7.752 seconds,
+with no rehashes, updates or local-sequence change. Idle CPU was 0.269% and
+the idle working set passed the existing benchmark's 300 MiB check. Peak
+working set was 2,551,562,240 bytes. The scanner materializes the native
+walk, prior rows, and update rows before commit; the second walk retains both
+the completed first-walk heap and its own rows until delayed reclamation.
+If the plan's memory threshold is interpreted as a peak throughout indexing,
+the current implementation does not meet it and needs a bounded, durable
+scan-staging design. No peak pass is claimed.
