@@ -46,6 +46,7 @@ public sealed class ArchiveVisualTreeTests
             ((DataGridRow)grid.ItemContainerGenerator.ContainerFromIndex(0)).IsVisible.ShouldBeTrue();
             var text = Descendants<TextBlock>(window).Select(item => item.Text).ToArray();
             text.ShouldContain("notes.txt");
+            text.ShouldContain(model.ArchiveVersions.Single().ArchivedLocal);
             text.ShouldContain(model.ArchiveVersions.Single().SizeDisplay);
             text.ShouldContain(item => item.Contains("more versions exist", StringComparison.Ordinal));
             var buttons = Descendants<Button>(window).Where(item => item.IsVisible).Select(item => item.Content?.ToString()).ToArray();
