@@ -67,16 +67,19 @@ public sealed class ControlStatusPipeTests : IDisposable
     public async Task FolderManagementRpcsAddJoinListPeersAndStreamIndexOverTheVerifiedPipe()
     {
         using var identity = WindowsIdentity.GetCurrent();
+        string logDirectory = Path.Combine(fixture, "folder-control-logs");
+        using var journal = new DiagnosticJournal(logDirectory, "control", debugEnabled: true);
         string statePath = Path.Combine(fixture, "state", "peersync.db");
         string addPath = Path.Combine(fixture, "add"); string joinPath = Path.Combine(fixture, "join");
         Directory.CreateDirectory(Path.GetDirectoryName(statePath)!); Directory.CreateDirectory(addPath); Directory.CreateDirectory(joinPath);
         await File.WriteAllTextAsync(Path.Combine(addPath, "sample.txt"), "indexed", Token);
-        var runtime = new ControlStatusRuntime();
+        var runtime = new ControlStatusRuntime(journal);
         await using var folderHost = await InstalledFolderHost.StartForTestAsync(statePath, Device(10), identity.User!.Value,
-            runtime, cancellationToken: Token);
+            runtime, diagnostics: journal, cancellationToken: Token);
         runtime.AttachFolderHost(folderHost);
         string pipe = Pipe;
-        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
+        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!],
+            diagnostics: journal, cancellationToken: Token);
         using var client = Client(pipe, identity.User!);
 
         var added = await client.AddFolderAsync(addPath, Token);
@@ -151,6 +154,12 @@ public sealed class ControlStatusPipeTests : IDisposable
         var dumped = new List<string>();
         await foreach (var row in client.DumpIndexAsync(added.FolderId, timeout.Token)) dumped.Add(row.Path);
         dumped.ShouldContain("sample.txt");
+
+        string raw = File.ReadAllText(Path.Combine(logDirectory, "debug.jsonl"));
+        raw.ShouldContain("control.folder_keys_read");
+        foreach (string sensitive in new[] { share.Key, key, added.FolderId, joined.FolderId,
+            Path.GetFullPath(addPath), Path.GetFullPath(joinPath), "sample.txt" })
+            raw.Contains(sensitive, StringComparison.OrdinalIgnoreCase).ShouldBeFalse("Raw control logs exposed folder data.");
     }
 
     [Fact]
