@@ -1,11 +1,13 @@
 # P5 local-only leaf publication cache, 2026-10-23
 
-The live million-file source exposed a global-epoch cost: a read-only snapshot
+The earlier million-file source exposed a global-epoch cost: a read-only snapshot
 at about 6,015 seconds found 309 completed directory publication caches and
 847 queued directories. Some completed siblings had been restaged by a later
-scan even though their direct signed children were unchanged. The run still
-uses the earlier committed binary and remains diagnostic evidence; this change
-cannot affect that process.
+scan even though their direct signed children were unchanged. After preserving
+its log, provenance, database and a final read-only snapshot, that superseded
+run was stopped at 327 completed caches and 851 queued publications. Its
+`diagnostic-end.json` and other local artifacts remain under
+`artifacts/scale/p5-peer-20261022T234611-e6deecf51d6b416f8716ec5614bf42fe/`.
 
 The earlier general signed-manifest shortcut was rejected after retained
 hierarchical simulation failures. This narrower scanner check applies only
@@ -48,6 +50,15 @@ Local controls so far:
   and its Engine DLL SHA-256 is
   `EABC63ED1459433B643B230EF964F6B87E4593196C9956D4F7E365EFBFE4208B`.
 
-The live million-file baseline still has not published all source directories.
-The 10,000-file control and local tests do not meet the million-file target.
-Physical transport and the P5 release gate remain open.
+The committed candidate `79d4e46` began a separate million-file fresh-peer
+run at 2026-10-23 01:41 UTC, using a new database over the retained generated
+tree. Its binary hashes and source revision are recorded in
+`artifacts/scale/p5-final-peer-79d4e46/provenance.json`. Its first index
+completed in 256.184 seconds for 1,000,000 real files; the unchanged walk
+kept all 1,001,000 rows and took 8.115 seconds without rehash or update. The
+30-second idle sample measured 0.239% CPU and 137,539,584 working-set bytes,
+so the runner's idle-memory target passed. Peak working set was 2,547,621,888
+bytes and remains a separate limitation. Source publication and fresh-peer
+convergence are still running. The 10,000-file control and local tests do not
+meet the million-file transfer target. Physical transport and the P5 release
+gate remain open.
