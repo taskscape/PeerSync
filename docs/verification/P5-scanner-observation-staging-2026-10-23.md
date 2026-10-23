@@ -52,3 +52,18 @@ changed-path result still grow with the first scan, so the 300 MB peak target
 and a committed-source million-file measurement remain open. The existing
 million-file fresh-peer process uses an earlier separate binary/database and
 was not modified.
+
+The local Simulation runner completed 17/17 test methods with zero failures
+and skips in 14 minutes 44.832 seconds: ten retained hierarchical seeds,
+eight generated flat cases and four generated hierarchical cases. The summary
+files report `status=passed` for both generated cohorts; their
+`gateP1Passed=false` field reflects this deliberately reduced local seed count,
+not a test failure or a new P1 gate result. The run's TRX, seeds, summaries and
+binary hashes are retained under
+`artifacts/simulation/20261023T044805-150804db228e48d495fccfaf5e2fe8dd/`.
+Its binary was built from the observation-stage source before the final
+ignored-file-prefix and hashing-order refinements. Those refinements passed
+the final-source 20-case scanner/Unicode focus above; a full Simulation rerun
+on exactly the final commit remains to be done before claiming final-source
+simulation validation. Hosted CI is denied before job start by the Actions
+budget.
