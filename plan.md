@@ -2367,6 +2367,7 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
 - [ ] **P4.1.7 Central deployment diagnostics** (`PeerSync.Rendezvous/Diagnostics/`, `docs/diagnostics.md`)
   - Done when: server debug events correlate authentication, presence, introductions, relay joins/leaves, quota/timeout and transport errors with client sessions; health and environment checks distinguish TCP/UDP failures. Central and second-PC bundles diagnose a forced relay failure on LAN and WAN. No FolderIds, keys or plaintext are logged; IP retention stays at most 24 hours.
   - In progress: `psp probe` sends one correlation ID over HTTP/2 and HTTP/3, reports bounded per-leg transport errors and confirms an echoed ID; the server writes that ID on each reached probe event. Authenticated tracker failure, relay join rejection and HTTP 429 now write bounded events, including session ID when issued. [Local verification](docs/verification/P4-probe-correlation-2026-10-23.md) includes collected central ZIPs for probe/tracker rejection, a certificate-bound relay failure and rate-limit denial; physical LAN/WAN forced-relay bundles remain required.
+  - Idle raw-log retention now uses a timer, so an IP-bearing file expires after 24 hours without waiting for another write. A clock-controlled test and a raw-log spot check are recorded in [local retention evidence](docs/verification/P4-idle-log-retention-2026-10-23.md). Installed-server retention and the physical LAN/WAN bundles remain open.
 
 ### 10.1 Code: Kestrel on port 99 (P4.1.1)
 

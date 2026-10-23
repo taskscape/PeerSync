@@ -14,12 +14,15 @@ public sealed class DiagnosticJournal : IDisposable
     private readonly string runId = Guid.NewGuid().ToString("N");
     private readonly long maxFileBytes;
     private readonly int retainedFiles;
+    private readonly TimeProvider clock;
+    private readonly ITimer expiryTimer;
+    private DateTime nextExpiryUtc = DateTime.MaxValue;
     private bool disposed;
     private long droppedEvents;
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     public DiagnosticJournal(string directory, string component, bool debugEnabled = false,
-        long maxFileBytes = 14_000_000, int retainedFiles = 7)
+        long maxFileBytes = 14_000_000, int retainedFiles = 7, TimeProvider? timeProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentException.ThrowIfNullOrWhiteSpace(component);
@@ -30,8 +33,14 @@ public sealed class DiagnosticJournal : IDisposable
         this.component = component;
         this.maxFileBytes = maxFileBytes;
         this.retainedFiles = retainedFiles;
+        clock = timeProvider ?? TimeProvider.System;
         DebugEnabled = debugEnabled;
         Directory.CreateDirectory(this.directory);
+        expiryTimer = clock.CreateTimer(_ => SweepExpiredOnTimer(), null,
+            Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        try { SweepExpiredAndSchedule(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { Interlocked.Increment(ref droppedEvents); expiryTimer.Change(TimeSpan.FromMinutes(15), Timeout.InfiniteTimeSpan); }
     }
 
     public bool DebugEnabled { get; }
@@ -57,7 +66,7 @@ public sealed class DiagnosticJournal : IDisposable
         if (entry.ErrorCode is not null) ValidateCode(entry.ErrorCode);
         if (entry.RemotePort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(entry), "A diagnostic remote port must be a valid TCP or UDP port.");
-        DateTime occurredUtc = DateTime.UtcNow;
+        DateTime occurredUtc = clock.GetUtcNow().UtcDateTime;
         byte[] line = JsonSerializer.SerializeToUtf8Bytes(new
         {
             timestampUtc = new DateTimeOffset(occurredUtc),
@@ -91,11 +100,19 @@ public sealed class DiagnosticJournal : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
+            if (occurredUtc >= nextExpiryUtc) SweepExpiredAndSchedule();
             string file = Path.Combine(directory, "debug.jsonl");
-            Rotate(file, line.Length + 1);
-            using var output = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.Read);
-            output.Write(line);
-            output.WriteByte((byte)'\n');
+            bool freshFile = Rotate(file, line.Length + 1);
+            using (var output = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.Read))
+            { output.Write(line); output.WriteByte((byte)'\n'); }
+            if (freshFile)
+            {
+                // Match the event clock when a test or host supplies a clock;
+                // otherwise a time jump can make a newly written file look old.
+                File.SetCreationTimeUtc(file, occurredUtc);
+                File.SetLastWriteTimeUtc(file, occurredUtc);
+                SweepExpiredAndSchedule();
+            }
         }
         foreach (Action<DiagnosticEvent, DateTime> observer in EntryWritten?.GetInvocationList() ?? [])
             try { observer(entry, occurredUtc); }
@@ -109,14 +126,11 @@ public sealed class DiagnosticJournal : IDisposable
             throw new ArgumentException("Diagnostic codes must be short identifiers.", nameof(code));
     }
 
-    private void Rotate(string file, int incoming)
+    private bool Rotate(string file, int incoming)
     {
-        // IP-bearing debug events expire after 24h, including the active file.
-        foreach (string old in Directory.EnumerateFiles(directory, "debug*.jsonl"))
-            if (File.GetLastWriteTimeUtc(old) < DateTime.UtcNow.AddHours(-24)
-                || File.GetCreationTimeUtc(old) < DateTime.UtcNow.AddHours(-24)) File.Delete(old);
-        if (!File.Exists(file) || new FileInfo(file).Length + incoming <= maxFileBytes) return;
-        File.Delete(Path.Combine(directory, $"debug.{retainedFiles - 1}.jsonl"));
+        if (!File.Exists(file)) return true;
+        if (new FileInfo(file).Length + incoming <= maxFileBytes) return false;
+        if (retainedFiles > 1) File.Delete(Path.Combine(directory, $"debug.{retainedFiles - 1}.jsonl"));
         for (int i = retainedFiles - 2; i >= 1; i--)
         {
             string source = Path.Combine(directory, $"debug.{i}.jsonl");
@@ -124,11 +138,56 @@ public sealed class DiagnosticJournal : IDisposable
         }
         if (retainedFiles > 1) File.Move(file, Path.Combine(directory, "debug.1.jsonl"), overwrite: true);
         else File.Delete(file);
+        return true;
+    }
+
+    private void SweepExpiredOnTimer()
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            try { SweepExpiredAndSchedule(); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { Interlocked.Increment(ref droppedEvents); expiryTimer.Change(TimeSpan.FromMinutes(15), Timeout.InfiniteTimeSpan); }
+        }
+    }
+
+    private void SweepExpiredAndSchedule()
+    {
+        DateTime now = clock.GetUtcNow().UtcDateTime;
+        long cutoff = Math.Max(0, now.Ticks - TimeSpan.TicksPerDay);
+        long earliest = DateTime.MaxValue.Ticks;
+        foreach (string file in Directory.EnumerateFiles(directory, "debug*.jsonl"))
+        {
+            if (!IsDiagnosticFileName(Path.GetFileName(file))) continue;
+            try
+            {
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) continue;
+                long oldest = Math.Min(File.GetCreationTimeUtc(file).Ticks, File.GetLastWriteTimeUtc(file).Ticks);
+                if (oldest <= cutoff) { File.Delete(file); continue; }
+                earliest = Math.Min(earliest, oldest > DateTime.MaxValue.Ticks - TimeSpan.TicksPerDay
+                    ? DateTime.MaxValue.Ticks : oldest + TimeSpan.TicksPerDay);
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
+        nextExpiryUtc = new DateTime(earliest, DateTimeKind.Utc);
+        TimeSpan due = earliest <= now.Ticks ? TimeSpan.Zero : TimeSpan.FromTicks(earliest - now.Ticks);
+        expiryTimer.Change(due < TimeSpan.FromMinutes(15) ? due : TimeSpan.FromMinutes(15), Timeout.InfiniteTimeSpan);
+    }
+
+    private static bool IsDiagnosticFileName(string name)
+    {
+        if (name == "debug.jsonl") return true;
+        if (!name.StartsWith("debug.", StringComparison.Ordinal) || !name.EndsWith(".jsonl", StringComparison.Ordinal)) return false;
+        ReadOnlySpan<char> digits = name.AsSpan(6, name.Length - 12);
+        return int.TryParse(digits, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int value)
+            && value > 0 && digits.SequenceEqual(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     public void Dispose()
     {
-        lock (gate) { disposed = true; }
+        lock (gate) { disposed = true; expiryTimer.Dispose(); }
     }
 }
 

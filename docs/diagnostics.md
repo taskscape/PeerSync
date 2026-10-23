@@ -119,9 +119,11 @@ debug events in its local journal. The event model
 accepts metadata rather than arbitrary payloads or exception messages. Never
 add folder keys, FolderIds, file contents or record bodies to diagnostics.
 
-The diagnostic journal defaults to seven files of at most 14 MB each. Files
-containing network addresses expire at 24 hours on the next write. Collection
-also filters events to the last 24 hours. Debug disk writes are synchronous;
+The diagnostic journal defaults to seven files of at most 14 MB each. Its
+15-minute timer removes journal files 24 hours after their oldest file timestamp,
+even when the service is idle; a write also checks for expired files. Removal
+can discard newer events in the same file. Collection independently filters
+events to the last 24 hours. Debug disk writes are synchronous;
 only emit progress at bounded intervals rather than for every transferred chunk.
 
 Run `psp diagnostics --logs <log-directory> --output <new-zip>` on both
