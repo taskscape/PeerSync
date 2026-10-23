@@ -27,8 +27,8 @@ function Confirm-InstalledUpdate([string]$serviceExe, [version]$offerVersion, [s
 }
 
 function Remove-ReadySlot([IO.DirectoryInfo]$ready, [string]$pendingRoot) {
-    # The service can write pending slots. Recheck the exact owned GUID path
-    # and reject a reparse point immediately before the recursive removal.
+    # The service can write pending slots. Never recurse into this directory:
+    # an unexpected child or junction must remain for administrator diagnosis.
     $current = Get-Item -LiteralPath $ready.FullName -Force
     if (-not $current.PSIsContainer -or
         ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
@@ -37,7 +37,16 @@ function Remove-ReadySlot([IO.DirectoryInfo]$ready, [string]$pendingRoot) {
             [IO.Path]::GetFullPath($pendingRoot), [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Pending update slot changed before cleanup.'
     }
-    Remove-Item -LiteralPath $current.FullName -Recurse -Force
+    $children = @(Get-ChildItem -LiteralPath $current.FullName -Force)
+    foreach ($child in $children) {
+        if ($child.PSIsContainer -or
+            ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $child.Name -cnotin @('manifest.json', 'setup.exe', 'receipt.json')) {
+            throw 'Pending update slot contains an unexpected child.'
+        }
+    }
+    foreach ($child in $children) { Remove-Item -LiteralPath $child.FullName -Force }
+    Remove-Item -LiteralPath $current.FullName -Force
 }
 
 function Remove-TrustedAttempt([IO.DirectoryInfo]$attempt, [string]$trustedRoot) {
@@ -49,7 +58,16 @@ function Remove-TrustedAttempt([IO.DirectoryInfo]$attempt, [string]$trustedRoot)
             [IO.Path]::GetFullPath($trustedRoot), [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Trusted update attempt changed before cleanup.'
     }
-    Remove-Item -LiteralPath $current.FullName -Recurse -Force
+    $children = @(Get-ChildItem -LiteralPath $current.FullName -Force)
+    foreach ($child in $children) {
+        if ($child.PSIsContainer -or
+            ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $child.Name -cnotin @('manifest.json', 'setup.exe', 'attempt.json')) {
+            throw 'Trusted update attempt contains an unexpected child.'
+        }
+    }
+    foreach ($child in $children) { Remove-Item -LiteralPath $child.FullName -Force }
+    Remove-Item -LiteralPath $current.FullName -Force
 }
 
 function Write-UpdateAttempt([string]$trusted, [string]$readyName, [long]$startedUtcTicks,

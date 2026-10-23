@@ -6,7 +6,8 @@ $helper = Join-Path (Split-Path $PSScriptRoot -Parent) 'installer\Update-Helper.
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($helper, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Update helper did not parse.' }
-foreach ($name in @('Write-UpdateAttempt', 'Find-RestartedAttempt')) {
+foreach ($name in @('Write-UpdateAttempt', 'Find-RestartedAttempt',
+        'Remove-ReadySlot', 'Remove-TrustedAttempt')) {
     $function = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
         $node.Name -eq $name }, $true))
     if ($function.Count -ne 1) { throw "Update restart function $name is missing or ambiguous." }
@@ -36,6 +37,28 @@ try {
     if ((Find-RestartedAttempt $ready $root).FullName -ne $attempt) {
         throw 'An unrelated damaged attempt blocked the verified attempt.'
     }
+
+    $pending = Join-Path $root 'pending'
+    New-Item -ItemType Directory -Path $pending | Out-Null
+    $blocked = Join-Path $pending ([guid]::NewGuid().ToString('N') + '.ready')
+    $foreign = Join-Path $blocked 'unexpected'
+    New-Item -ItemType Directory -Path $foreign -Force | Out-Null
+    'preserve' | Set-Content -LiteralPath (Join-Path $foreign 'marker.txt')
+    try { Remove-ReadySlot (Get-Item -LiteralPath $blocked) $pending; throw 'Nested child was removed.' }
+    catch { if ($_.Exception.Message -ne 'Pending update slot contains an unexpected child.') { throw } }
+    if ((Get-Content -LiteralPath (Join-Path $foreign 'marker.txt')) -ne 'preserve') {
+        throw 'Unexpected child was modified.'
+    }
+
+    $clean = Join-Path $pending ([guid]::NewGuid().ToString('N') + '.ready')
+    New-Item -ItemType Directory -Path $clean | Out-Null
+    foreach ($name in @('manifest.json', 'setup.exe', 'receipt.json')) {
+        '' | Set-Content -LiteralPath (Join-Path $clean $name)
+    }
+    Remove-ReadySlot (Get-Item -LiteralPath $clean) $pending
+    if (Test-Path -LiteralPath $clean) { throw 'Verified ready slot was not removed.' }
+    Remove-TrustedAttempt (Get-Item -LiteralPath $attempt) $root
+    if (Test-Path -LiteralPath $attempt) { throw 'Verified trusted attempt was not removed.' }
     'Update restart recovery control passed.'
 }
 finally {

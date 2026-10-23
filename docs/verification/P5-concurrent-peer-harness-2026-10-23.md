@@ -28,3 +28,11 @@ working-source build at parent `2c24342`; the product Engine code was unchanged
 in this harness block. A fresh committed-source million-file run remains
 mandatory. The older active binary `79d4e46` cannot validate this scheduling
 change or the later product scan repairs.
+
+The obsolete `79d4e46` million-peer process was intentionally stopped after
+18,240 seconds and 245 rounds. Its last complete ten-round report had 106,000
+destination rows, 895,000 needed rows and 909 source publications pending.
+The fixture, database and `artifacts/scale/p5-final-peer-79d4e46/benchmark.log`
+remain available for investigation. Continuing an outdated binary would not
+verify the parent-scheduling, scan-batching or concurrent-runner changes.
+No current-source million-file fresh-peer result is claimed.

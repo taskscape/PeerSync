@@ -14,6 +14,9 @@ Setup exit 3010 and proves that Windows booted after Setup started, the PeerSync
 Running, the installed service file version meets the signed offer and the
 scheduled task still runs as SYSTEM from the installed helper. It rechecks the exact
 GUID-named non-reparse slot under the pending root immediately before removal.
+The service-writable slot and protected copy are cleaned without recursive
+deletion: only their expected ordinary files are removed, and any unexpected
+child leaves the directory for administrator inspection.
 An invalid, tampered, expired or otherwise unhealthy package remains for
 administrator diagnosis. A missing attempt receipt also requires
 administrator disposition. Newer packages still follow the original protected
@@ -25,6 +28,8 @@ preflight, and a tampered setup. `build/Test-UpdateRestartRecovery.ps1` passed
 under Windows PowerShell 5.1 using the real boot timestamp: a protected
 attempt dated after boot was rejected, an unfinished attempt was rejected, one
 dated before boot with a recorded 3010 outcome was accepted,
-and a damaged unrelated receipt did not block it. The helper parsed without
-errors and `git diff --check` passed. These controls do not exercise a real
+and a damaged unrelated receipt did not block it. A subsequent unrun control
+case has been added for unexpected nested children and nonrecursive cleanup;
+its result belongs to the consolidated verification pass. The helper parsed
+without errors and `git diff --check` passed for the earlier change. These controls do not exercise a real
 3010 installer, reboot or SYSTEM task. Those installed-host checks remain open.
