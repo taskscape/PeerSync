@@ -43,7 +43,8 @@ The executable command was:
 & spikes\InstalledServiceProbe\bin\Release\net10.0-windows10.0.20348.0\PeerSync.InstalledProbe.exe --archive-ui
 ```
 
-This checks the real UI code and control calls against the installed service;
-the App assembly came from the Release test build, not an installed App
-package. Installed-client packaging and the physical two-PC and P5 release
+This checkpoint checks the real UI code and control calls against the
+installed service; the App assembly came from the Release test build. The
+subsequent [signed installed-client check](P5-installed-client-archive-2026-10-23.md)
+adds a separate-process installed App package. Physical two-PC and P5 release
 gates remain open.
