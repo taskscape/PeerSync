@@ -36,7 +36,11 @@ internal sealed class DiagnosticDirectory : IDisposable
             try
             {
                 parent.DangerousAddRef(ref retained);
-                var attributes = new LogNative.ObjectAttributes { Length = (uint)sizeof(LogNative.ObjectAttributes), RootDirectory = parent.DangerousGetHandle(), ObjectName = &text, Attributes = 0x1040 };
+                // The parent is already pinned and validated. Opening exactly one
+                // child with FILE_OPEN_REPARSE_POINT lets RequireKind reject a
+                // link without following it. OBJ_DONT_REPARSE also rejects some
+                // ordinary per-user AppData children on Windows.
+                var attributes = new LogNative.ObjectAttributes { Length = (uint)sizeof(LogNative.ObjectAttributes), RootDirectory = parent.DangerousGetHandle(), ObjectName = &text, Attributes = 0x40 };
                 int status = LogNative.NtCreateFile(out var handle, access, in attributes, out _, 0, directory ? 0x10u : 0x80u, share, disposition,
                     0x00200020u | (directory ? 1u : 0x40u), 0, 0);
                 if (status < 0) { handle.Dispose(); throw new Win32Exception((int)LogNative.RtlNtStatusToDosError(status)); }

@@ -14,6 +14,27 @@ public sealed partial class DiagnosticRunRetentionTests : IDisposable
     private string Root => Path.Combine(fixture, "logs");
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     [Fact]
+    public void AppLogRootOpensBeneathOrdinaryLocalAppData()
+    {
+        string local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        string root = Path.Combine(local, "PeerSync-LogProfileTest-" + Guid.NewGuid().ToString("N"));
+        string resolved = Path.GetFullPath(root);
+        if (!resolved.StartsWith(local.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(resolved).StartsWith("PeerSync-LogProfileTest-", StringComparison.Ordinal))
+            throw new IOException("Unexpected profile-log cleanup path.");
+        try
+        {
+            using var run = DiagnosticRunJournal.Open(Path.Combine(root, "logs", "app"), "app", debugEnabled: true);
+            run.Journal.Write(new("app.started", "test"));
+            File.ReadAllText(Path.Combine(run.DirectoryPath, "debug.jsonl")).ShouldContain("app.started");
+        }
+        finally
+        {
+            if (Directory.Exists(resolved)) Directory.Delete(resolved, recursive: true);
+        }
+    }
+    [Fact]
     public void FinishedSequentialRunsRespectTheBudgetWithoutAnotherProcessOrManualSweep()
     {
         for (int i = 0; i < 12; i++) { using var run = Open(); run.Journal.Write(new("run.complete", "test")); }

@@ -23,6 +23,21 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        if (args is ["--client-archive", var clientExecutable])
+        {
+            try
+            {
+                object result = await InstalledClientArchiveProbe.RunAsync(clientExecutable).ConfigureAwait(false);
+                Console.WriteLine(JsonSerializer.Serialize(new { target = "installed Archive client", status = "passed", result }));
+                return 0;
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine(JsonSerializer.Serialize(new { target = "installed Archive client", status = "failed",
+                    error = error.GetType().Name, hResult = error.HResult }));
+                return 1;
+            }
+        }
         if (args is ["--archive-ui"])
         {
             try
@@ -43,7 +58,7 @@ internal static class Program
             args.Length >= 4 && (!int.TryParse(args[3], out int requestedPort) || requestedPort is < 20000 or > 45000) ||
             args.Length == 5 && args[4] != "--render-ui")
         {
-            Console.Error.WriteLine("Usage: PeerSync.InstalledProbe <registered-folder-path> <service-port> <existing-file-name> [peer-port] [--render-ui] | --archive-ui");
+            Console.Error.WriteLine("Usage: PeerSync.InstalledProbe <registered-folder-path> <service-port> <existing-file-name> [peer-port] [--render-ui] | --archive-ui | --client-archive <app-exe>");
             return 2;
         }
 
