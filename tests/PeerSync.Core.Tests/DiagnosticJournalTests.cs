@@ -91,6 +91,23 @@ public sealed class DiagnosticJournalTests : IDisposable
     }
 
     [Fact]
+    public void NumericMemorySamplesRoundTripWithoutAPathOrPayload()
+    {
+        using (var log = new DiagnosticJournal(directory, "scanner", debugEnabled: true))
+            log.Write(new("scan.memory_hashed", "scan")
+            {
+                Level = DiagnosticLevel.Debug, WorkingSetBytes = 375_000_000,
+                PrivateBytes = 340_000_000, ManagedHeapBytes = 299_000_000,
+            });
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "debug.jsonl")));
+        json.RootElement.GetProperty("workingSetBytes").GetInt64().ShouldBe(375_000_000);
+        json.RootElement.GetProperty("privateBytes").GetInt64().ShouldBe(340_000_000);
+        json.RootElement.GetProperty("managedHeapBytes").GetInt64().ShouldBe(299_000_000);
+        json.RootElement.TryGetProperty("path", out _).ShouldBeFalse();
+        json.RootElement.TryGetProperty("payload", out _).ShouldBeFalse();
+    }
+
+    [Fact]
     public void RotatesAndExpiresOldFiles()
     {
         Directory.CreateDirectory(directory);

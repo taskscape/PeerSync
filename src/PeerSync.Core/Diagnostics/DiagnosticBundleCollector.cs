@@ -178,6 +178,8 @@ public static class DiagnosticBundleCollector
             CopyNonnegativeInt(root, writer, "retryInMs"); CopyNonnegativeLong(root, writer, "itemsVisited");
             CopyNonnegativeLong(root, writer, "itemsChanged"); CopyNonnegativeLong(root, writer, "itemsHashed");
             CopyNonnegativeLong(root, writer, "itemsSkipped"); CopyNonnegativeLong(root, writer, "itemsDeferred");
+            CopyNonnegativeLong(root, writer, "workingSetBytes"); CopyNonnegativeLong(root, writer, "privateBytes");
+            CopyNonnegativeLong(root, writer, "managedHeapBytes");
             if (includeAddresses && TryString(root, "remoteAddress", out string address) && IPAddress.TryParse(address, out IPAddress? parsed))
             {
                 writer.WriteString("remoteAddress", parsed.ToString());

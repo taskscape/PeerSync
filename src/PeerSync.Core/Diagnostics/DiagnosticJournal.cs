@@ -93,6 +93,9 @@ public sealed class DiagnosticJournal : IDisposable
             itemsHashed = entry.ItemsHashed,
             itemsSkipped = entry.ItemsSkipped,
             itemsDeferred = entry.ItemsDeferred,
+            workingSetBytes = entry.WorkingSetBytes,
+            privateBytes = entry.PrivateBytes,
+            managedHeapBytes = entry.ManagedHeapBytes,
             remoteAddress = entry.RemoteAddress?.ToString(),
             remotePort = entry.RemotePort,
         }, Json);
@@ -201,6 +204,9 @@ public sealed record DiagnosticEvent(string Event, string Operation)
     public long? ItemsHashed { get; init; }
     public long? ItemsSkipped { get; init; }
     public long? ItemsDeferred { get; init; }
+    public long? WorkingSetBytes { get; init; }
+    public long? PrivateBytes { get; init; }
+    public long? ManagedHeapBytes { get; init; }
     public DiagnosticLevel Level { get; init; } = DiagnosticLevel.Information;
     public Guid? SessionId { get; init; }
     public DiagnosticTransport? Transport { get; init; }

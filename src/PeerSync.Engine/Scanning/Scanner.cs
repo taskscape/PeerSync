@@ -224,6 +224,7 @@ public sealed partial class Scanner : IDisposable
             }
 
             Checkpoint?.Invoke("after-enumerate");
+            LogMemoryStage("scan.memory_enumerated", session, entries.Count, stopwatch);
             var updates = new ConcurrentBag<LocalFileRow>();
             int unchanged = 0, hashed = 0, renamed = 0, deleted = 0, unsyncable = 0;
             // Identity matching is restricted to paths absent from the successful walk.
@@ -350,6 +351,7 @@ public sealed partial class Scanner : IDisposable
             finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
 
             Checkpoint?.Invoke("after-hash");
+            LogMemoryStage("scan.memory_hashed", session, entries.Count, stopwatch);
             foreach (var old in previous.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -416,6 +418,7 @@ public sealed partial class Scanner : IDisposable
             if (StageDirectorySnapshots)
                 await StageDirectoriesAsync(root.Identity, entries, protectedPrefixes, ignoredPrefixes, problems, session, cancellationToken).ConfigureAwait(false);
             Checkpoint?.Invoke("after-upsert");
+            LogMemoryStage("scan.memory_committed", session, entries.Count, stopwatch);
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
@@ -517,5 +520,23 @@ public sealed partial class Scanner : IDisposable
         || p.EndsWith(".!psp", StringComparison.OrdinalIgnoreCase));
     private static bool IsFileError(Exception error) => error is IOException or UnauthorizedAccessException or Win32Exception or CryptographicException;
     private static int? NativeCode(Exception error) => error is Win32Exception native ? native.NativeErrorCode : null;
+    private void LogMemoryStage(string name, Guid session, int entries, Stopwatch stopwatch)
+    {
+        if (journal is not { DebugEnabled: true }) return;
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            process.Refresh();
+            journal.TryWrite(new(name, "scan")
+            {
+                SessionId = session, Level = DiagnosticLevel.Debug, ItemsVisited = entries,
+                ElapsedMilliseconds = stopwatch.Elapsed.TotalMilliseconds,
+                WorkingSetBytes = process.WorkingSet64, PrivateBytes = process.PrivateMemorySize64,
+                ManagedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
+            });
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        { /* Stage telemetry must not interrupt a scan. */ }
+    }
     private sealed record WalkEntry(string Path, NativeEntry Native, bool Unsyncable);
 }

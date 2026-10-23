@@ -20,6 +20,7 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
             {
                 SessionId = Guid.Parse("479407df-d4d0-4cae-9e9b-454add07b31a"),
                 Transport = DiagnosticTransport.Quic, Bytes = 4096, ElapsedMilliseconds = 125.5,
+                WorkingSetBytes = 375_000_000, PrivateBytes = 340_000_000, ManagedHeapBytes = 299_000_000,
                 RemoteAddress = IPAddress.Parse("203.0.113.8"), RemotePort = 47821,
             });
         File.AppendAllText(Path.Combine(logs, "debug.jsonl"),
@@ -34,6 +35,9 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
         using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
         string bundleLog = reader.ReadToEnd();
         bundleLog.ShouldContain("transport.request_complete"); bundleLog.ShouldContain("479407df-d4d0-4cae-9e9b-454add07b31a");
+        bundleLog.ShouldContain("\"workingSetBytes\":375000000");
+        bundleLog.ShouldContain("\"privateBytes\":340000000");
+        bundleLog.ShouldContain("\"managedHeapBytes\":299000000");
         bundleLog.ShouldNotContain("203.0.113.8"); bundleLog.ShouldNotContain("47821"); bundleLog.ShouldNotContain("folder-secret");
         bundleLog.ShouldNotContain("private.txt"); bundleLog.ShouldNotContain("private-body");
         using var environment = JsonDocument.Parse(new StreamReader(archive.GetEntry("environment.json")!.Open()).ReadToEnd());

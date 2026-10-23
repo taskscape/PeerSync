@@ -126,6 +126,14 @@ can discard newer events in the same file. Collection independently filters
 events to the last 24 hours. Debug disk writes are synchronous;
 only emit progress at bounded intervals rather than for every transferred chunk.
 
+With debug logging enabled, each scanner pass also emits
+`scan.memory_enumerated`, `scan.memory_hashed` and `scan.memory_committed`.
+Each event carries the same scan session ID, elapsed time, visited-item count,
+and numeric `workingSetBytes`, `privateBytes` and `managedHeapBytes`. These are
+point-in-time process samples, not a process-wide peak or proof that the
+300 MB scale target holds throughout a scan. The sanitized diagnostic bundle
+keeps these numbers and still excludes paths and content.
+
 Run `psp diagnostics --logs <log-directory> --output <new-zip>` on both
 machines immediately after reproducing. The command retains only an explicit
 allowlist of structured fields, filters events to the last 24 hours, excludes

@@ -257,6 +257,14 @@ public sealed class ScannerTests : IDisposable
         index.LocalFiles.Find("private-name")!.Flags.ShouldBe(LocalFileState.None);
         string log = await File.ReadAllTextAsync(Path.Combine(fixture, "logs", "debug.jsonl"), Token);
         log.ShouldContain("scan.defer"); log.ShouldContain("scan.complete");
+        using (var stage = System.Text.Json.JsonDocument.Parse(log.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .First(line => line.Contains("scan.memory_hashed", StringComparison.Ordinal))))
+        {
+            stage.RootElement.GetProperty("workingSetBytes").GetInt64().ShouldBeGreaterThan(0);
+            stage.RootElement.GetProperty("privateBytes").GetInt64().ShouldBeGreaterThan(0);
+            stage.RootElement.GetProperty("managedHeapBytes").GetInt64().ShouldBeGreaterThan(0);
+        }
+        log.ShouldContain("scan.memory_enumerated"); log.ShouldContain("scan.memory_committed");
         log.ShouldNotContain("private-name"); log.ShouldNotContain("private content"); log.ShouldNotContain(keys.ExportText());
     }
 
