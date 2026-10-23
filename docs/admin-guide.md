@@ -27,6 +27,14 @@ service and administrators. Operators who use the local control pipe must be
 authorized in the device settings; membership in `PeerSync Users` alone is
 for diagnostic-log reading.
 
+On an unpatched Windows Server 2022 evaluation guest, the runtime rejected
+`--init` with `Your Windows doesn't fully support CET. Please install all
+available Windows updates.` Setup had copied files but could not initialize
+the service. Installing the available Windows updates and rebooting made
+`--init` and the service start succeed on that guest. If this exact error
+appears, update and reboot Windows before retrying Setup; verify both
+`Get-Service PeerSync` and `psp status --json` afterward.
+
 ## Signed automatic updates
 
 Automatic updates are off until an administrator installs a trusted publisher
@@ -199,3 +207,8 @@ survive reinitialization. Export needed diagnostics and verify the intended
 machine before invoking it. The
 [two-PC runbook](peersync-service-two-pc-runbook.md) contains the full test
 deployment and teardown sequence.
+After either uninstall path, confirm that `Get-Service PeerSync` and
+`Get-LocalGroup 'PeerSync Users'` find no entry, the
+`PeerSyncUpdateInstall` task is gone, and the synchronized folder files remain.
+The remove-data path should also remove `%ProgramData%\PeerSync` and the
+machine's PeerSync device certificate; the keep-data path preserves them.

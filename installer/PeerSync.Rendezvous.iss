@@ -59,7 +59,6 @@ Source: "{#StageRoot}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 
 [UninstallRun]
-Filename: "{sys}\sc.exe"; Parameters: "delete PeerSyncRendezvous"; Flags: runhidden; RunOnceId: "DeleteService"; Check: ServiceExists
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync Rendezvous TCP 99"""; Flags: runhidden; RunOnceId: "DeleteTcpRule"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync Rendezvous UDP 99"""; Flags: runhidden; RunOnceId: "DeleteUdpRule"
 
@@ -206,4 +205,8 @@ begin
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\Set-WerPolicy.ps1') + '" -ExecutableNames PeerSync.Rendezvous.exe -Remove');
+  { Delete before files are removed on every uninstall cycle. A conditional
+    service entry in UninstallRun can be skipped after a reinstall. }
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'delete PeerSyncRendezvous');
 end;

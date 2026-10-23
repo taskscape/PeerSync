@@ -1,9 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDirectory = $PSScriptRoot
+    [string]$InstallDirectory
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($InstallDirectory)) {
+    # PowerShell 5.1 can evaluate a parameter default before PSScriptRoot is
+    # populated for -File. Resolve it in the script body for the packaged
+    # no-argument command used by operators.
+    $InstallDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
 
 # This preflight does not change service configuration. The loopback health
 # request emits one ordinary diagnostic event, and cannot establish that the

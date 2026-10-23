@@ -93,9 +93,7 @@ Filename: "{app}\app\PeerSync.exe"; Description: "Open PeerSync"; Flags: postins
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\tools\Update-Helper.ps1"" -Unregister"; Flags: runhidden; RunOnceId: "DeleteUpdateTask"
-Filename: "{sys}\sc.exe"; Parameters: "delete PeerSync"; Flags: runhidden; RunOnceId: "DeleteService"; Check: ServiceExists
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync"""; Flags: runhidden; RunOnceId: "DeleteFirewallRule"
-Filename: "{sys}\net.exe"; Parameters: "localgroup ""PeerSync Users"" /delete"; Flags: runhidden; RunOnceId: "DeleteGroup"; Check: GroupExists
 
 [Code]
 var PostInstallSucceeded: Boolean;
@@ -271,4 +269,12 @@ begin
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\tools\Set-WerPolicy.ps1') +
     '" -ExecutableNames PeerSync.Service.exe,PeerSync.exe,psp.exe -Remove');
+  { Perform these once on every uninstall, even after an install/uninstall/
+    reinstall cycle. Conditional entries in UninstallRun were skipped on the
+    second cycle, leaving a service pointing at deleted files and an orphaned
+    local group. Keep failures visible before Setup removes the payload. }
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'delete PeerSync');
+  if GroupExists then
+    RequireSuccess(ExpandConstant('{sys}\net.exe'), 'localgroup "PeerSync Users" /delete');
 end;
