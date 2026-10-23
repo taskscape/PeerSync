@@ -2544,8 +2544,10 @@ public sealed class PortMapper(int port, ILogger<PortMapper> log) : IAsyncDispos
   - Done when: a Let's Encrypt certificate for `sync.taskscape.com` is in `LocalMachine\My`, renewal is scheduled, and the post-renewal script restarts `PeerSyncRendezvous`.
 - [ ] **P4.3.3 Port 99 free and open**
   - Done when: nothing else listens on 99, the Windows Firewall rules exist, and the provider allows TCP 99 (confirmed) and UDP 99 (to verify).
+  - A [current outside-network preflight](docs/verification/P4-public-endpoint-preflight-2026-10-23.md) resolves the DNS name but times out on TCP 99 and on both `psp probe` HTTP/2 and HTTP/3 legs. Server/service, Windows Firewall and provider state need inspection before this gate can close.
 - [ ] **P4.3.4 Install and verify**
   - Done when: the rendezvous installer has run, `/healthz` answers, and `psp probe sync.taskscape.com:99` passes from an outside network for both TCP and UDP. If UDP fails, ask the provider to open UDP 99 and record the outcome in section 2.
+  - The 2026-10-23 outside-network probe timed out for both protocols; this does not verify the installed server or its health endpoint. See the [preflight evidence](docs/verification/P4-public-endpoint-preflight-2026-10-23.md).
 
 ### 10.4 Server commands (P4.3)
 
