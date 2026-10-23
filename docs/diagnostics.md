@@ -283,6 +283,8 @@ restarting or modifying the files.
 | `directory.parent_roots_complete` | Every eligible root is covered by authenticated current children for this attempt. Final commit still revalidates the witnesses. |
 | `directory.parent_clock_template` | Parent clocks were absorbed before publication. `proven-root-floor` means all eligible roots were proven. |
 | `directory.publication_retry` | `errorCode` starts with the failing stage, such as `parent-roots`, `history` or `commit`, followed by the exception category or `pending`. Inspect native error and retry delay. |
+| `puller.publication_scan_deferred` | A full native scan is being shared across consecutive live-file batches. `itemsDeferred` is the installed file count awaiting a parent-snapshot scan; `retryInMs` is the remaining five-minute ceiling. |
+| `puller.publication_scan_flushed` | A completed scan caught up with those installed files. `itemsChanged` is the coalesced count and `elapsedMs` is its age. A missing flush after a deferred event warrants inspection of later scan/retry events. |
 
 These events intentionally omit file paths, content hashes, keys and signed
 records. Counts and session IDs support comparison without disclosing folder
