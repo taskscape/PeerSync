@@ -54,6 +54,11 @@ To stop future checks and scheduled installations, run:
 A task already installing a package must finish before disable takes effect.
 The signed offer expires after at most 30 days; stale or modified packages
 are rejected and retained for diagnosis.
+If Setup returns 3010 (restart required), the pending package remains until
+the next scheduled helper run. After the restart, that run verifies the signed
+package again and removes its own slot only if the installed version matches,
+the service is running, and the SYSTEM task is intact. A failed health check or
+expired offer keeps the slot for administrator diagnosis.
 
 To rotate the publisher, first disable updates and wait for any running
 `PeerSyncUpdateInstall` task to finish. Inspect `%ProgramData%\PeerSync\updates`
@@ -99,7 +104,8 @@ the publisher CA's revocation endpoints. A failed validation does not replace
 the installed service.
 
 For diagnosis, inspect Get-ScheduledTaskInfo -TaskName PeerSyncUpdateInstall,
-Application events 4301 and 4302 from PeerSync, and the service logs. A
+Application events 4301 (setup), 4302 (failure) and 4303 (post-restart slot
+retired) from PeerSync, and the service logs. A
 .ready directory under the ProgramData PeerSync updates directory remains
 after failure. Do not run a setup from that directory manually; use the
 signed helper after resolving the failure. The development certificate and

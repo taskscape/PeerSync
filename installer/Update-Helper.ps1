@@ -12,6 +12,34 @@ function Write-UpdateEvent([int]$eventId, [string]$message, [string]$kind = 'Inf
     catch { }
 }
 
+function Confirm-InstalledUpdate([string]$serviceExe, [version]$offerVersion, [string]$taskName) {
+    $service = Get-Service -Name PeerSync -ErrorAction Stop
+    $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+    $installedVersion = [version](Get-Item -LiteralPath $serviceExe).VersionInfo.FileVersion
+    if ($installedVersion -lt $offerVersion) {
+        throw 'Installed service version is older than the signed offer.'
+    }
+    $registered = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    if ($registered.Principal.UserId -ne 'SYSTEM' -or
+        $registered.Actions.Arguments -notmatch [regex]::Escape('PeerSync\tools\Update-Helper.ps1')) {
+        throw 'Update task was not retained by Setup.'
+    }
+}
+
+function Remove-ReadySlot([IO.DirectoryInfo]$ready, [string]$pendingRoot) {
+    # The service can write pending slots. Recheck the exact owned GUID path
+    # and reject a reparse point immediately before the recursive removal.
+    $current = Get-Item -LiteralPath $ready.FullName -Force
+    if (-not $current.PSIsContainer -or
+        ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $current.Name -cnotmatch '^[0-9a-f]{32}\.ready$' -or
+        -not [string]::Equals([IO.Path]::GetFullPath($current.Parent.FullName),
+            [IO.Path]::GetFullPath($pendingRoot), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Pending update slot changed before cleanup.'
+    }
+    Remove-Item -LiteralPath $current.FullName -Recurse -Force
+}
+
 if ($Register) {
     $windowsPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $script = [IO.Path]::GetFullPath($PSCommandPath)
@@ -66,6 +94,23 @@ try {
         }
     }
 
+    # A successful 3010 install keeps its package until the next boot. Once
+    # the installed version is current and healthy, retire that verified slot
+    # so it does not block every subsequent feed check.
+    $classification = @(& $serviceExe --classify-update $ready.FullName)
+    if ($LASTEXITCODE -ne 0 -or $classification.Count -ne 1 -or
+        $classification[0] -notin @('CURRENT', 'NEWER')) {
+        throw 'Signed pending update classification failed.'
+    }
+    if ($classification[0] -eq 'CURRENT') {
+        $savedEnvelope = Get-Content -LiteralPath (Join-Path $ready.FullName 'manifest.json') -Raw | ConvertFrom-Json
+        $savedPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($savedEnvelope.payload)) |
+            ConvertFrom-Json
+        Confirm-InstalledUpdate $serviceExe ([version]$savedPayload.version) $taskName
+        Remove-ReadySlot $ready $pendingRoot
+        Write-UpdateEvent 4303 'PeerSync completed update slot retired after restart.'
+        exit 0
+    }
     & $serviceExe --verify-update $ready.FullName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Signed pending update verification failed.' }
     $trusted = Join-Path $trustedRoot ([guid]::NewGuid().ToString('N'))
@@ -84,26 +129,11 @@ try {
     if ($setup.ExitCode -notin @(0, 3010)) { throw ('Update setup failed with exit code ' + $setup.ExitCode) }
     Write-UpdateEvent 4301 ('PeerSync signed update setup completed with exit code ' + $setup.ExitCode)
     if ($setup.ExitCode -eq 0) {
-        $service = Get-Service -Name PeerSync -ErrorAction Stop
-        $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
-        $installedVersion = [version](Get-Item -LiteralPath $serviceExe).VersionInfo.FileVersion
         $savedEnvelope = Get-Content -LiteralPath (Join-Path $trusted 'manifest.json') -Raw | ConvertFrom-Json
         $savedPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($savedEnvelope.payload)) |
             ConvertFrom-Json
-        if ($installedVersion -lt [version]$savedPayload.version) {
-            throw 'Installed service version is older than the signed offer.'
-        }
-        $registered = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-        if ($registered.Principal.UserId -ne 'SYSTEM' -or
-            $registered.Actions.Arguments -notmatch [regex]::Escape('PeerSync\tools\Update-Helper.ps1')) {
-            throw 'Update task was not retained by Setup.'
-        }
-        # Remove only the already-validated GUID slot under the intended parent.
-        if ([string]::Equals([IO.Path]::GetFullPath($ready.Parent.FullName),
-                [IO.Path]::GetFullPath($pendingRoot), [StringComparison]::OrdinalIgnoreCase) -and
-            $ready.Name -cmatch '^[0-9a-f]{32}\.ready$') {
-            Remove-Item -LiteralPath $ready.FullName -Recurse -Force
-        }
+        Confirm-InstalledUpdate $serviceExe ([version]$savedPayload.version) $taskName
+        Remove-ReadySlot $ready $pendingRoot
         if ([string]::Equals([IO.Path]::GetFullPath((Get-Item -LiteralPath $trusted).Parent.FullName),
                 [IO.Path]::GetFullPath($trustedRoot), [StringComparison]::OrdinalIgnoreCase) -and
             (Split-Path $trusted -Leaf) -cmatch '^[0-9a-f]{32}$') {

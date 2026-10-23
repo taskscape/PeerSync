@@ -258,6 +258,43 @@ public sealed class UpdateManifestVerifierTests
         finally { DeleteOwnedFixture(root); }
     }
 
+    [Fact]
+    public void CompletedUpdateClassificationRequiresCurrentSignedBytes()
+    {
+        using var signer = Signer(); byte[] cert = signer.Export(X509ContentType.Cert);
+        byte[] setup = "completed setup"u8.ToArray();
+        Version current = typeof(UpdateVerificationCommand).Assembly.GetName().Version!;
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-updates-" + Guid.NewGuid().ToString("N"));
+        string policyDir = Path.Combine(root, "update-policy"), stage = Path.Combine(root, "staged");
+        Directory.CreateDirectory(policyDir); Directory.CreateDirectory(stage);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(policyDir, "update-policy.json"), JsonSerializer.SerializeToUtf8Bytes(new
+            { enabled = true, manifestUrl = "https://updates.example.test/manifest.json",
+                publisherCertificate = Convert.ToBase64String(cert),
+                publisherCertificateSha256 = Convert.ToHexString(SHA256.HashData(cert)) }));
+            string manifest = Path.Combine(stage, "manifest.json");
+            string setupPath = Path.Combine(stage, "setup.exe");
+            File.WriteAllBytes(setupPath, setup);
+            File.WriteAllBytes(manifest, Offer(signer, current.ToString(), "https://updates.example.test/setup.exe",
+                Convert.ToHexString(SHA256.HashData(setup)), setup.Length, Now.AddDays(2).UtcTicks));
+            using var output = new StringWriter(); using var error = new StringWriter();
+            UpdateVerificationCommand.Run(["--classify-update", stage], root, output, error, Now).ShouldBe(0);
+            output.ToString().Trim().ShouldBe("CURRENT");
+            UpdateVerificationCommand.Run(["--verify-update", stage], root, output, error, Now).ShouldBe(1);
+
+            output.GetStringBuilder().Clear();
+            Version newer = new(current.Major + 1, 0, 0, 0);
+            File.WriteAllBytes(manifest, Offer(signer, newer.ToString(), "https://updates.example.test/setup.exe",
+                Convert.ToHexString(SHA256.HashData(setup)), setup.Length, Now.AddDays(2).UtcTicks));
+            UpdateVerificationCommand.Run(["--classify-update", stage], root, output, error, Now).ShouldBe(0);
+            output.ToString().Trim().ShouldBe("NEWER");
+            File.WriteAllBytes(setupPath, "tampered setup"u8.ToArray());
+            UpdateVerificationCommand.Run(["--classify-update", stage], root, output, error, Now).ShouldBe(1);
+        }
+        finally { DeleteOwnedFixture(root); }
+    }
+
     private static void DeleteOwnedFixture(string root)
     {
         string full = Path.GetFullPath(root);

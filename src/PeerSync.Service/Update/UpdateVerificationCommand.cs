@@ -9,9 +9,11 @@ internal static class UpdateVerificationCommand
     internal static int Run(string[] args, string dataRoot, TextWriter output, TextWriter error,
         DateTimeOffset? now = null)
     {
-        if (args is not ["--verify-update", var directory] || string.IsNullOrWhiteSpace(directory))
+        if (args is not [var command, var directory] || string.IsNullOrWhiteSpace(directory)
+            || (!string.Equals(command, "--verify-update", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(command, "--classify-update", StringComparison.OrdinalIgnoreCase)))
         {
-            error.WriteLine("Usage: PeerSync.Service.exe --verify-update <staged-directory>");
+            error.WriteLine("Usage: PeerSync.Service.exe --verify-update|--classify-update <staged-directory>");
             return 2;
         }
         try
@@ -26,14 +28,18 @@ internal static class UpdateVerificationCommand
                 throw new InvalidDataException("Incomplete update stage.");
             using var signer = policy.OpenPublisher();
             Version current = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
+            bool classify = string.Equals(command, "--classify-update", StringComparison.OrdinalIgnoreCase);
             VerifiedUpdate offer = UpdateManifestVerifier.Verify(File.ReadAllBytes(envelopeFile.FullName), signer,
-                policy.PublisherCertificateSha256, current, now ?? DateTimeOffset.UtcNow);
+                policy.PublisherCertificateSha256, current, now ?? DateTimeOffset.UtcNow,
+                allowCurrentVersion: classify);
             if (setupFile.Length != offer.Size) throw new InvalidDataException("Update setup size differs from manifest.");
             using var file = new FileStream(setupFile.FullName, FileMode.Open, FileAccess.Read, FileShare.Read,
                 64 * 1024, FileOptions.SequentialScan);
             if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(file), offer.Sha256))
                 throw new InvalidDataException("Update setup hash differs from manifest.");
-            output.WriteLine("Verified signed update " + offer.Version);
+            output.WriteLine(classify
+                ? (offer.Version == current ? "CURRENT" : "NEWER")
+                : "Verified signed update " + offer.Version);
             return 0;
         }
         catch (Exception problem) when (problem is IOException or InvalidDataException or UnauthorizedAccessException or

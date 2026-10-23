@@ -10,7 +10,8 @@ if (args.Length > 0 && string.Equals(args[0], "--init", StringComparison.Ordinal
     return InitCommand.Run(args);
 if (args.Length > 0 && string.Equals(args[0], "--remove-data", StringComparison.OrdinalIgnoreCase))
     return RemoveDataCommand.Run(args);
-if (args.Length > 0 && string.Equals(args[0], "--verify-update", StringComparison.OrdinalIgnoreCase))
+if (args.Length > 0 && (string.Equals(args[0], "--verify-update", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(args[0], "--classify-update", StringComparison.OrdinalIgnoreCase)))
     return UpdateVerificationCommand.Run(args,
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync"),
         Console.Out, Console.Error);
