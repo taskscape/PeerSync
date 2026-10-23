@@ -28,8 +28,9 @@ preflight, and a tampered setup. `build/Test-UpdateRestartRecovery.ps1` passed
 under Windows PowerShell 5.1 using the real boot timestamp: a protected
 attempt dated after boot was rejected, an unfinished attempt was rejected, one
 dated before boot with a recorded 3010 outcome was accepted,
-and a damaged unrelated receipt did not block it. A subsequent unrun control
-case has been added for unexpected nested children and nonrecursive cleanup;
-its result belongs to the consolidated verification pass. The helper parsed
-without errors and `git diff --check` passed for the earlier change. These controls do not exercise a real
+and a damaged unrelated receipt did not block it. The consolidated Windows
+PowerShell 5.1 run also passed the unexpected nested-child and nonrecursive
+cleanup controls: a slot with an unexpected child is retained for inspection,
+while an ordinary expected slot is retired. The helper parsed without errors
+and `git diff --check` passed for the earlier change. These controls do not exercise a real
 3010 installer, reboot or SYSTEM task. Those installed-host checks remain open.
