@@ -75,15 +75,8 @@ try {
     Copy-Item -LiteralPath (Join-Path $ready.FullName 'setup.exe') -Destination $trustedSetup
     & $serviceExe --verify-update $trusted | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Trusted-copy update verification failed.' }
-    $authenticode = Get-AuthenticodeSignature -LiteralPath $trustedSetup
-    if ($authenticode.Status -ne 'Valid' -or $null -eq $authenticode.SignerCertificate) {
-        throw 'Update setup Authenticode validation failed.'
-    }
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { $publisherHash = [BitConverter]::ToString($sha.ComputeHash($authenticode.SignerCertificate.RawData)).Replace('-', '') }
-    finally { $sha.Dispose() }
-    if (-not [string]::Equals($publisherHash, $policy.publisherCertificateSha256,
-            [StringComparison]::OrdinalIgnoreCase)) { throw 'Update setup publisher does not match the pin.' }
+    & (Join-Path $PSScriptRoot 'Assert-UpdateSetupSignature.ps1') -Path $trustedSetup `
+        -PublisherCertificateSha256 $policy.publisherCertificateSha256
 
     $setup = Start-Process -FilePath $trustedSetup `
         -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `

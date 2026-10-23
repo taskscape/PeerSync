@@ -44,6 +44,22 @@ try {
             -or $null -eq $signature.TimeStamperCertificate) {
             throw "Installer signature verification failed: $arch"
         }
+        $publisherHash = [Security.Cryptography.SHA256]::Create()
+        try {
+            $publisherPin = [BitConverter]::ToString(
+                $publisherHash.ComputeHash($certificate.RawData)).Replace('-', '')
+        } finally { $publisherHash.Dispose() }
+        $verifyUpdateSetup = Join-Path $root 'installer/Assert-UpdateSetupSignature.ps1'
+        & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass -File $verifyUpdateSetup -Path $setup `
+            -PublisherCertificateSha256 $publisherPin
+        if ($LASTEXITCODE -ne 0) { throw "Online update-signer chain check failed: $arch" }
+        if ($arch -eq 'x64') {
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+                -ExecutionPolicy Bypass -File $verifyUpdateSetup -Path $setup `
+                -PublisherCertificateSha256 ('0' * 64) 2>$null
+            if ($LASTEXITCODE -eq 0) { throw 'Update-signer check accepted the wrong publisher pin.' }
+        }
         $public = [Security.Cryptography.X509Certificates.X509Certificate2]::new("$setup.cer")
         try {
             if ($public.Thumbprint -ne $certificate.Thumbprint) {

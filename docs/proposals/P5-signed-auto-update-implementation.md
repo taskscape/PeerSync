@@ -51,6 +51,14 @@ execution. The signer pin lives outside service-writable storage. No
 `schtasks /run` right is granted to the service; the daily SYSTEM task reads
 pending work on its own schedule.
 
+The helper's protected-copy check now pairs Authenticode and the exact pin
+with an explicit current code-signing chain build. Online revocation is
+required for non-root certificates, with a bounded retrieval timeout and no
+ignored chain errors. An unavailable revocation result leaves the package
+uninstalled for administrator diagnosis. The local development certificate
+is self-signed, so release-CA revocation and outage behavior remain part of
+the installed release verification.
+
 Microsoft references:
 [RSA-PSS verification](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.rsa.verifydata),
 [WinVerifyTrust Authenticode policy](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust),

@@ -91,8 +91,12 @@ contains the installer version, URL, SHA-256 digest, byte count and expiry;
 its RSA-PSS/SHA-256 signature covers the exact payload bytes. The service
 fetches it at startup and daily, rejects redirects, and downloads only a
 newer signed version. The scheduled helper rechecks the manifest, package
-digest and Authenticode publisher before running silent Setup. A failed
-validation does not replace the installed service.
+digest and Authenticode publisher before running silent Setup. It also builds
+a current code-signing certificate chain with online revocation checking for
+every non-root certificate. If revocation data cannot be obtained, the helper
+fails closed and retains the staged package; deployment networks must allow
+the publisher CA's revocation endpoints. A failed validation does not replace
+the installed service.
 
 For diagnosis, inspect Get-ScheduledTaskInfo -TaskName PeerSyncUpdateInstall,
 Application events 4301 and 4302 from PeerSync, and the service logs. A

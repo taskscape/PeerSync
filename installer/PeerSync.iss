@@ -56,6 +56,7 @@ Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 ; Extract before installation so a reboot requirement leaves the old service intact.
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
 Source: "Update-Helper.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Assert-UpdateSetupSignature.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Set-WerPolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 #ifndef UnsignedDevelopment
