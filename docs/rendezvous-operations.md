@@ -75,6 +75,47 @@ Get-NetUDPEndpoint -LocalPort 99
 Get-NetFirewallRule -DisplayName 'PeerSync Rendezvous*'
 ```
 
+For one machine-readable server preflight, run the script packaged
+with Setup from an elevated Windows PowerShell session:
+
+```powershell
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File 'C:\Program Files\PeerSync Rendezvous\Test-RendezvousDeployment.ps1'
+```
+
+It returns one JSON object and exits 0 only when its local checks pass. The
+`issues` array distinguishes a stopped service, absent or foreign TCP/UDP
+listener, missing matching server-authentication certificate, absent inbound
+allow rule, DNS lookup failure, and a loopback health/TLS failure. The
+certificate check does not prove the service identity can use the private key;
+the listener and health checks supply runtime evidence. The script reads the
+installed `appsettings.json` and does not inspect service-process environment
+overrides. It omits certificate thumbprints, private keys, paths and resolved
+IP addresses from its JSON. Its health request emits one ordinary diagnostic
+event, but it does not change service configuration. A passing result proves
+only the server's local configuration and loopback TLS path. Keep the
+outside-network `psp probe`
+below as the TCP/UDP 99 acceptance test; neither a local allow rule nor a
+local UDP socket proves provider or upstream firewall admission.
+
+Read `issues` in this order. For `settings-unavailable` or
+`public-url-mismatch`, inspect the installed `appsettings.json` and any
+service-level `PEERSYNC_` overrides. For `server-certificate-unavailable`,
+install or renew the Server Authentication certificate for the configured
+host in `LocalMachine\My`; if the service remains stopped with an eligible
+certificate, inspect its Application Event Log entries and rerun the packaged
+certificate-grant helper. For `service-not-running`, inspect those events and
+the service account before restarting the service. A
+`tcp-listener-missing-or-foreign` or `udp-listener-missing-or-foreign` result
+means port 99 is unbound or held by another process; inspect the reported
+service PID and the corresponding `Get-Net*` endpoint command above.
+`tcp-allow-rule-missing` and `udp-allow-rule-missing` identify local rule
+configuration only. `local-health-or-tls-failed` includes `curlExitCode`;
+after the service owns TCP 99, check certificate trust, name and the local
+`/healthz` response. `dns-check-unavailable` means the public name did not
+resolve from the server. Any `*-check-unavailable` result means that check
+could not run and must not be treated as a pass.
+
 Both Windows Firewall and the server provider must permit TCP and UDP 99.
 `/healthz` reports HTTP service health. From a **different network**, run the
 installed client CLI:

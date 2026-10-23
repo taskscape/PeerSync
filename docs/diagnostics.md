@@ -45,7 +45,10 @@ and UDP 99 firewall rules, and preserves `appsettings.json` on upgrade. Run
 `After-RendezvousRenewal.ps1` as the win-acme post-renewal action: it reapplies
 that ACL and restarts the service so Kestrel loads the new certificate.
 
-On the server, first check `Get-Service PeerSyncRendezvous`,
+On the server, first run the packaged
+`Test-RendezvousDeployment.ps1` from the installation directory; its JSON
+`issues` separate local service, listener, certificate, rule, DNS and TLS
+health failures. Then check `Get-Service PeerSyncRendezvous`,
 `Get-NetTCPConnection -LocalPort 99`, and `Get-NetUDPEndpoint -LocalPort 99`.
 From a second PC, run `psp probe sync.taskscape.com:99`; its JSON result must
 show `tcp.reachable` and `udp.reachable` true and the server-observed address.
