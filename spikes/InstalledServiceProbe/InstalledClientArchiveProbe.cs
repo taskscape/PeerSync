@@ -50,6 +50,11 @@ internal static class InstalledClientArchiveProbe
                 (await client.ListArchiveAsync(folder.FolderId).ConfigureAwait(false)).Versions
                     .Any(row => row.OriginalPath == "notes.txt")).ConfigureAwait(false);
             Stage("archive-ready");
+            string exportedKey = (await client.GetFolderKeysAsync(folder.FolderId).ConfigureAwait(false)).Key;
+            bool indexed = false;
+            await foreach (IndexEntry entry in client.DumpIndexAsync(folder.FolderId))
+                indexed |= entry.Path == "notes.txt" && !entry.Deleted;
+            if (!indexed) throw new IOException("The installed index omitted the probe file.");
 
             process = Process.Start(new ProcessStartInfo(executable)
             { WorkingDirectory = Path.GetDirectoryName(executable)!, UseShellExecute = false,
@@ -123,8 +128,11 @@ internal static class InstalledClientArchiveProbe
             await UntilAsync(async () => File.Exists(copy)
                 && await File.ReadAllTextAsync(copy).ConfigureAwait(false) == "before").ConfigureAwait(false);
             Stage("copy-restored");
+            int auditedEvents = AuditRawServiceLog(exportedKey, folder.FolderId, root, "notes.txt");
+            Stage("service-log-audited");
             outcome = new { appSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(executable))),
-                uiAutomation = true, originalRestored = true, copyRestored = true, retainedRoot = root };
+                uiAutomation = true, originalRestored = true, copyRestored = true,
+                serviceLogAuditedEvents = auditedEvents, retainedRoot = root };
         }
         finally
         {
@@ -149,6 +157,39 @@ internal static class InstalledClientArchiveProbe
 
     private static void Stage(string stage) => Console.WriteLine(JsonSerializer.Serialize(
         new { target = "installed Archive client", stage }));
+
+    private static int AuditRawServiceLog(string key, string folderId, string root, string fileName)
+    {
+        string logs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "PeerSync", "logs", "service");
+        string run = Directory.EnumerateDirectories(logs)
+            .Where(path => Guid.TryParseExact(Path.GetFileName(path), "N", out _))
+            .OrderByDescending(Directory.GetCreationTimeUtc).FirstOrDefault()
+            ?? throw new IOException("The installed service has no raw diagnostic run.");
+        if ((File.GetAttributes(logs) & FileAttributes.ReparsePoint) != 0
+            || (File.GetAttributes(run) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("The installed service log path is linked.");
+        string[] files = Directory.GetFiles(run, "debug*.jsonl", SearchOption.TopDirectoryOnly);
+        if (files.Length == 0) throw new IOException("The installed service has no raw debug journal.");
+        int events = 0; bool audit = false;
+        foreach (string path in files)
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("The installed raw journal is linked.");
+            using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan));
+            while (reader.ReadLine() is { } line)
+            {
+                events++;
+                audit |= line.Contains("control.folder_keys_read", StringComparison.Ordinal);
+                if (new[] { key, folderId, root, fileName }.Any(value =>
+                    line.Contains(value, StringComparison.OrdinalIgnoreCase)))
+                    throw new IOException("The installed raw service journal exposed folder data.");
+            }
+        }
+        if (!audit) throw new IOException("The installed raw journal omitted the key-read audit event.");
+        return events;
+    }
 
     private static AutomationElement? FindArchiveRow(AutomationElement grid) => grid.FindAll(
             TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.DataItem))

@@ -43,6 +43,16 @@ The run returned exit 0 with `uiAutomation=true`,
 & 'C:\Projects\Sync\spikes\InstalledServiceProbe\bin\Release\net10.0-windows10.0.20348.0\PeerSync.InstalledProbe.exe' --client-archive 'C:\Program Files\PeerSync\app\PeerSync.exe'
 ```
 
+The probe was then extended to export the disposable folder key and dump its
+index through the installed verified pipe. A second installed-client run still
+passed both UI actions and checked 843 raw service debug events in the active
+SCM run. It required `control.folder_keys_read` and found none of the exported
+key text, FolderId, native root path or indexed filename. Its retained native
+result is `C:\PeerSync-Test\archive-client-7a52afe503d144e2acf0ae157e0d3e9c`.
+The probe emits only counts and booleans, never the key or path contents.
+This audits the local installed service run; independent review of other
+components and deployment hosts remains open.
+
 The earlier [reviewed screenshot](archive-tab-installed-service-2026-10-23.png)
 shows path, date, size and both Archive actions against the local SCM service.
 That capture used the current App assembly in the probe process. This new
