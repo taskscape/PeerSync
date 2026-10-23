@@ -78,3 +78,29 @@ source provenance. The control EXE SHA-256 is
 `FDB5B1D045CE4B32C2D38CE7F13F31C6D1C56232F26D856CE7EF234C4913F357`;
 the still-running deployed benchmark EXE remains
 `F2B88CF90C96770531056E6EBBE3564B4DBE591B9A28C8324BC870F6EEA1F14A`.
+
+## Rejected overlap experiment
+
+An uncommitted runner experiment connected the destination before the source
+finished publishing its directory snapshots, then alternated source passes,
+index exchange and destination passes. A 1,000-file control passed in four
+rounds with all native bytes verified. A lower-priority 10,000-file control
+exercised ten directories and exposed much slower mid-publication behavior:
+after 751.769 seconds and 90 rounds it still had 7,850 of 10,010 destination
+rows, 2,161 needed rows, eight source and three destination publication jobs.
+The first pass counted 993 unsuccessful scheduled attempts while the raw journal
+classified them as `publication-pending` with bounded retries. Later reported
+passes had zero failures but remained deferred; the source revalidated its
+directory inputs and emitted additional versions. The sequential 10,000-file
+control on this corpus had finished with exact native-byte verification in
+457.575 seconds.
+
+The experiment was intentionally stopped, not counted as an engine failure or
+a completed sync. Its stdout, stderr, source patch and binary hashes are retained
+under `artifacts/scale/p5-peer-overlap-10k-20261023.*`, and the test tree and
+databases remain under `artifacts/scale/p5-leaf-cache-10k/`. The experimental
+overlap edit was reverted; the committed runner keeps source publication
+before destination connection and retains the new 48-hour safety guard.
+Mid-publication peer behavior needs separate focused investigation before it
+can replace the sequential million-file gate. The running 12-hour million-file
+candidate was not interrupted.
