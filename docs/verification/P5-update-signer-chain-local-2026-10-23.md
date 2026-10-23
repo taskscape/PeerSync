@@ -26,11 +26,12 @@ signer is a root, so this positive check cannot exercise non-root revocation.
 The same x64 published payload compiled into an unsigned development Inno
 installer with the new helper file entry and `--no-compression`; compiler
 exit code was zero and the output was 591,285,050 bytes. The unsigned output
-is not an install or release test. `build/Run-InstallerCi.ps1` now invokes
-the verifier on each freshly signed development installer while its temporary
-trust is installed, and checks wrong-pin rejection on x64. Hosted CI did not
-run because of the Actions budget; the new script was not installed in the
-disposable VM.
+is not an install or release test. The complete
+[local signed-installer CI script](P5-local-installer-ci-2026-10-23.md)
+subsequently passed for x64, Arm64 and rendezvous, including the new verifier
+against freshly signed client packages and wrong-pin rejection. Hosted CI did
+not run because of the Actions budget; the new script was not installed in
+the disposable VM.
 
 A release-CA certificate with an actual revoked serial, an unavailable CRL or
 OCSP endpoint, and a separate trusted signer still require installed-host
