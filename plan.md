@@ -2276,6 +2276,7 @@ until its actual check passes; no LAN beta is claimed meanwhile.
 - [ ] Complete deferred P0.2.1: a 1 GiB mutual-certificate QUIC transfer with ALPN `psp/1`, certificate-derived DeviceIds and verified hash between physical PCs on a 1-Gbit LAN; record link speeds and throughput, then close P0.2.1 with the evidence.
 - [ ] Three physical PCs sync a 50 GB mixed corpus (large files, 100,000 small files, deep trees) over the LAN.
 - [ ] 72-hour soak with random operations, sleep/resume and Wi-Fi switching: zero data loss, and the hourly tree comparisons all match (attach the report).
+  - A [read-only hourly tree tool](docs/verification/P5-physical-soak-evidence-tool-2026-10-23.md) now captures content/path digests, compares peers and audits missing hours. Its exact source passed one two-installed-guest checkpoint and mismatch/missing-hour controls. [Physical operator instructions](docs/physical-soak.md) require three PCs and 73 hourly checks; no elapsed-time physical soak is claimed.
 - [ ] The MITM and reflection tests from P2.2.3 pass in CI.
 
 ---
@@ -2607,6 +2608,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [ ] With direct paths blocked, the relay carries the sync. Its rate caps hold, and taskscape.com stays responsive (load test attached).
 - [ ] UDP 99 verified end to end, or the TCP-only outcome is logged with its impact.
 - [ ] A 72-hour soak across the WAN with zero data loss.
+  - The same [physical soak procedure](docs/physical-soak.md) can retain hourly WAN comparisons and correlated diagnostic bundles. The local two-guest control does not satisfy this gate.
 
 ---
 
@@ -2673,6 +2675,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [ ] All tests and performance targets met (attach the numbers).
 - [ ] No open data-loss or security bugs.
 - [ ] A 72-hour soak on the release candidate, on LAN and WAN, with zero data loss.
+  - The [hourly comparison/audit tool](docs/physical-soak.md) is available in the local development field kit. A release-signed candidate and physical elapsed-time evidence remain required.
 - [ ] Release signed and published, and the design doc and this plan updated to "v1.0 shipped".
 
 ---

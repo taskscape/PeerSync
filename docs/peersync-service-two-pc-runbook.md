@@ -301,14 +301,10 @@ icacls 'C:\PeerSync-Test\Share' /remove:g 'NT SERVICE\PeerSync' /T
 certificate/key. It never deletes synced folders. Keep the test folders until
 you have retained any needed evidence.
 
-The P2 implementation has two-host in-process QUIC and TCP loopbacks. The
-latest current-source canonical verification rebuilt the complete solution
-with zero warnings or errors and passed 1,708 tests, native P0 probes, QUIC
-diagnostics, six spike publishes, and 600 seconds of five-target fuzz across
-192,235 seeds with zero crashes. All 14 App tests passed after the desktop
-session returned to Active. See
-`docs/verification/P2-current-source-verification-2026-10-22.md` for exact
-results and artifacts. The service package and runbook have not yet been
-validated between two installed service machines. Gate P2 still requires
-that external run, physical LAN throughput and corpus tests, the 72-hour soak,
-and hosted MITM/reflection CI.
+The installed client packages have since completed authenticated direct,
+tracker and forced-relay sync between two disposable Windows Server guests.
+See [two-guest central and relay evidence](verification/P4-two-guest-central-relay-2026-10-23.md).
+The [physical soak procedure](physical-soak.md) supplies read-only hourly tree
+snapshots and a completeness audit. Gate P2 still requires three physical PCs,
+LAN throughput and corpus evidence, actual sleep/resume and Wi-Fi switching,
+and a full 72-hour soak. Virtual guests do not close those checks.
