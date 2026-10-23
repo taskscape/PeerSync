@@ -199,15 +199,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
             $normalizedHour = Get-HourValue $item.hourUtc
             $timestamp = Convert-ToUtc $item.hourUtc
             $checked = Convert-ToUtc $item.checkedUtc
-            if ($checked -lt $timestamp -or $checked -ge $timestamp.AddHours(2) -or
-                @($item.snapshots).Count -lt $RequiredMachines) {
-                throw 'The hourly comparison was not completed near its capture hour.'
+            if ($checked -lt $timestamp -or @($item.snapshots).Count -lt $RequiredMachines) {
+                throw 'The hourly comparison has incomplete timing or peer evidence.'
             }
             $labels = @($item.snapshots | ForEach-Object { $_.machineLabel } | Sort-Object -Unique)
             if ($labels.Count -ne $item.machineCount -or
                 @($labels | Where-Object { $_ -notmatch '^[A-Za-z0-9_-]{1,32}$' }).Count -ne 0) {
                 throw 'The hourly machine set is invalid.'
             }
+            $starts = [System.Collections.Generic.List[DateTime]]::new()
             foreach ($snapshot in $item.snapshots) {
                 $captureStart = Convert-ToUtc $snapshot.startedUtc
                 $captureEnd = Convert-ToUtc $snapshot.endedUtc
@@ -216,9 +216,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
                     $captureEnd -lt $captureStart -or $captureEnd -gt $checked) {
                     throw 'An hourly snapshot has inconsistent timestamps.'
                 }
+                $starts.Add($captureStart)
             }
+            $sortedStarts = @($starts | Sort-Object)
             $hours.Add([pscustomobject]@{ runId = $item.runId; hourUtc = $normalizedHour;
-                timestamp = $timestamp; checked = $checked;
+                timestamp = $timestamp; firstStart = $sortedStarts[0];
+                lastStart = $sortedStarts[-1];
                 collectorSha256 = $item.collectorSha256; labels = ($labels -join ',');
                 machines = [int]$item.machineCount })
         } catch { $auditIssues.Add('hourly-report-invalid') }
@@ -236,7 +239,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
         }
     }
     $elapsedHours = if ($sorted.Count -gt 1) {
-        ($sorted[-1].checked - $sorted[0].checked).TotalHours
+        ($sorted[-1].firstStart - $sorted[0].lastStart).TotalHours
     } else { 0 }
     if ($elapsedHours -lt $MinimumHours) {
         $auditIssues.Add('insufficient-elapsed-time')

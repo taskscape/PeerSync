@@ -38,6 +38,7 @@ Evidence is under `artifacts/vm/soak-operations-2026-10-23/`.
 The [physical procedure](../physical-soak.md) now pairs the operation loop
 with hourly tree capture and documents manual sleep/resume, Wi-Fi switch and
 permission-change evidence. The development [field kit](P4-field-deployment-collector-2026-10-23.md)
-contains both tools and their source hashes. These local and two-guest
+contains the operation, tree, capture and comparison tools with their source
+hashes. These local and two-guest
 controls do not establish a 50 GB three-physical-PC corpus, 72 elapsed hours,
 native NAT behavior or a release-candidate soak.

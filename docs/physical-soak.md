@@ -18,7 +18,7 @@ native NAT result. Keep full local logs and share only the sanitized evidence
 bundle after review. Gate P5 needs the release candidate on physical LAN and
 WAN; development-signed packages cannot close it.
 
-Before running either unsigned helper, verify its SHA-256 against the
+Before running any packaged unsigned helper, verify its SHA-256 against the
 field-kit README. If local execution policy blocks it, open a new PowerShell
 process with `powershell.exe -NoProfile -ExecutionPolicy Bypass` for this test
 session; do not change machine-wide execution policy.
@@ -37,18 +37,24 @@ operations. Do not use it on irreplaceable data; the test subtree will sync
 and occupy space on all peers.
 
 From each physical PC, use the same run GUID but a distinct machine label.
-This example runs repeated short batches until 72 hours have elapsed while
+This example runs repeated short batches through the final capture hour while
 its PowerShell session remains open. Create the log directory first and use
 the same `$run` as in the hourly capture commands below:
 
 ```powershell
 $run = [guid]'11111111-2222-3333-4444-555555555555' # replace once per soak
+$first = '2026-10-23T11:00:00Z' # same future UTC hour used by the capture loop
 $label = 'pc-a' # pc-b and pc-c on the other machines
 $root = 'C:\PeerSync-Test\Share'
 $logDirectory = 'C:\Temp\PeerSync-soak-operations'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
-$end = (Get-Date).ToUniversalTime().AddHours(72)
+$end = [DateTime]::Parse($first).ToUniversalTime().AddHours(73)
 while ((Get-Date).ToUniversalTime() -lt $end) {
+  $minute = (Get-Date).ToUniversalTime().Minute
+  if ($minute -lt 15 -or $minute -ge 55) {
+    Start-Sleep -Seconds 60 # shared quiet window for hourly hashing
+    continue
+  }
   & .\tools\Invoke-PeerSyncSoakOperations.ps1 -Root $root -RunId $run `
     -MachineLabel $label -LogDirectory $logDirectory -Count 5
   if ($LASTEXITCODE -ne 0) { throw 'Operation batch failed; retain its JSONL.' }
@@ -61,16 +67,43 @@ root, and retain all batch logs; record the downtime. The script does not
 perform sleep/resume, Wi-Fi switches or permission changes. Do those
 deliberately and record their UTC times and outcomes separately. An
 unattended loop that stops or loses hours cannot by itself pass the gate.
+If hashing the full corpus takes longer than 15 minutes on any peer, extend
+the common quiet window before restarting the timed gate.
 
 ## Capture each hour
 
-Choose a fresh run GUID and copy it to every PC. At each UTC hour, wait until
-all peers have finished syncing and pause test writes long enough for a stable
-scan. On each PC, run the packaged script from **Windows PowerShell 5.1** with
-the same GUID and literal hour value copied from the first PC, a distinct
-label, and the PC's actual synchronized
-folder. The report directory must already exist and be outside that folder.
-Use a new output file for every hour:
+Choose a fresh run GUID and copy it to every PC. At each UTC hour, leave a
+common quiet window so all peers finish syncing and no test writes interrupt
+the full-content scan. On each PC, run the packaged script from **Windows
+PowerShell 5.1** with the same GUID and literal hour value copied from the
+first PC, a distinct label, and the PC's actual synchronized folder. The
+report directory must already exist and be outside that folder. Use a new
+output file for every hour.
+
+For unattended capture, start this in a **separate** PowerShell 5.1 session
+on each PC before the same future UTC hour. Copy the identical first-hour
+value to all PCs. The loop waits for each hour, writes a new snapshot and a
+local JSONL journal, and stops with a failed record if an hour is missed or
+the tool changes. `-Intervals 73` requests 74 snapshots, allowing the audit
+to verify at least 72 elapsed hours despite small capture-start jitter. A
+stopped console or a long sleep can leave a gap; keep the journal and repeat
+the timed gate as needed:
+
+```powershell
+$run = [guid]'11111111-2222-3333-4444-555555555555' # same as operation loop
+$first = '2026-10-23T11:00:00Z' # replace with the same future UTC hour on all PCs
+$label = 'pc-a' # distinct on each PC
+$root = 'C:\PeerSync-Test\Share'
+$reports = 'C:\Temp\PeerSync-soak'
+New-Item -ItemType Directory -Force -Path $reports | Out-Null
+& .\tools\Invoke-PeerSyncSoakCaptureLoop.ps1 -Root $root -RunId $run `
+  -MachineLabel $label -FirstHourUtc $first -OutputDirectory $reports `
+  -Intervals 73
+if ($LASTEXITCODE -ne 0) { throw 'Hourly capture stopped; retain its journal.' }
+```
+
+For a manual capture or a focused check, invoke the underlying tool directly
+with the same GUID and literal hour value on all PCs:
 
 ```powershell
 $run = [guid]'11111111-2222-3333-4444-555555555555' # replace once per soak
@@ -105,9 +138,29 @@ if ($LASTEXITCODE -ne 0) { throw 'Peers differ or evidence is incomplete.' }
 
 This rejects failed/missing snapshots, duplicate machine labels, a different
 run or hour, differing tool versions, mismatched tree hashes/counts and scans
-whose start times are more than 30 minutes apart. Capture the first hour and
-the hour exactly 72 hours later, giving at least 73 consecutive hourly
-comparison reports for a 72-hour soak. Audit the full ordered set:
+whose start times are more than 30 minutes apart. Capture at least 73
+consecutive hourly checkpoints. The automated loop requests 74 so small
+start-time jitter does not shorten the measured interval.
+
+After collecting all machine snapshots and capture-loop journals, use the
+packaged batch comparator to run every hourly comparison and the elapsed-time
+audit in one command. Give each machine's snapshot directory and label in the
+same order. Its summary, hourly reports and audit stay in an existing local
+output directory outside the synced roots:
+
+```powershell
+$run = [guid]'11111111-2222-3333-4444-555555555555'
+$first = '2026-10-23T11:00:00Z' # use the actual common first hour
+& .\tools\Compare-PeerSyncSoakReports.ps1 -RunId $run -FirstHourUtc $first `
+  -MachineLabels @('pc-a', 'pc-b', 'pc-c') `
+  -InputDirectories @('C:\Temp\collected\pc-a', 'C:\Temp\collected\pc-b',
+    'C:\Temp\collected\pc-c') -OutputDirectory 'C:\Temp\PeerSync-soak-results' `
+  -Intervals 73 -MinimumHours 72 -MinimumMachines 3
+if ($LASTEXITCODE -ne 0) { throw 'At least one hourly comparison or the audit failed.' }
+```
+
+The following direct audit command is useful when hourly comparison JSONs
+were already produced separately:
 
 ```powershell
 $reports = @(Get-ChildItem 'C:\Temp\PeerSync-soak\compare-*.json' |
@@ -118,11 +171,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Soak evidence is incomplete.' }
 ```
 
 The audit requires a single run ID, the same tool and machine set, 73 or more
-consecutive UTC hours, at least 72 hours between the first and last recorded
-comparison times, and a passing comparison with three or more peers at each
-hour. A passing audit establishes only tree agreement at those checkpoints.
-Inspect the operation,
-service and diagnostic evidence for data loss, errors, resets and recovery,
+consecutive UTC hours, at least 72 hours between the last first-hour capture
+start and the first final-hour capture start, and a passing comparison with
+three or more peers at each hour. A passing audit establishes only tree
+agreement at those checkpoints. Inspect the operation, service and diagnostic
+evidence for data loss, errors, resets and recovery,
 and retain the full reports and environment record with the gate decision.
 If a machine sleeps across a scheduled check, do not silently fill that gap;
 record the gap and repeat the full timed gate when required.

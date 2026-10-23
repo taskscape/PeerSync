@@ -10,26 +10,27 @@ paths, file names, contents, keys or network addresses. The physical operator
 procedure is [documented here](../physical-soak.md).
 
 The final script SHA-256 is
-`C65F2F94A2F28522DE16BAA64D312D5A15B560C9D57D672CDBC2E6958B353F9C`.
+`78027326BBEF5E4A2200D553D8F80E517F03F2B3852B3378DFA873EB19C37F3A`.
 That exact source was copied to the installed Server 2022 and Server 2025
 guests and run with Windows PowerShell 5.1 against their previously
-synchronized target/source folders. Both captures exited 0. Each measured
-four files, zero non-metadata directories and 1,966,080 bytes, with matching
+synchronized target/source folders. Both final captures exited 0. After the
+scoped operation control, each measured seven files, eleven non-metadata
+directories and 2,046,346 bytes, with matching
 tree SHA-256
-`0700E4CCB67970D65853E8F14E419EA99FF4B4F2C10A506BDEE5CBD51F1FAA27`.
+`B8EBE308F65097B1BBAB0FC791F890B7B48DEE036754321390665BA2326BCB68`.
 The host comparison exited 0 with `match: true`, no issues, a common run ID
 and capture starts about one second apart. The final JSON evidence is under
-`artifacts/vm/tree-snapshot-2026-10-23/kit-*`.
+`artifacts/vm/soak-capture-loop-final-2026-10-23/`.
 
 A local changed-file fixture produced two valid captures but comparison
-exited 1 with `tree-mismatch`. A separately marked **synthetic** 73-report
-sequence with corresponding reported capture/comparison times passed the
-72-interval and elapsed-time audit, while omitting hour 37 exited 1 with
-`insufficient-hours` and `missing-or-duplicate-hour`. The host Windows
-PowerShell 5.1 comparison and synthetic audit both exited 0 using
-process-scoped `-ExecutionPolicy Bypass`, since that host blocks unsigned
-scripts by default. These controls verify the reporter's decisions; the
-synthetic sequence is not elapsed-time soak evidence.
+exited 1 with `tree-mismatch`. A separately marked **synthetic** 74-report
+sequence passed the 72-hour capture-time audit when compared after the
+reported capture period; omitting hour 37 exited 1 with
+`hourly-report-invalid` and `missing-or-duplicate-hour`. The Windows
+PowerShell 5.1 batch comparison and audit used process-scoped
+`-ExecutionPolicy Bypass`, since that host blocks unsigned scripts by
+default. See [capture automation evidence](P5-physical-soak-capture-automation-2026-10-23.md).
+These controls verify decisions, not an elapsed physical soak.
 
 The tracked `build/Build-PeerSyncFieldKit.ps1` packages the exact signed
 development installers, the public signing certificate, the field collector,

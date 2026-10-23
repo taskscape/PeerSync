@@ -65,14 +65,17 @@ mobile NAT behavior, WAN relay caps, 72-hour soaks or release signing.
 
 A local transfer kit at `artifacts/deploy/PeerSync-P5-field-kit-1.0.16.0.zip`
 contains the two exact signed development setups, their public `.cer` and
-manifests, the scoped firewall helper, the hourly tree and random-operation tools, and the operator
-guides. The tracked `build/Build-PeerSyncFieldKit.ps1` builder accepts the
+manifests, the scoped firewall helper, the hourly tree, capture loop, batch
+comparison and random-operation tools, and the operator guides. The tracked
+`build/Build-PeerSyncFieldKit.ps1` builder accepts the
 package version and checks manifest/package hashes, source revision and the
 matching public certificate before creating the ZIP; `python -m zipfile -t` passed.
 Its SHA-256 is
-`468C3D39BF06944DA904C78770ADE918C1D240691F6855FB6641ED5191FE8E59`.
+`7FA0A1D25486141CCCBA7714ADC25849E3F62DA007796BB55177ECDE071AC984`.
 The kit is local and ignored by Git; it has not been published as a release.
 The [tree-tool control](P5-physical-soak-evidence-tool-2026-10-23.md)
 records the exact packaged script hash and installed two-guest result.
 The [scoped operation control](P5-physical-soak-operations-2026-10-23.md)
 records its own final hash and a 30-operation installed two-guest sync result.
+The [capture automation control](P5-physical-soak-capture-automation-2026-10-23.md)
+records exact final loop/comparator hashes and the delayed comparison path.
