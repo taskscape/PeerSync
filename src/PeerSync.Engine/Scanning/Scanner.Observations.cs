@@ -2,7 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Sync;
 using PeerSync.Engine.Native;
+using PeerSync.Storage.FolderDb;
 
 namespace PeerSync.Engine.Scanning;
 
@@ -51,6 +53,14 @@ public sealed partial class Scanner
                         + "change_time INTEGER NOT NULL, file_id BLOB NOT NULL, unsyncable INTEGER NOT NULL, "
                         + "parent_key TEXT NOT NULL, depth INTEGER NOT NULL, sort_key BLOB NOT NULL) WITHOUT ROWID; "
                         + "CREATE INDEX observed_parent ON observed(parent_key,sort_key); "
+                        + "CREATE TABLE staged_updates (id INTEGER PRIMARY KEY, path_sort BLOB NOT NULL, "
+                        + "path TEXT NOT NULL, type INTEGER NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL, "
+                        + "attributes INTEGER NOT NULL, deleted INTEGER NOT NULL, changed INTEGER NOT NULL, "
+                        + "file_hash BLOB, vector BLOB NOT NULL, body BLOB, signature BLOB, file_id BLOB, "
+                        + "sequence INTEGER NOT NULL, flags INTEGER NOT NULL, ready INTEGER NOT NULL, "
+                        + "change_time INTEGER, chunks BLOB, conflict_copy INTEGER NOT NULL); "
+                        + "CREATE INDEX staged_order ON staged_updates(path_sort,id); "
+                        + "CREATE INDEX staged_conflict ON staged_updates(file_id,file_hash,path_sort) WHERE conflict_copy=1; "
                         + "CREATE TABLE scan_owner(root_identity BLOB NOT NULL);";
                     schema.ExecuteNonQuery();
                 }
@@ -149,6 +159,135 @@ public sealed partial class Scanner
             using var reader = command.ExecuteReader();
             while (reader.Read()) yield return ReadEntry(reader);
             foreach (var entry in unencodable.Values) yield return entry;
+        }
+
+        // Close every observation reader before the hash workers stage their
+        // signed rows. SQLite cannot upgrade a long-lived read cursor here.
+        internal IEnumerable<WalkEntry[]> ReadPages()
+        {
+            string after = "";
+            while (true)
+            {
+                var page = new List<WalkEntry>(RowRepository<LocalFileRow>.BatchSize);
+                using (var readerConnection = OpenReader())
+                using (var command = readerConnection.CreateCommand())
+                {
+                    command.CommandText = "SELECT path_key,path,name,attributes,length,last_write,change_time,file_id,unsyncable "
+                        + "FROM observed WHERE path_key>$after ORDER BY path_key LIMIT $limit;";
+                    command.Parameters.AddWithValue("$after", after);
+                    command.Parameters.AddWithValue("$limit", RowRepository<LocalFileRow>.BatchSize);
+                    using var reader = command.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        after = reader.GetString(0);
+                        page.Add(ReadEntry(reader, 1));
+                    }
+                }
+                if (page.Count == 0) break;
+                yield return page.ToArray();
+            }
+            foreach (var page in unencodable.Values.Chunk(RowRepository<LocalFileRow>.BatchSize)) yield return page;
+        }
+
+        internal int UpdateCount { get; private set; }
+
+        internal void StageUpdates(IEnumerable<LocalFileRow> rows)
+        {
+            using var transaction = connection.BeginTransaction();
+            using var insertUpdate = connection.CreateCommand(); insertUpdate.Transaction = transaction;
+            insertUpdate.CommandText = "INSERT INTO staged_updates(path_sort,path,type,size,mtime,attributes,deleted,changed,file_hash,vector,body,signature,file_id,sequence,flags,ready,change_time,chunks,conflict_copy) "
+                + "VALUES($sort,$path,$type,$size,$mtime,$attributes,$deleted,$changed,$hash,$vector,$body,$signature,$file,$sequence,$flags,$ready,$change,$chunks,$conflict);";
+            foreach (string name in new[] { "$sort", "$path", "$type", "$size", "$mtime", "$attributes", "$deleted", "$changed", "$hash", "$vector", "$body", "$signature", "$file", "$sequence", "$flags", "$ready", "$change", "$chunks", "$conflict" })
+                insertUpdate.Parameters.AddWithValue(name, DBNull.Value);
+            insertUpdate.Prepare();
+            foreach (var row in rows)
+            {
+                insertUpdate.Parameters["$sort"].Value = Encoding.BigEndianUnicode.GetBytes(row.Path);
+                insertUpdate.Parameters["$path"].Value = row.Path;
+                insertUpdate.Parameters["$type"].Value = (long)row.Type;
+                insertUpdate.Parameters["$size"].Value = row.Size;
+                insertUpdate.Parameters["$mtime"].Value = row.MtimeTicks;
+                insertUpdate.Parameters["$attributes"].Value = (long)row.Attributes;
+                insertUpdate.Parameters["$deleted"].Value = row.Deleted ? 1 : 0;
+                insertUpdate.Parameters["$changed"].Value = row.ChangedTicks;
+                insertUpdate.Parameters["$hash"].Value = (object?)row.FileHash ?? DBNull.Value;
+                insertUpdate.Parameters["$vector"].Value = VersionVector.Serialize(row.Vector);
+                insertUpdate.Parameters["$body"].Value = (object?)row.Record?.Body.ToArray() ?? DBNull.Value;
+                insertUpdate.Parameters["$signature"].Value = (object?)row.Record?.Signature.ToArray() ?? DBNull.Value;
+                insertUpdate.Parameters["$file"].Value = (object?)row.FileId ?? DBNull.Value;
+                insertUpdate.Parameters["$sequence"].Value = row.LocalSequence;
+                insertUpdate.Parameters["$flags"].Value = (int)row.Flags;
+                insertUpdate.Parameters["$ready"].Value = row.ContentReady ? 1 : 0;
+                insertUpdate.Parameters["$change"].Value = (object?)row.ChangeFileTime ?? DBNull.Value;
+                insertUpdate.Parameters["$chunks"].Value = (object?)EncodeChunks(row.IndexedChunks) ?? DBNull.Value;
+                insertUpdate.Parameters["$conflict"].Value = !row.Deleted && row.Type == 0 && row.FileId is not null
+                    && row.FileHash is not null && row.Path.Split('/').Any(p => p.Contains(".sync-conflict-", StringComparison.Ordinal)) ? 1 : 0;
+                insertUpdate.ExecuteNonQuery(); UpdateCount = checked(UpdateCount + 1);
+            }
+            transaction.Commit();
+        }
+
+        internal string? FindRetainedConflictCopy(byte[] fileId, byte[] hash)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT path FROM staged_updates WHERE file_id=$file AND file_hash=$hash AND conflict_copy=1 ORDER BY path_sort,id LIMIT 1;";
+            command.Parameters.AddWithValue("$file", fileId); command.Parameters.AddWithValue("$hash", hash);
+            return command.ExecuteScalar() as string;
+        }
+
+        internal IEnumerable<LocalFileRow> ReadUpdates()
+        {
+            using var readerConnection = OpenReader(); using var command = readerConnection.CreateCommand();
+            command.CommandText = "SELECT path,type,size,mtime,attributes,deleted,changed,file_hash,vector,body,signature,file_id,sequence,flags,ready,change_time,chunks "
+                + "FROM staged_updates ORDER BY path_sort,id;";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                byte[]? body = reader.IsDBNull(9) ? null : reader.GetFieldValue<byte[]>(9);
+                byte[]? signature = reader.IsDBNull(10) ? null : reader.GetFieldValue<byte[]>(10);
+                if ((body is null) != (signature is null)) throw new InvalidDataException("Incomplete staged signed record.");
+                long sequence = reader.GetInt64(12);
+                yield return new LocalFileRow(reader.GetString(0), checked((uint)reader.GetInt64(1)), reader.GetInt64(2), reader.GetInt64(3),
+                    checked((uint)reader.GetInt64(4)), reader.GetInt64(5) != 0, reader.GetInt64(6),
+                    reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7), VersionVector.Deserialize(reader.GetFieldValue<byte[]>(8)),
+                    body is null ? null : new SignedRecord(body, signature!, checked((ulong)sequence)),
+                    reader.IsDBNull(11) ? null : reader.GetFieldValue<byte[]>(11), sequence, (LocalFileState)reader.GetInt64(13))
+                {
+                    ContentReady = reader.GetInt64(14) != 0,
+                    ChangeFileTime = reader.IsDBNull(15) ? null : reader.GetInt64(15),
+                    IndexedChunks = reader.IsDBNull(16) ? null : DecodeChunks(reader.GetFieldValue<byte[]>(16)),
+                };
+            }
+        }
+
+        private static byte[]? EncodeChunks(IReadOnlyList<LocalChunk>? chunks)
+        {
+            if (chunks is null) return null;
+            using var stream = new MemoryStream(); using var writer = new BinaryWriter(stream);
+            writer.Write(chunks.Count);
+            foreach (var chunk in chunks)
+            {
+                writer.Write(chunk.Offset); writer.Write(chunk.Length); writer.Write(chunk.Hash.Length); writer.Write(chunk.Hash);
+            }
+            return stream.ToArray();
+        }
+
+        private static List<LocalChunk> DecodeChunks(byte[] bytes)
+        {
+            using var stream = new MemoryStream(bytes); using var reader = new BinaryReader(stream);
+            int count = reader.ReadInt32();
+            if (count < 0 || count > (bytes.Length - sizeof(int)) / 48) throw new InvalidDataException("Invalid staged chunk count.");
+            var chunks = new List<LocalChunk>(count);
+            for (int i = 0; i < count; i++)
+            {
+                long offset = reader.ReadInt64(); int length = reader.ReadInt32(); int hashLength = reader.ReadInt32();
+                if (hashLength != 32) throw new InvalidDataException("Invalid staged chunk hash.");
+                byte[] hash = reader.ReadBytes(hashLength);
+                if (hash.Length != 32) throw new EndOfStreamException("Truncated staged chunk hash.");
+                chunks.Add(new(offset, length, hash));
+            }
+            if (stream.Position != stream.Length) throw new InvalidDataException("Trailing staged chunk data.");
+            return chunks;
         }
 
         internal IEnumerable<KeyValuePair<string, WalkEntry>> ReadDirectoriesDeepestFirst()

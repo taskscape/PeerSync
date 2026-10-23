@@ -243,7 +243,7 @@ public sealed partial class Scanner : IDisposable
             var cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             try
             {
-            foreach (var page in entries.ReadAll().Chunk(RowRepository<LocalFileRow>.BatchSize))
+            foreach (var page in entries.ReadPages())
             {
             cancellationToken.ThrowIfCancellationRequested();
             var previousPage = hasPrevious
@@ -360,6 +360,8 @@ public sealed partial class Scanner : IDisposable
                 catch (Exception error) when (IsFileError(error))
                 { Defer(entry.Path, old, error is CryptographicException ? "published-content-verification-failed" : "read-failed", NativeCode(error)); }
             }).ConfigureAwait(false);
+            if (!updates.IsEmpty) entries.StageUpdates(updates);
+            updates = new ConcurrentBag<LocalFileRow>();
             }
             }
             finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
@@ -369,6 +371,11 @@ public sealed partial class Scanner : IDisposable
             foreach (var old in index.LocalFiles.ReadAll())
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (updates.Count >= RowRepository<LocalFileRow>.BatchSize)
+                {
+                    entries.StageUpdates(updates);
+                    updates = new ConcurrentBag<LocalFileRow>();
+                }
                 string key = old.Path.ToUpperInvariant();
                 if (Under(key, ignoredPrefixes))
                 {
@@ -405,17 +412,14 @@ public sealed partial class Scanner : IDisposable
                 if (publish) tombstone = tombstone with { Record = Sign(tombstone, 0, []) };
                 updates.Add(tombstone); deleted++;
             }
+            if (!updates.IsEmpty) entries.StageUpdates(updates);
             // The root's pathname may have been replaced while its pinned handle stayed valid.
             using (var currentRoot = new NativeRoot(rootPath))
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity))
                     throw new IOException("Sync root was replaced during the scan.");
-            var ordered = updates.OrderBy(r => r.Path, StringComparer.Ordinal).ToArray(); bool followup = false;
-            var retainedCopies = ordered.Where(r => !r.Deleted && r.Type == 0 && r.FileId is not null && r.FileHash is not null
-                    && r.Path.Split('/').Any(p => p.Contains(".sync-conflict-", StringComparison.Ordinal)))
-                .GroupBy(r => Convert.ToHexString(r.FileId!) + Convert.ToHexString(r.FileHash!), StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.First().Path, StringComparer.Ordinal);
+            bool followup = false;
             bool requiresNeededRebuild = false;
-            foreach (var page in ordered.Chunk(RowRepository<LocalFileRow>.BatchSize))
+            foreach (var page in entries.ReadUpdates().Chunk(RowRepository<LocalFileRow>.BatchSize))
             {
                 var previousPage = hasPrevious
                     ? index.ReadLocalFilesByPaths(page.Select(row => row.Path).ToArray())
@@ -425,7 +429,7 @@ public sealed partial class Scanner : IDisposable
                 {
                     requiresNeededRebuild |= next.Deleted && old is { Type: 0, Deleted: false, Record: not null };
                     string? retainedPath = old.FileId is not null && old.FileHash is not null
-                        && retainedCopies.TryGetValue(Convert.ToHexString(old.FileId) + Convert.ToHexString(old.FileHash), out string? path) ? path : null;
+                        ? entries.FindRetainedConflictCopy(old.FileId, old.FileHash) : null;
                     followup |= await history.EnsureAsync(historyTree, old, next, retainedPath, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -436,7 +440,7 @@ public sealed partial class Scanner : IDisposable
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity)) throw new IOException("Sync root changed during history retention.");
             foreach (var cacheBatch in cacheUpdates.Chunk(1000))
                 await index.UpdateNativeChangeTimesAsync(cacheBatch, cancellationToken).ConfigureAwait(false);
-            int written = await index.LocalFiles.UpsertAsync(ordered, cancellationToken).ConfigureAwait(false);
+            int written = await index.CommitScanRowsAsync(entries.ReadUpdates(), cancellationToken).ConfigureAwait(false);
             if (StageDirectorySnapshots)
                 await StageDirectoriesAsync(root.Identity, entries, protectedPrefixes, ignoredPrefixes, problems, session, cancellationToken).ConfigureAwait(false);
             Checkpoint?.Invoke("after-upsert");
@@ -445,10 +449,17 @@ public sealed partial class Scanner : IDisposable
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
                 ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
+            // A very large change set rebuilds needed work from the durable
+            // index union; no million-path result list survives this scan.
+            const int changedPathLimit = 10_000;
+            bool rebuildNeeded = requiresNeededRebuild || written + cacheUpdates.Count > changedPathLimit;
+            IReadOnlyList<string> changedPaths = rebuildNeeded ? [] : Array.AsReadOnly(entries.ReadUpdates()
+                .Select(row => row.Path).Concat(cacheUpdates.Select(row => row.Path))
+                .Distinct(StringComparer.Ordinal).ToArray());
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { SessionId = session, RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
-                    RequiresNeededRebuild = requiresNeededRebuild };
+                { SessionId = session, RequiresFollowupScan = followup, ChangedPaths = changedPaths,
+                    RequiresNeededRebuild = rebuildNeeded };
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {

@@ -82,8 +82,10 @@ internal static class ScanningBenchmark
         var unchanged = await scanner.ScanAsync();
         long finalSequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
         long rows = index.LocalFiles.Count();
+        bool changedPathsBounded = count <= 10_000 || initial.RequiresNeededRebuild && initial.ChangedPaths.Count == 0;
         bool correct = initial.Hashed == count && initial.Problems.Count == 0 && unchanged.Problems.Count == 0
-            && unchanged.Hashed == 0 && unchanged.Updated == 0 && unchanged.Unchanged == rows && sequence == finalSequence;
+            && unchanged.Hashed == 0 && unchanged.Updated == 0 && unchanged.Unchanged == rows && sequence == finalSequence
+            && changedPathsBounded;
         double? idleCpuPercent = null;
         long? idleWorkingSetBytes = null, idlePrivateBytes = null;
         long? peakWorkingSetBytes = null, managedIdleBytes = null;
@@ -119,7 +121,7 @@ internal static class ScanningBenchmark
             firstIndexSeconds = firstIndex.Elapsed.TotalSeconds,
             initialSeconds = initial.Elapsed.TotalSeconds, initialHashed = initial.Hashed,
             unchangedSeconds = unchanged.Elapsed.TotalSeconds, unchanged.Hashed, unchanged.Updated,
-            unchanged.Unchanged, sequencePreserved = sequence == finalSequence,
+            unchanged.Unchanged, sequencePreserved = sequence == finalSequence, changedPathsBounded,
             idleCpuPercent, idleWorkingSetBytes, idlePrivateBytes,
             peakWorkingSetBytes, managedIdleBytes, gcCommittedIdleBytes, sqliteMemoryIdleBytes,
             targetSeconds = count == 1_000_000 ? 1200 : 10, correct, targetMet,

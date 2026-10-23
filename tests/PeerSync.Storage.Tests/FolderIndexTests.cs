@@ -17,6 +17,35 @@ public sealed class FolderIndexTests : IDisposable
     public FolderIndexTests() => Directory.CreateDirectory(root);
 
     [Fact]
+    public async Task StagedScanCommitRollsBackEveryPageWhenItsSourceFails()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        static IEnumerable<LocalFileRow> InterruptedRows()
+        {
+            for (int i = 0; i < 1001; i++) yield return Row($"file-{i:D4}");
+            throw new IOException("interrupted staged stream");
+        }
+        await Should.ThrowAsync<IOException>(() => index.CommitScanRowsAsync(InterruptedRows(), TestContext.Current.CancellationToken));
+        index.LocalFiles.Count().ShouldBe(0);
+        index.ReadIndexHighWater().ShouldBe(0);
+        (await index.CommitScanRowsAsync(Enumerable.Range(0, 1001).Select(i => Row($"file-{i:D4}")), TestContext.Current.CancellationToken))
+            .ShouldBe(1001);
+        index.LocalFiles.Count().ShouldBe(1001);
+        index.ReadIndexHighWater().ShouldBe(1001);
+    }
+
+    [Fact]
+    public async Task NeededRebuildPathMergeDeduplicatesAcrossThreeIndexes()
+    {
+        await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
+        await index.LocalFiles.UpsertAsync([Row("alpha"), Row("éclair")], TestContext.Current.CancellationToken);
+        await index.RemoteFiles.UpsertAsync([new(Peer, "ALPHA", new Dictionary<ulong, ulong>(), Row("alpha").Record!),
+            new(Peer, "zulu", new Dictionary<ulong, ulong>(), Row("zulu").Record!)], TestContext.Current.CancellationToken);
+        await index.Needed.UpsertAsync([new("ZULU", Peer, 0)], TestContext.Current.CancellationToken);
+        index.ReadAllNeededPathKeys().ToArray().ShouldBe(["ALPHA", "ZULU", "ÉCLAIR"]);
+    }
+
+    [Fact]
     public async Task NativeChangeCacheRoundTripsAndCompareAndSwapNeverChangesPublicationMetadata()
     {
         await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
