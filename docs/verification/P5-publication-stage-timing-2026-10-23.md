@@ -42,6 +42,10 @@ publication, before native-byte verification, and the verified-view edit was
 reverted. Its source patch, binary hashes and partial output remain under
 `artifacts/scale/p5-publication-reuse-10k-20261023/`.
 
+The final timing-only source passed the full Engine suite: 1,038 passed, zero
+failed and zero skipped. The retained log is
+`artifacts/tests/p5-engine-publication-timing-final-20261023.log`.
+
 The committed-source million-file candidate and 24-hour fuzz process stayed
 alive during these controls. The [bounded scanner staging design](../proposals/P5-bounded-scanner-staging.md)
 addresses the separate 2.55 GB peak-memory finding; neither this diagnostic
