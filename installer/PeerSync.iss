@@ -60,6 +60,7 @@ Source: "Assert-UpdateSetupSignature.ps1"; DestDir: "{app}\tools"; Flags: ignore
 Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Set-WerPolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Audit-CrashPolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Collect-DeploymentEvidence.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\service\*.exe"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
 Source: "{#StageRoot}\service\*.dll"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce

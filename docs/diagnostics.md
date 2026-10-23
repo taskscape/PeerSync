@@ -105,6 +105,33 @@ On both PCs run `psp diagnostics --logs <service-log-directory> --output
 UTC timestamps and session IDs: `tracker.session_connected`,
 `tracker.peer_list_received`, `tracker.relay_offer_received`,
 `rendezvous.relay_joined`, `service.peer_connected`, and sync-pass events.
+
+For one bounded collection on each installed machine, run these in elevated
+Windows PowerShell. Each invocation creates a new directory, prints the path
+to `deployment-evidence.json`, and writes that sanitized summary plus a ZIP.
+The client command probes the central server using HTTP/2 and HTTP/3; omit
+`-ProbeHost` when testing an offline machine. The server command includes its
+installed local deployment preflight. Nonzero exit leaves the summary and
+bundle in place with issue codes; it does not change service settings.
+
+```powershell
+& "$env:ProgramFiles\PeerSync\tools\Collect-DeploymentEvidence.ps1" `
+  -Role Client -ProbeHost sync.taskscape.com:99
+& "$env:ProgramFiles\PeerSync Rendezvous\Collect-DeploymentEvidence.ps1" `
+  -Role Rendezvous
+```
+
+Pass `-OutputDirectory C:\Temp\PeerSync-field-machine1` to choose a new,
+nonexistent directory. The summary keeps the probe correlation ID and
+per-protocol result but omits the observed address, peer identities, folder
+keys and raw settings. It records installed binary signature and hash, SCM
+state and account, client listener ownership when configured, crash-policy
+audit and a SHA-256 hash for its default sanitized ZIP. A new client with no
+registered folder may not have started its listener yet.
+It does not assert that a folder synced or that an outside provider admits
+port 99; retain a file-hash comparison and an outside-network probe for those
+gates.
+
 `tracker.outgoing_full` means the bounded tracker stream did not accept a
 relay or punch request; its `errorCode` names only the request kind. The
 connection attempt fails promptly and the maintainer can retry. Folder and

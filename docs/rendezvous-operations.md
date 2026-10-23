@@ -98,6 +98,11 @@ outside-network `psp probe`
 below as the TCP/UDP 99 acceptance test; neither a local allow rule nor a
 local UDP socket proves provider or upstream firewall admission.
 
+The installed `Collect-DeploymentEvidence.ps1 -Role Rendezvous` collects this
+preflight, binary signing and crash-policy state, and a sanitized diagnostic
+bundle into one new local directory. The [diagnostics guide](diagnostics.md)
+gives the command and the limits of that evidence.
+
 Read `issues` in this order. For `settings-unavailable` or
 `public-url-mismatch`, inspect the installed `appsettings.json` and any
 service-level `PEERSYNC_` overrides. For `server-certificate-unavailable`,

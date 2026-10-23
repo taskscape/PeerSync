@@ -45,6 +45,7 @@ Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversio
 Source: "Set-WerPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Audit-CrashPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Test-RendezvousDeployment.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Collect-DeploymentEvidence.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 Source: "After-RendezvousRenewal.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 #ifndef UnsignedDevelopment
