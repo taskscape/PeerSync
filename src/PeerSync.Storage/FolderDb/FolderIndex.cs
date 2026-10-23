@@ -86,6 +86,18 @@ public sealed partial class FolderIndex : IAsyncDisposable
 
     public IEnumerable<NeededRow> NeededByPriority() => Needed.ReadWhere("1=1 ORDER BY priority DESC,path_key");
     public IEnumerable<ArchiveRow> ArchivesByAge() => Archive.ReadWhere("1=1 ORDER BY archived_ticks,id");
+    /// <summary>Fetch one scanner page without materializing the entire prior index.</summary>
+    public IReadOnlyDictionary<string, LocalFileRow> ReadLocalFilesByPaths(IReadOnlyList<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (paths.Count > RowRepository<LocalFileRow>.BatchSize) throw new ArgumentOutOfRangeException(nameof(paths));
+        if (paths.Count == 0) return new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+        if (paths.Any(path => path is null)) throw new ArgumentException("Null path in scanner page.", nameof(paths));
+        object?[] keys = paths.Select(path => (object?)path.ToUpperInvariant()).ToArray();
+        string parameters = string.Join(',', Enumerable.Range(0, keys.Length).Select(i => "$k" + i));
+        return LocalFiles.ReadWhere("path_key IN (" + parameters + ")", keys)
+            .ToDictionary(row => row.Path.ToUpperInvariant(), StringComparer.Ordinal);
+    }
     public IEnumerable<ArchiveRow> ArchivesForVersion(string originalPath, byte[] hash, long size)
     {
         _ = PathRules.Key(originalPath); FolderMaps.RequireBytes(hash, 32); ArgumentOutOfRangeException.ThrowIfNegative(size);

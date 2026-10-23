@@ -57,6 +57,27 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task PagedPriorLookupPreservesUnchangedRowsAndFindsDeletionAcrossPageBoundary()
+    {
+        for (int i = 0; i < 1001; i++)
+            File.WriteAllBytes(Path.Combine(Root, $"file-{i:D4}"), []);
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device);
+        var first = await scanner.ScanAsync(Token);
+        first.Updated.ShouldBe(1001); first.Problems.ShouldBeEmpty();
+
+        var unchanged = await scanner.ScanAsync(Token);
+        unchanged.Unchanged.ShouldBe(1001); unchanged.Updated.ShouldBe(0);
+        File.Delete(Path.Combine(Root, "file-1000"));
+        File.WriteAllText(Path.Combine(Root, "file-0000"), "edited");
+        var changed = await scanner.ScanAsync(Token);
+        changed.Deleted.ShouldBe(1); changed.Hashed.ShouldBe(1); changed.Updated.ShouldBe(2);
+        index.LocalFiles.Find("file-1000")!.Deleted.ShouldBeTrue();
+        index.LocalFiles.Find("file-0000")!.Deleted.ShouldBeFalse();
+        index.LocalFiles.Count().ShouldBe(1001);
+    }
+
+    [Fact]
     public async Task RenameReusesVerifiedChunksAndMissingPathsBecomeSignedTombstones()
     {
         await Write("before", "rename fixture");

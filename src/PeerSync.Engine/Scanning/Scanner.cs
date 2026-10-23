@@ -174,7 +174,7 @@ public sealed partial class Scanner : IDisposable
             var history = new SnapshotHistory(index, keys, device, settings, journal, clock) { Checkpoint = Checkpoint };
             foreach (var intent in pendingIntents) await history.RecoverIntentAsync(historyTree, intent, cancellationToken).ConfigureAwait(false);
 
-            var previous = index.LocalFiles.ReadAll().ToDictionary(r => r.Path.ToUpperInvariant(), StringComparer.Ordinal);
+            bool hasPrevious = index.LocalFiles.Count() != 0;
             var entries = new Dictionary<string, WalkEntry>(StringComparer.Ordinal);
             var protectedPrefixes = new HashSet<string>(StringComparer.Ordinal);
             var ignoredPrefixes = new HashSet<string>(StringComparer.Ordinal);
@@ -228,7 +228,7 @@ public sealed partial class Scanner : IDisposable
             var updates = new ConcurrentBag<LocalFileRow>();
             int unchanged = 0, hashed = 0, renamed = 0, deleted = 0, unsyncable = 0;
             // Identity matching is restricted to paths absent from the successful walk.
-            var renameCandidates = previous.Values.Where(r => !r.Deleted && r.Type == 0 && r.Record is not null
+            var renameCandidates = index.LocalFiles.ReadAll().Where(r => !r.Deleted && r.Type == 0 && r.Record is not null
                 && r.Flags == LocalFileState.None && r.FileId is not null && !entries.ContainsKey(r.Path.ToUpperInvariant())
                 && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes))
                 .GroupBy(r => Convert.ToHexString(r.FileId!), StringComparer.Ordinal)
@@ -236,13 +236,19 @@ public sealed partial class Scanner : IDisposable
             var cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             try
             {
-            await Parallel.ForEachAsync(entries.Values, new ParallelOptions
+            foreach (var page in entries.Values.Chunk(RowRepository<LocalFileRow>.BatchSize))
+            {
+            cancellationToken.ThrowIfCancellationRequested();
+            var previousPage = hasPrevious
+                ? index.ReadLocalFilesByPaths(page.Select(entry => entry.Path).ToArray())
+                : new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+            await Parallel.ForEachAsync(page, new ParallelOptions
             {
                 MaxDegreeOfParallelism = hashConcurrency, CancellationToken = cancellationToken,
             }, async (entry, token) =>
             {
                 string key = entry.Path.ToUpperInvariant();
-                previous.TryGetValue(key, out var old);
+                previousPage.TryGetValue(key, out var old);
                 // An incomplete directory listing must not produce changes in that subtree.
                 if (Under(key, protectedPrefixes, includeExact: !entry.Unsyncable)) return;
                 if (entry.Unsyncable)
@@ -348,11 +354,12 @@ public sealed partial class Scanner : IDisposable
                 { Defer(entry.Path, old, error is CryptographicException ? "published-content-verification-failed" : "read-failed", NativeCode(error)); }
             }).ConfigureAwait(false);
             }
+            }
             finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
 
             Checkpoint?.Invoke("after-hash");
             LogMemoryStage("scan.memory_hashed", session, entries.Count, stopwatch);
-            foreach (var old in previous.Values)
+            foreach (var old in index.LocalFiles.ReadAll())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string key = old.Path.ToUpperInvariant();
@@ -400,13 +407,21 @@ public sealed partial class Scanner : IDisposable
                     && r.Path.Split('/').Any(p => p.Contains(".sync-conflict-", StringComparison.Ordinal)))
                 .GroupBy(r => Convert.ToHexString(r.FileId!) + Convert.ToHexString(r.FileHash!), StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First().Path, StringComparer.Ordinal);
-            foreach (var next in ordered)
-                if (previous.TryGetValue(next.Path.ToUpperInvariant(), out var old))
+            bool requiresNeededRebuild = false;
+            foreach (var page in ordered.Chunk(RowRepository<LocalFileRow>.BatchSize))
+            {
+                var previousPage = hasPrevious
+                    ? index.ReadLocalFilesByPaths(page.Select(row => row.Path).ToArray())
+                    : new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+                foreach (var next in page)
+                if (previousPage.TryGetValue(next.Path.ToUpperInvariant(), out var old))
                 {
+                    requiresNeededRebuild |= next.Deleted && old is { Type: 0, Deleted: false, Record: not null };
                     string? retainedPath = old.FileId is not null && old.FileHash is not null
                         && retainedCopies.TryGetValue(Convert.ToHexString(old.FileId) + Convert.ToHexString(old.FileHash), out string? path) ? path : null;
                     followup |= await history.EnsureAsync(historyTree, old, next, retainedPath, cancellationToken).ConfigureAwait(false);
                 }
+            }
             Checkpoint?.Invoke("before-scan-commit");
             // History retention can perform I/O: recheck the root pathname again
             // before committing the newly collected local records.
@@ -426,8 +441,7 @@ public sealed partial class Scanner : IDisposable
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
                 { SessionId = session, RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
-                    RequiresNeededRebuild = ordered.Any(row => row.Deleted && previous.TryGetValue(row.Path.ToUpperInvariant(), out var old)
-                        && old is { Type: 0, Deleted: false, Record: not null }) };
+                    RequiresNeededRebuild = requiresNeededRebuild };
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {
