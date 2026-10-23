@@ -2365,6 +2365,7 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
 
 - [ ] **P4.1.7 Central deployment diagnostics** (`PeerSync.Rendezvous/Diagnostics/`, `docs/diagnostics.md`)
   - Done when: server debug events correlate authentication, presence, introductions, relay joins/leaves, quota/timeout and transport errors with client sessions; health and environment checks distinguish TCP/UDP failures. Central and second-PC bundles diagnose a forced relay failure on LAN and WAN. No FolderIds, keys or plaintext are logged; IP retention stays at most 24 hours.
+  - In progress: `psp probe` sends one correlation ID over HTTP/2 and HTTP/3, reports bounded per-leg transport errors and confirms an echoed ID; the server writes that ID on each reached probe event. [Local verification](docs/verification/P4-probe-correlation-2026-10-23.md) passes, while physical LAN/WAN forced-relay bundles remain required.
 
 ### 10.1 Code: Kestrel on port 99 (P4.1.1)
 
@@ -2495,6 +2496,7 @@ await tls.AuthenticateAsClientAsync(PeerTls.ClientOptions(deviceCert), ct);
   - Done when: after 5 s without a direct path, `RelayRequest`, then `Relay.Pipe`, then TLS inside (10.2), then the normal handshake. The UI shows "via relay" for that peer.
 - [ ] **P4.2.5 `psp.exe probe`** (`PeerSync.Cli/Probe.cs`)
   - Done when: `psp probe sync.taskscape.com:99` reports TCP reachability, UDP reachability (an HTTP/3 request) and the address the server observes. Exit code 0 means both protocols work.
+  - Implemented locally with [probe-correlation verification](docs/verification/P4-probe-correlation-2026-10-23.md); external production endpoint verification remains open.
 
 ### 10.3 Code: port mapping (P4.2.2)
 

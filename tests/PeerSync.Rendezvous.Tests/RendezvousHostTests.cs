@@ -2,10 +2,13 @@ using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Rendezvous.Contracts.V1;
 using PeerSync.Rendezvous.Hosting;
 using Shouldly;
@@ -31,6 +34,12 @@ public sealed class RendezvousHostTests
             "--Rendezvous:LogDirectory=" + logs,
             "--Logging:LogLevel:Microsoft.AspNetCore.Server.Kestrel=Debug"], serverCertificate, IPAddress.Loopback);
         await app.StartAsync(TestContext.Current.CancellationToken);
+        Guid probeSession = Guid.NewGuid();
+        var probes = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
+        app.Services.GetRequiredService<DiagnosticJournal>().EntryWritten += (entry, _) =>
+        {
+            if (entry.Event == "rendezvous.probed") probes.Enqueue(entry);
+        };
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
 
@@ -45,12 +54,28 @@ public sealed class RendezvousHostTests
 
             using var probe = new HttpRequestMessage(HttpMethod.Get, origin + "/probe")
             { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            probe.Headers.Add(ProbeCorrelation.HeaderName, ProbeCorrelation.Format(probeSession));
             using HttpResponseMessage probeResponse = await client.SendAsync(probe, timeout.Token);
             probeResponse.IsSuccessStatusCode.ShouldBeTrue();
             probeResponse.Version.ShouldBe(HttpVersion.Version30);
-            string body = await probeResponse.Content.ReadAsStringAsync(timeout.Token);
-            body.ShouldContain("HTTP/3");
-            body.ShouldContain("127.0.0.1");
+            using JsonDocument body = JsonDocument.Parse(await probeResponse.Content.ReadAsStringAsync(timeout.Token));
+            body.RootElement.GetProperty("httpVersion").GetString().ShouldBe("HTTP/3");
+            body.RootElement.GetProperty("observedAddress").GetString().ShouldBe("127.0.0.1");
+            body.RootElement.GetProperty("probeSessionId").GetString().ShouldBe(ProbeCorrelation.Format(probeSession));
+            probes.Count.ShouldBe(1);
+            probes.Single().SessionId.ShouldBe(probeSession);
+            probes.Single().Transport.ShouldBe(DiagnosticTransport.Http3);
+
+            using var invalidProbe = new HttpRequestMessage(HttpMethod.Get, origin + "/probe")
+            { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            invalidProbe.Headers.Add(ProbeCorrelation.HeaderName, "invalid-id");
+            using HttpResponseMessage invalidResponse = await client.SendAsync(invalidProbe, timeout.Token);
+            invalidResponse.IsSuccessStatusCode.ShouldBeTrue();
+            using JsonDocument invalidBody = JsonDocument.Parse(
+                await invalidResponse.Content.ReadAsStringAsync(timeout.Token));
+            invalidBody.RootElement.GetProperty("probeSessionId").ValueKind.ShouldBe(JsonValueKind.Null);
+            probes.Count.ShouldBe(2);
+            probes.Last().SessionId.ShouldBeNull();
         }
 
         using (var anonymousHandler = Handler(serverCertificate))

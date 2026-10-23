@@ -67,7 +67,13 @@ psp probe sync.taskscape.com:99
 
 The JSON must report `tcp.reachable` and `udp.reachable` true, with the
 server-observed address. Exit code 0 requires both. If TCP works and UDP fails,
-check provider UDP filtering and QUIC support. A local probe proves only the
+check provider UDP filtering and QUIC support. Both requests carry one
+`sessionId`; find it as `sessionId` on the server's `rendezvous.probed` events,
+which also identify HTTP/2 versus HTTP/3. `correlated: true` confirms the server
+echoed that ID. A failed leg includes a bounded `category`, exception type and,
+when available, socket, QUIC, HTTP request and native error codes. No server
+event for a leg means it did not reach the HTTP handler; it does not alone
+identify the blocking firewall or network hop. A local probe proves only the
 server's own listeners, not external reachability.
 
 ## Configure two PCs

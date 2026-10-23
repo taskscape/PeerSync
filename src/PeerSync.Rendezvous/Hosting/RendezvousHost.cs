@@ -141,8 +141,11 @@ internal static class RendezvousHost
         });
         app.MapGet("/probe", (HttpContext context, DiagnosticJournal journal) =>
         {
+            Guid? probeSession = ProbeCorrelation.TryParse(
+                context.Request.Headers[ProbeCorrelation.HeaderName].ToString(), out Guid parsed)
+                ? parsed : null;
             journal.TryWrite(new("rendezvous.probed", "probe")
-            { Level = DiagnosticLevel.Debug, Transport = Transport(context),
+            { SessionId = probeSession, Level = DiagnosticLevel.Debug, Transport = Transport(context),
                 RemoteAddress = context.Connection.RemoteIpAddress, RemotePort = context.Connection.RemotePort });
             RendezvousMetrics.Probes.Add(1);
             return Results.Json(new
@@ -150,6 +153,7 @@ internal static class RendezvousHost
                 observedAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 observedPort = context.Connection.RemotePort,
                 httpVersion = context.Request.Protocol,
+                probeSessionId = probeSession is Guid session ? ProbeCorrelation.Format(session) : null,
             });
         });
         app.Lifetime.ApplicationStarted.Register(() =>

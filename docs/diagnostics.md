@@ -49,6 +49,13 @@ On the server, first check `Get-Service PeerSyncRendezvous`,
 `Get-NetTCPConnection -LocalPort 99`, and `Get-NetUDPEndpoint -LocalPort 99`.
 From a second PC, run `psp probe sync.taskscape.com:99`; its JSON result must
 show `tcp.reachable` and `udp.reachable` true and the server-observed address.
+Save the JSON `sessionId` and match it to the server's `rendezvous.probed`
+events for the HTTP/2 and HTTP/3 legs. `correlated: true` means the server
+echoed the probe ID; older servers can respond without that field. A failed
+leg reports a short category and available exception, socket, QUIC, HTTP
+request and native codes, without exception messages. A timeout or missing
+server event narrows the failed leg but does not prove which network hop
+blocked it. The probe ID is diagnostic correlation, not device authentication.
 An HTTP/2 success with HTTP/3 failure points to UDP 99, QUIC or provider
 filtering. Neither a local probe nor a virtual LAN probe proves provider
 reachability from another network. Check the service certificate subject and
