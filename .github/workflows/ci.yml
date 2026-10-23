@@ -204,6 +204,11 @@ jobs:
         run: |
           & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./build/Test-UpdatePolicyRotation.ps1
           if ($LASTEXITCODE -ne 0) { throw "Update publisher rotation guard failed ($LASTEXITCODE)." }
+      - name: Verify update restart recovery guard
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./build/Test-UpdateRestartRecovery.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Update restart recovery guard failed ($LASTEXITCODE)." }
       - name: Build and verify signed development installers
         shell: pwsh
         run: ./build/Run-InstallerCi.ps1

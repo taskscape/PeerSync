@@ -40,6 +40,55 @@ function Remove-ReadySlot([IO.DirectoryInfo]$ready, [string]$pendingRoot) {
     Remove-Item -LiteralPath $current.FullName -Recurse -Force
 }
 
+function Remove-TrustedAttempt([IO.DirectoryInfo]$attempt, [string]$trustedRoot) {
+    $current = Get-Item -LiteralPath $attempt.FullName -Force
+    if (-not $current.PSIsContainer -or
+        ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $current.Name -cnotmatch '^[0-9a-f]{32}$' -or
+        -not [string]::Equals([IO.Path]::GetFullPath($current.Parent.FullName),
+            [IO.Path]::GetFullPath($trustedRoot), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Trusted update attempt changed before cleanup.'
+    }
+    Remove-Item -LiteralPath $current.FullName -Recurse -Force
+}
+
+function Write-UpdateAttempt([string]$trusted, [string]$readyName, [long]$startedUtcTicks,
+    [string]$outcome) {
+    $record = @{ readyName = $readyName; startedUtcTicks = $startedUtcTicks; outcome = $outcome } |
+        ConvertTo-Json -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($record)
+    $file = [IO.FileStream]::new((Join-Path $trusted 'attempt.json'),
+        [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $file.Write($bytes, 0, $bytes.Length)
+        $file.Flush($true)
+    } finally { $file.Dispose() }
+}
+
+function Find-RestartedAttempt([string]$readyName, [string]$trustedRoot) {
+    $matched = @()
+    foreach ($directory in (Get-ChildItem -LiteralPath $trustedRoot -Directory)) {
+        if ($directory.Name -cnotmatch '^[0-9a-f]{32}$' -or
+            ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        $path = Join-Path $directory.FullName 'attempt.json'
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $file = Get-Item -LiteralPath $path -Force
+        if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        try {
+            $record = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            if ($record.readyName -ceq $readyName -and $record.outcome -ceq 'restartRequired' -and
+                $record.startedUtcTicks -match '^[0-9]{15,19}$') {
+                $matched += [pscustomobject]@{ Directory = $directory; Started = [long]$record.startedUtcTicks }
+            }
+        } catch { continue }
+    }
+    if ($matched.Count -eq 0) { return $null }
+    if ($matched.Count -ne 1) { throw 'Multiple protected update attempts match the same package.' }
+    $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().Ticks
+    if ($boot -le $matched[0].Started) { throw 'Restart is still required before update cleanup.' }
+    return $matched[0].Directory
+}
+
 if ($Register) {
     $windowsPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $script = [IO.Path]::GetFullPath($PSCommandPath)
@@ -97,20 +146,24 @@ try {
     # A successful 3010 install keeps its package until the next boot. Once
     # the installed version is current and healthy, retire that verified slot
     # so it does not block every subsequent feed check.
+    $restartedAttempt = Find-RestartedAttempt $ready.Name $trustedRoot
     $classification = @(& $serviceExe --classify-update $ready.FullName)
     if ($LASTEXITCODE -ne 0 -or $classification.Count -ne 1 -or
         $classification[0] -notin @('CURRENT', 'NEWER')) {
         throw 'Signed pending update classification failed.'
     }
     if ($classification[0] -eq 'CURRENT') {
+        if ($null -eq $restartedAttempt) { throw 'Current package has no protected restart receipt.' }
         $savedEnvelope = Get-Content -LiteralPath (Join-Path $ready.FullName 'manifest.json') -Raw | ConvertFrom-Json
         $savedPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($savedEnvelope.payload)) |
             ConvertFrom-Json
         Confirm-InstalledUpdate $serviceExe ([version]$savedPayload.version) $taskName
         Remove-ReadySlot $ready $pendingRoot
+        Remove-TrustedAttempt $restartedAttempt $trustedRoot
         Write-UpdateEvent 4303 'PeerSync completed update slot retired after restart.'
         exit 0
     }
+    if ($null -ne $restartedAttempt) { throw 'Setup is still incomplete after restart.' }
     & $serviceExe --verify-update $ready.FullName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Signed pending update verification failed.' }
     $trusted = Join-Path $trustedRoot ([guid]::NewGuid().ToString('N'))
@@ -123,22 +176,26 @@ try {
     & (Join-Path $PSScriptRoot 'Assert-UpdateSetupSignature.ps1') -Path $trustedSetup `
         -PublisherCertificateSha256 $policy.publisherCertificateSha256
 
+    # This SYSTEM-owned receipt is written before Setup can replace the
+    # service. A 3010 result must survive a later Windows boot before cleanup.
+    $attemptStarted = [DateTime]::UtcNow.Ticks
+    Write-UpdateAttempt $trusted $ready.Name $attemptStarted 'started'
+
     $setup = Start-Process -FilePath $trustedSetup `
         -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
         -WorkingDirectory $trusted -WindowStyle Hidden -Wait -PassThru
     if ($setup.ExitCode -notin @(0, 3010)) { throw ('Update setup failed with exit code ' + $setup.ExitCode) }
     Write-UpdateEvent 4301 ('PeerSync signed update setup completed with exit code ' + $setup.ExitCode)
+    if ($setup.ExitCode -eq 3010) {
+        Write-UpdateAttempt $trusted $ready.Name $attemptStarted 'restartRequired'
+    }
     if ($setup.ExitCode -eq 0) {
         $savedEnvelope = Get-Content -LiteralPath (Join-Path $trusted 'manifest.json') -Raw | ConvertFrom-Json
         $savedPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($savedEnvelope.payload)) |
             ConvertFrom-Json
         Confirm-InstalledUpdate $serviceExe ([version]$savedPayload.version) $taskName
         Remove-ReadySlot $ready $pendingRoot
-        if ([string]::Equals([IO.Path]::GetFullPath((Get-Item -LiteralPath $trusted).Parent.FullName),
-                [IO.Path]::GetFullPath($trustedRoot), [StringComparison]::OrdinalIgnoreCase) -and
-            (Split-Path $trusted -Leaf) -cmatch '^[0-9a-f]{32}$') {
-            Remove-Item -LiteralPath $trusted -Recurse -Force
-        }
+        Remove-TrustedAttempt (Get-Item -LiteralPath $trusted) $trustedRoot
     }
     exit 0
 }

@@ -55,10 +55,12 @@ A task already installing a package must finish before disable takes effect.
 The signed offer expires after at most 30 days; stale or modified packages
 are rejected and retained for diagnosis.
 If Setup returns 3010 (restart required), the pending package remains until
-the next scheduled helper run. After the restart, that run verifies the signed
-package again and removes its own slot only if the installed version matches,
-the service is running, and the SYSTEM task is intact. A failed health check or
-expired offer keeps the slot for administrator diagnosis.
+the next scheduled helper run after a Windows reboot. The protected attempt
+receipt records when Setup started and its 3010 result; the helper verifies a later boot and the
+signed package again, then removes its own slot only if the installed version
+matches, the service is running, and the SYSTEM task is intact. A missing
+receipt, pending restart, failed health check or expired offer keeps the slot
+for administrator diagnosis.
 
 To rotate the publisher, first disable updates and wait for any running
 `PeerSyncUpdateInstall` task to finish. Inspect `%ProgramData%\PeerSync\updates`
