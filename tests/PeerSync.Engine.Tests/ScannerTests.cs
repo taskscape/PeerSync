@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Ignore;
@@ -75,6 +76,27 @@ public sealed class ScannerTests : IDisposable
         index.LocalFiles.Find("file-1000")!.Deleted.ShouldBeTrue();
         index.LocalFiles.Find("file-0000")!.Deleted.ShouldBeFalse();
         index.LocalFiles.Count().ShouldBe(1001);
+    }
+
+    [Fact]
+    public async Task AbandonedObservationIsDiscardedOnlyAfterItsOwnerReleasesTheLock()
+    {
+        await Write("kept", "user bytes");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        string owner = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(index.DatabasePath)))[..16];
+        string stem = Path.Combine(fixture, "scan-observations-" + owner + "-" + Guid.NewGuid().ToString("N"));
+        string lockPath = stem + ".lock", staged = stem + ".db";
+        File.WriteAllBytes(staged, [1, 2, 3]);
+        using (var ownerLock = new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+        using (var scanner = new Scanner(Root, index, keys, Device))
+        {
+            (await scanner.ScanAsync(Token)).Problems.ShouldBeEmpty();
+            File.Exists(staged).ShouldBeTrue();
+        }
+        using (var scanner = new Scanner(Root, index, keys, Device))
+            (await scanner.ScanAsync(Token)).Updated.ShouldBe(0);
+        File.Exists(staged).ShouldBeFalse(); File.Exists(lockPath).ShouldBeFalse();
+        File.ReadAllText(Path.Combine(Root, "kept")).ShouldBe("user bytes");
     }
 
     [Fact]

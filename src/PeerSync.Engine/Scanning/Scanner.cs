@@ -175,7 +175,7 @@ public sealed partial class Scanner : IDisposable
             foreach (var intent in pendingIntents) await history.RecoverIntentAsync(historyTree, intent, cancellationToken).ConfigureAwait(false);
 
             bool hasPrevious = index.LocalFiles.Count() != 0;
-            var entries = new Dictionary<string, WalkEntry>(StringComparer.Ordinal);
+            using var entries = new ScanObservations(index.DatabasePath, root.Identity, session, journal);
             var protectedPrefixes = new HashSet<string>(StringComparer.Ordinal);
             var ignoredPrefixes = new HashSet<string>(StringComparer.Ordinal);
             var problems = new ConcurrentBag<ScanProblem>();
@@ -196,7 +196,12 @@ public sealed partial class Scanner : IDisposable
                         bool valid = PathRules.IsValid(path);
                         if (valid && ignore.IsIgnored(path, native.IsDirectory))
                         {
-                            ignored++; ignoredPrefixes.Add(key); continue;
+                            ignored++;
+                            // Only ignored directories can shield descendants.
+                            // Individual ignored files are rechecked against the
+                            // matcher when prior rows are streamed below.
+                            if (native.IsDirectory) ignoredPrefixes.Add(key);
+                            continue;
                         }
                         var entry = new WalkEntry(path, native, !valid || native.IsReparse);
                         if (!entries.TryAdd(key, entry))
@@ -223,6 +228,7 @@ public sealed partial class Scanner : IDisposable
                 }
             }
 
+            entries.CompleteWalk();
             Checkpoint?.Invoke("after-enumerate");
             LogMemoryStage("scan.memory_enumerated", session, entries.Count, stopwatch);
             var updates = new ConcurrentBag<LocalFileRow>();
@@ -230,13 +236,14 @@ public sealed partial class Scanner : IDisposable
             // Identity matching is restricted to paths absent from the successful walk.
             var renameCandidates = index.LocalFiles.ReadAll().Where(r => !r.Deleted && r.Type == 0 && r.Record is not null
                 && r.Flags == LocalFileState.None && r.FileId is not null && !entries.ContainsKey(r.Path.ToUpperInvariant())
-                && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes))
+                && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes)
+                && !ignore.IsIgnored(r.Path, false))
                 .GroupBy(r => Convert.ToHexString(r.FileId!), StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
             var cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             try
             {
-            foreach (var page in entries.Values.Chunk(RowRepository<LocalFileRow>.BatchSize))
+            foreach (var page in entries.ReadAll().Chunk(RowRepository<LocalFileRow>.BatchSize))
             {
             cancellationToken.ThrowIfCancellationRequested();
             var previousPage = hasPrevious

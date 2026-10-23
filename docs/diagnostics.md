@@ -134,6 +134,12 @@ point-in-time process samples, not a process-wide peak or proof that the
 300 MB scale target holds throughout a scan. The sanitized diagnostic bundle
 keeps these numbers and still excludes paths and content.
 
+`scan.observation_discarded` records cleanup of an abandoned private native
+walk after its exclusive owner lock is released. `scan.observation_cleanup_deferred`
+warns that owned stage files could not be removed; neither event includes a
+path or staged metadata. Such files are not a published index and are never
+used as deletion evidence on restart.
+
 Run `psp diagnostics --logs <log-directory> --output <new-zip>` on both
 machines immediately after reproducing. The command retains only an explicit
 allowlist of structured fields, filters events to the last 24 hours, excludes

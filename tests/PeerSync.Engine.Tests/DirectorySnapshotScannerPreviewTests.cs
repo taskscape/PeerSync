@@ -13,6 +13,20 @@ namespace PeerSync.Engine.Tests;
 public sealed partial class DirectorySnapshotCaptureTests
 {
     [Fact]
+    public async Task ScannerObservationInventoryKeepsUtf16OrdinalChildOrder()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "topic"));
+        File.WriteAllText(Path.Combine(Root, "topic", "\uE000"), "one");
+        File.WriteAllText(Path.Combine(Root, "topic", "\U0001F600"), "two");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        (await PreviewScan(index)).Problems.ShouldBeEmpty();
+        index.ReadDirectoryPublication("topic")!.ExpectedChildren.ShouldBe(2);
+        (await Worker(index).RunAsync(token: Token)).ChangedPaths.ShouldBe(["topic"]);
+        (await PreviewScan(index)).Updated.ShouldBe(0);
+        index.ReadDirectoryPublication("topic").ShouldBeNull();
+    }
+
+    [Fact]
     public async Task LocalOnlyLeafCacheSurvivesUnrelatedPublicationButDetectsChangedSignedChild()
     {
         Directory.CreateDirectory(Path.Combine(Root, "alpha"));

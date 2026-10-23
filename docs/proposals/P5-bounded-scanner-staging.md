@@ -1,6 +1,9 @@
 # P5.3 bounded scanner staging design
 
-Status: implementation design, not a completed scale gate. The measured
+Status: partial implementation. The native observation workspace is now
+disk-backed, but pending signed updates, changed-path reporting and a
+crash-safe staged commit remain to be bounded. This is not a completed scale
+gate. The measured
 million-file first walk uses about 1.28 GB at the commit checkpoint, and an
 immediate unchanged walk reaches about 2.55 GB. Its 135-138 MB idle result
 does not prove a 300 MB peak. P5.3 therefore still requires a bounded scanner
@@ -45,6 +48,11 @@ dominate the peak. Collecting after the scan cannot lower its live peak.
 5. Remove only the workspace owned by the completed scan, after durable
    commit and publication staging. On startup, detect abandoned workspaces,
    invalidate partial scan state, and rescan under the same safety gates.
+6. Bound the changed-path handoff as well as the scan itself. The current
+   `ScanResult.ChangedPaths`, `NeededSet.RecomputeAsync` and
+   `FolderIndex.RecomputeNeededAsync` materialize all requested paths; use
+   ordered pages or a durable full-rebuild marker so a million new files do
+   not reintroduce the same peak immediately after the scan.
 
 ## Acceptance evidence
 

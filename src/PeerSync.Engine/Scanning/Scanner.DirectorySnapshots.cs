@@ -13,7 +13,7 @@ public sealed partial class Scanner
 {
     // Scanner owns the folder gate and has already committed file versions and
     // tombstones. Queue staging never replaces an advertised directory row.
-    private async Task StageDirectoriesAsync(byte[] root, Dictionary<string, WalkEntry> entries, HashSet<string> protectedPrefixes,
+    private async Task StageDirectoriesAsync(byte[] root, ScanObservations entries, HashSet<string> protectedPrefixes,
         HashSet<string> ignoredPrefixes, IEnumerable<ScanProblem> problems, Guid scanSession, CancellationToken token)
     {
         long now = clock.GetUtcNow().UtcTicks;
@@ -49,11 +49,10 @@ public sealed partial class Scanner
         // Keep the common remote-peer path bounded even when its remote table
         // contains a very large corpus. A late arrival is checked again below.
         bool hasExternalState = index.RemoteFiles.Count() != 0 || index.Needed.Count() != 0;
-        var children = entries.Where(pair => !pair.Value.Unsyncable && !Under(pair.Key, protectedPrefixes))
-            .GroupBy(pair => ParentKey(pair.Key), StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.Select(pair => pair.Key).Order(StringComparer.Ordinal), StringComparer.Ordinal);
-        foreach (var pair in entries.Where(pair => pair.Value.Native.IsDirectory && !pair.Value.Unsyncable).OrderByDescending(pair => pair.Key.Count(value => value == '/')))
+        foreach (var pair in entries.ReadDirectoriesDeepestFirst())
         {
             token.ThrowIfCancellationRequested(); string key = pair.Key; var entry = pair.Value;
+            if (entry.Unsyncable) continue;
             if (index.HasIncompleteDirectoryCaseCopy(entry.Path)) { Log("case_copy_publication_held", scanSession, "members-pending"); continue; }
             if (uncertain.Contains("") || uncertain.Contains(key) || Under(key, protectedPrefixes)) continue;
             var old = index.LocalFiles.Find(entry.Path);
@@ -65,13 +64,18 @@ public sealed partial class Scanner
             {
                 var received = VersionView.Open(old.Record, keys, device);
                 if (received.Type == 1 && !received.Deleted && !received.ModifiedBy.SequenceEqual(device)
-                    && received.ExportBody().DirectorySnapshotHash.Length != 0 && !CacheMatchesIdentity(old, root, entry, null, null))
+                    && received.ExportBody().DirectorySnapshotHash.Length != 0 && !CacheMatchesIdentity(old, root, entry, null, null, false))
                 { reconstruct = true; Log("received_root_pending", scanSession, "exact-reconstruction-required"); }
             }
             using var fingerprint = new DirectoryChildFingerprint(entry.Path);
-            if (children.TryGetValue(key, out var names)) foreach (string name in names) fingerprint.Add(name);
+            bool hasDirectoryChild = false;
+            foreach (var child in entries.ReadChildren(key))
+            {
+                if (child.Unsyncable || Under(child.Key, protectedPrefixes)) continue;
+                fingerprint.Add(child.Key); hasDirectoryChild |= child.IsDirectory;
+            }
             var inventory = fingerprint.Complete(index.ReadDirectoryCaptureEpoch());
-            if (sameNative && old?.Record is not null && CacheMatchesIdentity(old, root, entry, inventory, inventory.Epoch))
+            if (sameNative && old?.Record is not null && CacheMatchesIdentity(old, root, entry, inventory, inventory.Epoch, hasDirectoryChild))
             { Log("snapshot_cache_hit", scanSession, "validated-input"); continue; }
             var existing = index.ReadDirectoryPublication(entry.Path);
             bool sameQueuedNative = existing is not null && existing.Path == entry.Path && existing.ExpectedLocalSequence == (old?.LocalSequence ?? 0)
@@ -97,7 +101,8 @@ public sealed partial class Scanner
                 (uint)entry.Native.Attributes, row.Record!, inventory.Hash, inventory.Count, now, now) { ReconstructionOnly = reconstruct }, token).ConfigureAwait(false);
             Log("queue_staged", staged.Version, "complete-inventory");
         }
-        bool CacheMatchesIdentity(LocalFileRow row, byte[] identity, WalkEntry observed, DirectoryChildInventory? inventory, long? epoch)
+        bool CacheMatchesIdentity(LocalFileRow row, byte[] identity, WalkEntry observed, DirectoryChildInventory? inventory, long? epoch,
+            bool hasDirectoryChild)
         {
             var cache = index.ReadDirectoryPublicationCache(row.Path);
             if (cache is null || row.Record is null || !cache.RootId.AsSpan().SequenceEqual(identity)
@@ -114,8 +119,7 @@ public sealed partial class Scanner
                 || currentVersion.Vector.Keys.Any(source => source != deviceShort)
                 || hasExternalState
                 || index.HasPendingChildDirectoryPublication(row.Path)
-                || children.TryGetValue(PathRules.Key(row.Path), out var names)
-                    && names.Any(name => entries[name].Native.IsDirectory)) return false;
+                || hasDirectoryChild) return false;
             bool validated = SameSignedLeafInput(row.Path, cache.InputHash, cache.MemberCount)
                 && index.ReadDirectoryCaptureEpoch() == epoch
                 && index.RemoteFiles.Count() == 0 && index.Needed.Count() == 0;
@@ -155,7 +159,6 @@ public sealed partial class Scanner
             BinaryPrimitives.WriteInt64LittleEndian(countBytes, count); digest.Update(countBytes);
             return count == expectedCount && digest.Finalize().AsSpan().SequenceEqual(expectedHash);
         }
-        static string ParentKey(string key) { int separator = key.LastIndexOf('/'); return separator < 0 ? "" : key[..separator]; }
         void Log(string kind, Guid session, string reason) => journal?.TryWrite(new("directory." + kind, "directory-scan")
             { SessionId = session, Level = DiagnosticLevel.Debug, ErrorCode = reason, ItemsVisited = 1 });
     }

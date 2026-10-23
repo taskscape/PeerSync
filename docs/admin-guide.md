@@ -146,6 +146,12 @@ Windows service; never run both against the same database and listener.
 Detailed event names, privacy rules and failure classification are in
 [diagnostics.md](diagnostics.md).
 
+Large scans may create `scan-observations-*.db` and matching `.lock` files
+beside the private folder index. They contain relative file names and native
+metadata, so keep them under the same restricted ACL and out of support
+bundles. A later scan discards an abandoned stage after its owner lock has
+closed; do not remove a stage while the service is running.
+
 ## Crash-report policy
 
 Setup excludes `PeerSync.Service.exe`, `PeerSync.exe` and `psp.exe` from

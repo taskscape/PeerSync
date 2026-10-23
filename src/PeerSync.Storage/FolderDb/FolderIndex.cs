@@ -30,6 +30,8 @@ public sealed partial class FolderIndex : IAsyncDisposable
     public RowRepository<DeviceRow> Devices { get; }
     public RowRepository<ArchiveRow> Archive { get; }
     public RowRepository<MetaRow> Meta { get; }
+    /// <summary>Private index path used to place disposable scan work beside its owner.</summary>
+    public string DatabasePath => database.Path;
 
     public static async Task<FolderIndex> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
