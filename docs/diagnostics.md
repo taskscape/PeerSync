@@ -111,8 +111,9 @@ Windows PowerShell. Each invocation creates a new directory, prints the path
 to `deployment-evidence.json`, and writes that sanitized summary plus a ZIP.
 The client command probes the central server using HTTP/2 and HTTP/3; omit
 `-ProbeHost` when testing an offline machine. The server command includes its
-installed local deployment preflight. Nonzero exit leaves the summary and
-bundle in place with issue codes; it does not change service settings.
+installed local deployment preflight. Nonzero exit leaves the summary and any
+successfully collected bundle in place with issue codes; it does not change
+service settings.
 
 ```powershell
 & "$env:ProgramFiles\PeerSync\tools\Collect-DeploymentEvidence.ps1" `
