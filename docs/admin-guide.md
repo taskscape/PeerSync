@@ -152,21 +152,20 @@ Setup excludes `PeerSync.Service.exe`, `PeerSync.exe` and `psp.exe` from
 automatic machine-wide Windows Error Reporting. It leaves any exclusion
 already created by an administrator alone, maintains its own exclusions on
 upgrade and removes only its own entries at uninstall. Check the policy after
-install or upgrade:
+install or upgrade with the packaged read-only audit:
 
 ```powershell
-$wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
-Get-ItemProperty -LiteralPath "$wer\ExcludedApplications" -ErrorAction SilentlyContinue |
-    Select-Object 'PeerSync.Service.exe', 'PeerSync.exe', 'psp.exe'
-Get-ItemProperty -LiteralPath "$wer\LocalDumps" -ErrorAction SilentlyContinue
-Get-ItemProperty -LiteralPath "$wer\LocalDumps\PeerSync.Service.exe" -ErrorAction SilentlyContinue
-Get-ItemProperty -LiteralPath "$wer\LocalDumps\PeerSync.exe" -ErrorAction SilentlyContinue
-Get-ItemProperty -LiteralPath "$wer\LocalDumps\psp.exe" -ErrorAction SilentlyContinue
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File 'C:\Program Files\PeerSync\tools\Audit-CrashPolicy.ps1' `
+    -Component Client
 ```
 
-An administrator-configured global or per-executable `LocalDumps` policy can
-still create dumps even when automatic reporting is excluded. Review both
-locations before production use. If local dumps are required by your
+Require `allAutomaticReportsExcluded: true`. Review
+`globalLocalDumpsConfigured` and each `localDumpsConfigured` flag before
+production use; the audit also distinguishes an empty registry key from a key
+with values. It reports no dump-folder paths. An administrator-configured
+global or per-executable `LocalDumps` policy can still create dumps even when
+automatic reporting is excluded. If local dumps are required by your
 organization, restrict them as secret material and never attach them to a
 PeerSync support bundle. A privileged live/full dump of a running process may
 contain folder keys; PeerSync cannot remove keys it must actively use from

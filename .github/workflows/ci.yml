@@ -194,6 +194,11 @@ jobs:
         run: |
           & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./build/Test-WerPolicy.ps1
           if ($LASTEXITCODE -ne 0) { throw "WER policy controls failed ($LASTEXITCODE)." }
+      - name: Verify read-only crash policy audit
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./build/Test-CrashPolicyAudit.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Crash policy audit failed ($LASTEXITCODE)." }
       - name: Verify update publisher rotation guard
         shell: pwsh
         run: |

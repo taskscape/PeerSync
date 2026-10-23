@@ -52,10 +52,17 @@ upgrading an earlier development installation.
 
 Setup also excludes `PeerSync.Rendezvous.exe` from automatic machine-wide
 Windows Error Reporting, preserving a pre-existing administrator exclusion
-and removing only a setup-owned entry at uninstall. Check that executable
-under `HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\ExcludedApplications`
-after installation. Audit both the global `LocalDumps` key and
-`LocalDumps\PeerSync.Rendezvous.exe` before public deployment; those
+and removing only a setup-owned entry at uninstall. Run the packaged read-only
+audit after installation or upgrade:
+
+```powershell
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File 'C:\Program Files\PeerSync Rendezvous\Audit-CrashPolicy.ps1' `
+    -Component Rendezvous
+```
+
+Require `allAutomaticReportsExcluded: true`. Review the global and
+per-executable `LocalDumps` flags before public deployment; those
 administrator-configured dumps operate independently of the automatic-report
 exclusion. Protect any retained dump as privileged secret material. The
 [approved dump boundary](proposals/P5-crash-dump-boundary.md) also applies to
