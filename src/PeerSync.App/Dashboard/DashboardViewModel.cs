@@ -170,7 +170,9 @@ internal sealed record OverwriteItem(string FolderId, long ArchiveId, string Pat
 internal sealed record ArchiveItem(string FolderId, long ArchiveId, string Path,
     string ArchivedLocal, long Size, bool Overwritten)
 {
-    public string SizeDisplay => $"{Size / 1024d / 1024d:0.0} MiB";
+    public string SizeDisplay => Size < 1024 ? $"{Size} B"
+        : Size < 1024 * 1024 ? $"{Size / 1024d:0.0} KiB"
+        : $"{Size / 1024d / 1024d:0.0} MiB";
 }
 internal sealed record PendingDeviceItem(string FolderId, string DeviceId, string Name, string RequestedLocal)
 {
