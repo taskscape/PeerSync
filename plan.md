@@ -2340,6 +2340,11 @@ The approved implementation phasing permits P4 code after merged P3 code,
 locally executable checks and required CI pass. The physical tester and clean
 VM checks below remain mandatory before any beta or release.
 
+The [installed Server 2022/2025 two-guest check](docs/verification/P4-two-guest-central-relay-2026-10-23.md)
+now verifies separately installed clients and exact native bytes in both
+directions. It supplements, but does not replace, the physical tester and
+clean Windows 11 checks.
+
 - [ ] A tester who hasn't seen the project installs on two PCs and syncs a folder in under 10 minutes, using only the app (screen recording attached).
 - [ ] Upgrade, uninstall-keep-data and uninstall-remove-data each pass on a clean Windows 11 VM and a clean Server 2022 VM.
 - [ ] A standard user who isn't authorized can't call the control API. After "Authorize this account" they can.
@@ -2361,6 +2366,7 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
   - Done when: `PunchRequest` leads to `PunchNow` sent to both peers with a start time 500 ms ahead, as decided in P0.2.2.
 - [ ] **P4.1.4 Relay** (`Rendezvous/Relay/`)
   - Done when: the `Relay.Pipe` gRPC stream is spliced as in 10.2. Limits apply: 2 MB/s per device, a total cap below the server uplink, sessions per device, and a 5-minute idle timeout.
+  - An [installed two-guest forced-relay check](docs/verification/P4-two-guest-central-relay-2026-10-23.md) blocked both peer listener ports while preserving central TCP 99; a new file arrived with matching native SHA-256. Central and both client bundles share relay session IDs and record authenticated Relay transport. Virtual-switch behavior does not verify the provider uplink cap, WAN reachability or physical NAT matrix.
 - [ ] **P4.1.5 Abuse controls, bootstrap file and observability**
   - Done when: ASP.NET Core rate limiting is partitioned by IP and DeviceId, with at most 500 folders per device. `/.well-known/peersync.json` is served. `/healthz` responds. OpenTelemetry metrics and the Event Log work. Logs hold no FolderIds.
   - Local [central diagnostic verification](docs/verification/P4-probe-correlation-2026-10-23.md) now exercises the real HTTP limiter's 120-token burst, 429 responses, a bounded warning and a sanitized ZIP. Required hosted/deployed observability and Gate P4 evidence remain open.
@@ -2373,6 +2379,7 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
   - Done when: server debug events correlate authentication, presence, introductions, relay joins/leaves, quota/timeout and transport errors with client sessions; health and environment checks distinguish TCP/UDP failures. Central and second-PC bundles diagnose a forced relay failure on LAN and WAN. No FolderIds, keys or plaintext are logged; IP retention stays at most 24 hours.
   - In progress: `psp probe` sends one correlation ID over HTTP/2 and HTTP/3, reports bounded per-leg transport errors and confirms an echoed ID; the server writes that ID on each reached probe event. Authenticated tracker failure, relay join rejection and HTTP 429 now write bounded events, including session ID when issued. [Local verification](docs/verification/P4-probe-correlation-2026-10-23.md) includes collected central ZIPs for probe/tracker rejection, a certificate-bound relay failure and rate-limit denial; physical LAN/WAN forced-relay bundles remain required.
   - Idle raw-log retention now uses a timer, so an IP-bearing file expires after 24 hours without waiting for another write. A clock-controlled test and a raw-log spot check are recorded in [local retention evidence](docs/verification/P4-idle-log-retention-2026-10-23.md). Installed-server retention and the physical LAN/WAN bundles remain open.
+  - [Installed two-guest bundles](docs/verification/P4-two-guest-central-relay-2026-10-23.md) correlate four recent relay session IDs between the central server and each client; a bounded review found no test path, file name, share-key field or VM IP address. This supplies a virtual-switch forced-relay diagnostic control; LAN/WAN deployment bundles remain open.
 
 ### 10.1 Code: Kestrel on port 99 (P4.1.1)
 
@@ -2494,6 +2501,7 @@ await tls.AuthenticateAsClientAsync(PeerTls.ClientOptions(deviceCert), ct);
 - [ ] **P4.2.1 Tracker client** (`PeerSync.Net/Rendezvous/TrackerClient.cs`)
   - Done when: one `Rendezvous.Session` stream per configured server uses the device certificate for mutual TLS. Announces are sent on start, on folder changes and every 5 minutes. Peer lists feed the connection manager. Reconnects back off up to 5 minutes. All servers in `RendezvousServers` are used.
   - Local reliability progress: critical relay/punch requests now report a full outbound stream queue instead of being silently dropped, refresh signals retain only the latest announcement, and a failed outbound writer ends the session so it can reconnect. The [tracker queue verification](docs/verification/P4-tracker-outbound-queue-2026-10-23.md) records 57 Net and 17 rendezvous local passes, including the loopback mTLS tracker/relay flow; the [diagnostics guide](docs/diagnostics.md) explains the bounded failure event. Physical server and WAN operation remain open.
+  - [Installed two-guest verification](docs/verification/P4-two-guest-central-relay-2026-10-23.md) uses a Server 2025 rendezvous service and Server 2022/2025 client services: with predefined hosts and LAN discovery disabled, both tracker sessions received peer lists and a new file synchronized byte-for-byte. The Server 2022 CLI probe independently passed HTTP/2 and HTTP/3 over the virtual switch.
 - [ ] **P4.2.2 Port mapping** (`PeerSync.Net/Nat/PortMapper.cs`)
   - Done when: UPnP or NAT-PMP maps the listening port for TCP and UDP, renews every 30 minutes, removes the mapping on stop, and degrades silently when no gateway answers.
   - Code: 10.3.
@@ -2503,6 +2511,7 @@ await tls.AuthenticateAsClientAsync(PeerTls.ClientOptions(deviceCert), ct);
   - P0 local outcome (2026-10-18): all three same-port options failed on the development PC. User-approved baseline (2026-10-19): implement direct reachable endpoints followed by relay at 5 s, with no coordinated-punch claim. The deferred P0.2.2 physical NAT matrix and final choice remain mandatory at Gate P4; see `docs/spikes/P0.2.2-quic-punch.md`.
 - [ ] **P4.2.4 Relay client** (`PeerSync.Net/Relay/RelayClient.cs`)
   - Done when: after 5 s without a direct path, `RelayRequest`, then `Relay.Pipe`, then TLS inside (10.2), then the normal handshake. The UI shows "via relay" for that peer.
+  - [Installed two-guest verification](docs/verification/P4-two-guest-central-relay-2026-10-23.md) forced the relay with temporary peer-port blocks, observed authenticated Relay sessions on both clients and verified the transferred file's native SHA-256. It did not exercise the rendered UI route field, WAN NATs or provider-side load cap.
 - [ ] **P4.2.5 `psp.exe probe`** (`PeerSync.Cli/Probe.cs`)
   - Done when: `psp probe sync.taskscape.com:99` reports TCP reachability, UDP reachability (an HTTP/3 request) and the address the server observes. Exit code 0 means both protocols work.
   - Implemented locally with [probe-correlation verification](docs/verification/P4-probe-correlation-2026-10-23.md); external production endpoint verification remains open.
