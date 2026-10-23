@@ -173,18 +173,49 @@ public sealed class Puller : IDisposable
         finally { gate.Release(); }
     }
 
+    // Installed hosts can run a separate watcher scanner before the first
+    // transport pass. Drain native intents before that scanner is exposed;
+    // the first pass repeats the check in case new work arrived meanwhile.
+    internal async Task RecoverBeforeExternalScanAsync(CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        var gate = PassGates.GetValue(index, _ => new(1, 1));
+        await gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            int recovered = await RecoverPendingAsync(token).ConfigureAwait(false);
+            journal?.TryWrite(new("puller.startup_recovery_complete", "pull")
+                { Level = DiagnosticLevel.Debug, ItemsChanged = recovered });
+        }
+        catch (Exception error)
+        {
+            journal?.TryWrite(new("puller.startup_recovery_failed", "pull")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                    NativeError = NativeError(error) });
+            throw;
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task<int> RecoverPendingAsync(CancellationToken token)
+    {
+        if (index.Meta.Find("_root-identity")?.Value is { } boundRoot)
+        {
+            int recovered = await staging.RecoverAsync(boundRoot, token).ConfigureAwait(false);
+            return recovered + await files.RecoverAsync(token).ConfigureAwait(false);
+        }
+        if (index.ReadApplyIntents().Any() || index.HasStagingRetirements())
+            throw new InvalidDataException("Unbound index has recovery state.");
+        return 0;
+    }
+
     private async Task<PullPassResult> RunPassCoreAsync(CancellationToken token)
     {
         int recovered = 0, scans = 0, applied = 0, deferred = 0, failed = 0;
         bool mustScan = false;
         if (!initialized)
         {
-            if (index.Meta.Find("_root-identity")?.Value is { } boundRoot)
-            {
-                recovered += await staging.RecoverAsync(boundRoot, token).ConfigureAwait(false);
-                recovered += await files.RecoverAsync(token).ConfigureAwait(false);
-            }
-            else if (index.ReadApplyIntents().Any() || index.HasStagingRetirements()) throw new InvalidDataException("Unbound index has recovery state.");
+            recovered += await RecoverPendingAsync(token).ConfigureAwait(false);
             await ScanAsync(rebuild: true, token).ConfigureAwait(false); scans++;
             rootId = index.Meta.Find("_root-identity")?.Value?.ToArray();
             if (rootId is not { Length: 24 }) throw new InvalidDataException("Startup scan did not bind the index.");

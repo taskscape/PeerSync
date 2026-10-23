@@ -4,11 +4,16 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using Google.Protobuf;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Settings;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
+using PeerSync.Engine.Scanning;
+using PeerSync.Crypto.Chunking;
+using PeerSync.Protocol.Records;
+using PeerSync.Protocol.Signing;
 using PeerSync.Service.Control;
 using PeerSync.Service.Hosting;
 using PeerSync.Net.Connections;
@@ -446,6 +451,70 @@ public sealed class InstalledFolderHostTests
         {
             await DeleteTemporaryRootAsync(root);
         }
+    }
+
+    [Fact]
+    public async Task InstalledHostRecoversPreparedApplyBeforeStartingItsIndependentScanner()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-ServiceHostRecovery-" + Guid.NewGuid().ToString("N"));
+        string data = Path.Combine(root, "data"), share = Path.Combine(root, "share");
+        string statePath = Path.Combine(data, "peersync.db"), logPath = Path.Combine(root, "logs");
+        byte[] oldBytes = "original local bytes"u8.ToArray(), newBytes = "verified remote bytes"u8.ToArray();
+        Directory.CreateDirectory(data); Directory.CreateDirectory(share);
+        File.WriteAllBytes(Path.Combine(share, "file"), oldBytes);
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            string actorSid = identity.User!.Value;
+            using var keys = FolderKeys.CreateNew();
+            byte[] own = new byte[32], remote = new byte[32]; own[0] = 1; remote[0] = 2;
+            await using (var state = await StateStore.OpenAsync(statePath, cancellationToken: TestContext.Current.CancellationToken))
+                await state.RegisterFolderAsync(keys, share, new FolderSettings { RescanIntervalSeconds = 3600 }, actorSid,
+                    cancellationToken: TestContext.Current.CancellationToken);
+            string indexPath = Path.Combine(data, "folders", Convert.ToHexString(keys.FolderId()) + ".db");
+            Directory.CreateDirectory(Path.GetDirectoryName(indexPath)!);
+            await using (var index = await FolderIndex.OpenAsync(indexPath, TestContext.Current.CancellationToken))
+            {
+                using (var scanner = new Scanner(share, index, keys, own))
+                    await scanner.ScanAsync(TestContext.Current.CancellationToken);
+                byte[] hash = Blake3.Hasher.Hash(newBytes).AsSpan().ToArray();
+                long now = DateTime.UtcNow.Ticks;
+                var body = new FileRecordBody { Path = "file", Type = 0, MtimeTicks = now, ChangedTicks = now,
+                    ModifiedBy = ByteString.CopyFrom(remote), Size = (ulong)newBytes.Length,
+                    ChunkClass = ChunkParameters.ClassFor(newBytes.Length), FileHash = ByteString.CopyFrom(hash) };
+                body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+                body.Chunks.Add(new Chunk { Hash = body.FileHash, Length = (uint)newBytes.Length });
+                await new NeededSet(index, keys, own).ApplyIndexUpdateAsync(remote, 0, 1,
+                    [SignedRecordFactory.Create(body, keys, 1)], TestContext.Current.CancellationToken);
+                var interrupted = new FileApplier(share, index, keys, own)
+                    { Checkpoint = stage => { if (stage == "archived") throw new IOException("injected"); } };
+                await Should.ThrowAsync<IOException>(() => interrupted.ApplyAsync("file",
+                    (_, _, _) => ValueTask.FromResult<ReadOnlyMemory<byte>>(newBytes), TestContext.Current.CancellationToken));
+                index.ReadApplyIntents().ShouldHaveSingleItem();
+                File.Exists(Path.Combine(share, "file")).ShouldBeFalse();
+            }
+
+            using var journal = new DiagnosticJournal(logPath, "service", debugEnabled: true);
+            var status = new ControlStatusRuntime();
+            await using (var host = await InstalledFolderHost.StartForTestAsync(statePath, own, actorSid, status,
+                journal, TestContext.Current.CancellationToken))
+            {
+                File.ReadAllBytes(Path.Combine(share, "file")).ShouldBe(newBytes);
+                host.ResolveFolder(Convert.ToHexString(keys.FolderId())).Index.ReadApplyIntents().ShouldBeEmpty();
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                deadline.CancelAfter(TimeSpan.FromSeconds(15));
+                await UntilAsync(() => File.Exists(Path.Combine(logPath, "debug.jsonl"))
+                    && ReadDiagnosticLog(Path.Combine(logPath, "debug.jsonl")).Contains("\"eventName\":\"scan.complete\"", StringComparison.Ordinal),
+                    deadline.Token);
+                string events = ReadDiagnosticLog(Path.Combine(logPath, "debug.jsonl"));
+                int recovery = events.IndexOf("puller.startup_recovery_complete", StringComparison.Ordinal);
+                int scan = events.IndexOf("\"eventName\":\"scan.start\"", StringComparison.Ordinal);
+                recovery.ShouldBeGreaterThanOrEqualTo(0);
+                scan.ShouldBeGreaterThan(recovery);
+                events.ShouldNotContain("scheduler.scan_failed");
+            }
+        }
+        finally { await DeleteTemporaryRootAsync(root); }
     }
 
     private static async Task DeleteTemporaryRootAsync(string root)

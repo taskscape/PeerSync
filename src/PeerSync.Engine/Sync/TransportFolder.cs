@@ -81,6 +81,8 @@ public sealed class TransportFolder : IAsyncDisposable
         if (after > before) await PublishIndexTargetAsync(after, cancellationToken).ConfigureAwait(false);
         return result;
     }
+    internal Task RecoverBeforeExternalScanAsync(CancellationToken cancellationToken = default)
+    { RequireOpen(); return puller.RecoverBeforeExternalScanAsync(cancellationToken); }
     public void RequestScan() { RequireOpen(); puller.RequestScan(); }
     internal void RecordIndexPush(string eventName, long targetSequence, Guid? sessionId = null, Exception? error = null)
         => puller.RecordIndexPush(eventName, targetSequence, sessionId, error);

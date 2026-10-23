@@ -171,6 +171,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     transport = new TransportFolder(descriptor.Path, index, keys, ownDevice, descriptor.Settings,
                         timeProvider: timeProvider, journal: diagnostics, uploadThrottle: uploadThrottle,
                         downloadThrottle: downloadThrottle, ignore: ignore);
+                    await transport.RecoverBeforeExternalScanAsync(cancellationToken).ConfigureAwait(false);
                     registration = status.RegisterFolder(transport, scanner);
                     folders.Add(new(index, keys, scanner, transport, registration, descriptor.Settings, descriptor.Path));
                     index = null; keys = null; scanner = null; transport = null; registration = null;
@@ -660,6 +661,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             transport = new TransportFolder(descriptor.Path, index, keys, deviceId, descriptor.Settings,
                 timeProvider: null, journal: diagnostics, uploadThrottle: uploadThrottle,
                 downloadThrottle: downloadThrottle, ignore: ignore);
+            await transport.RecoverBeforeExternalScanAsync(cancellationToken).ConfigureAwait(false);
             registration = status.RegisterFolder(transport, scanner);
             var result = new FolderRuntime(index, keys, scanner, transport, registration, descriptor.Settings, descriptor.Path);
             index = null; keys = null; scanner = null; transport = null; registration = null;
