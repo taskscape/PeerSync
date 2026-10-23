@@ -43,6 +43,19 @@ if ($Enable) {
             publisherCertificate = [Convert]::ToBase64String($der)
             publisherCertificateSha256 = [BitConverter]::ToString($digest).Replace('-', '')
         }
+        # A ready package signed under the old pin blocks new downloads. Keep it
+        # for administrator inspection instead of silently stranding rotation.
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $current = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            if (-not [string]::Equals([string]$current.publisherCertificateSha256,
+                    $policy.publisherCertificateSha256, [StringComparison]::OrdinalIgnoreCase)) {
+                $pending = Join-Path $env:ProgramData 'PeerSync\updates'
+                if ((Test-Path -LiteralPath $pending -PathType Container) -and
+                    @(Get-ChildItem -LiteralPath $pending -Directory -Filter '*.ready' | Select-Object -First 1).Count -gt 0) {
+                    throw 'A staged update belongs to the prior publisher. Disable updates, inspect and remove the old .ready slot, then enable the new publisher.'
+                }
+            }
+        }
     }
     finally { $cert.Dispose() }
 } else {

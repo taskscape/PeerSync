@@ -55,6 +55,29 @@ A task already installing a package must finish before disable takes effect.
 The signed offer expires after at most 30 days; stale or modified packages
 are rejected and retained for diagnosis.
 
+To rotate the publisher, first disable updates and wait for any running
+`PeerSyncUpdateInstall` task to finish. Inspect `%ProgramData%\PeerSync\updates`
+for GUID-named `.ready` directories. An old staged package cannot pass the
+new pin, and its presence prevents the service from fetching another offer;
+archive or remove each old slot under administrator control after recording
+its manifest, setup hash and reason for disposition. `Set-UpdatePolicy.ps1`
+refuses a different publisher pin while a `.ready` slot remains. Then install
+the new publisher's public certificate in the appropriate machine trust
+stores, enable the new policy with its `.cer` file, restart the PeerSync
+service so it checks the new feed, and verify that the SYSTEM task accepts a
+newly staged package. Keep the prior pin and trust only while an approved
+transition needs them; a single policy accepts one exact publisher at a time.
+
+If a publisher key is compromised or its certificate revoked, disable updates
+immediately, prevent the daily task from starting another installation, and
+inspect any task already running before changing trust. Remove the old
+publisher from machine trust according to the organization's certificate
+policy and disposition its pending packages as above. Resume only with a
+separately trusted, signed setup and a new pinned publisher. An exact pin
+checks identity, but it is not a substitute for certificate revocation and
+chain-trust validation. Release signers, rotation and revocation still need
+an installed-host check before the release gate closes.
+
 Release operators first sign the installer with the pinned Authenticode
 certificate, upload it to a direct HTTPS URL, then produce and publish the
 detached manifest using the same certificate's non-exportable signing key:

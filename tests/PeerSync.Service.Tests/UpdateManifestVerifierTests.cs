@@ -174,6 +174,64 @@ public sealed class UpdateManifestVerifierTests
     }
 
     [Fact]
+    public async Task PublisherRotationRejectsOldStageAndRequiresPendingDisposition()
+    {
+        using var oldSigner = Signer(); using var newSigner = Signer();
+        byte[] oldCert = oldSigner.Export(X509ContentType.Cert);
+        byte[] newCert = newSigner.Export(X509ContentType.Cert);
+        var manifestUrl = new Uri("https://updates.example.test/manifest.json");
+        var setupUrl = new Uri("https://updates.example.test/setup.exe");
+        byte[] oldSetup = "old publisher setup"u8.ToArray();
+        byte[] newSetup = "new publisher setup"u8.ToArray();
+        byte[] oldOffer = Offer(oldSigner, "99.0.1.0", setupUrl.AbsoluteUri,
+            Convert.ToHexString(SHA256.HashData(oldSetup)), oldSetup.Length, Now.AddDays(2).UtcTicks);
+        byte[] newOffer = Offer(newSigner, "99.0.2.0", setupUrl.AbsoluteUri,
+            Convert.ToHexString(SHA256.HashData(newSetup)), newSetup.Length, Now.AddDays(2).UtcTicks);
+        var oldPolicy = new UpdatePolicy(true, manifestUrl, oldCert, SHA256.HashData(oldCert));
+        var newPolicy = new UpdatePolicy(true, manifestUrl, newCert, SHA256.HashData(newCert));
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-updates-" + Guid.NewGuid().ToString("N"));
+        string pending = Path.Combine(root, "updates");
+        string policyDirectory = Path.Combine(root, "update-policy");
+        Directory.CreateDirectory(policyDirectory);
+        try
+        {
+            using var oldClient = new HttpClient(new FixedResponses(manifestUrl, oldOffer, setupUrl, oldSetup));
+            var oldDownloader = new UpdateDownloader(oldClient, pending, new Version(1, 0, 6), new FixedClock(Now));
+            (await oldDownloader.CheckOnceAsync(oldPolicy, TestContext.Current.CancellationToken)).ShouldBeTrue();
+            string oldReady = Directory.GetDirectories(pending, "*.ready").Single();
+
+            WritePolicy(oldPolicy);
+            using var output = new StringWriter(); using var error = new StringWriter();
+            UpdateVerificationCommand.Run(["--verify-update", oldReady], root, output, error, Now).ShouldBe(0);
+            WritePolicy(newPolicy);
+            UpdateVerificationCommand.Run(["--verify-update", oldReady], root, output, error, Now).ShouldBe(1);
+
+            var newResponses = new FixedResponses(manifestUrl, newOffer, setupUrl, newSetup);
+            using var newClient = new HttpClient(newResponses);
+            var newDownloader = new UpdateDownloader(newClient, pending, new Version(1, 0, 6), new FixedClock(Now));
+            (await newDownloader.CheckOnceAsync(newPolicy, TestContext.Current.CancellationToken)).ShouldBeFalse();
+            newResponses.Calls.ShouldBe(0);
+
+            Directory.Delete(oldReady, recursive: true); // Administrator disposition of the old fixture slot.
+            (await newDownloader.CheckOnceAsync(newPolicy, TestContext.Current.CancellationToken)).ShouldBeTrue();
+            string newReady = Directory.GetDirectories(pending, "*.ready").Single();
+            UpdateVerificationCommand.Run(["--verify-update", newReady], root, output, error, Now).ShouldBe(0);
+            WritePolicy(oldPolicy);
+            UpdateVerificationCommand.Run(["--verify-update", newReady], root, output, error, Now).ShouldBe(1);
+        }
+        finally { DeleteOwnedFixture(root); }
+
+        void WritePolicy(UpdatePolicy policy)
+            => File.WriteAllBytes(Path.Combine(policyDirectory, "update-policy.json"), JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                enabled = policy.Enabled,
+                manifestUrl = policy.ManifestUrl.AbsoluteUri,
+                publisherCertificate = Convert.ToBase64String(policy.PublisherCertificate),
+                publisherCertificateSha256 = Convert.ToHexString(policy.PublisherCertificateSha256),
+            }));
+    }
+
+    [Fact]
     public void ShortLivedPreflightReverifiesStagedBytesAndEnabledPolicy()
     {
         using var signer = Signer(); byte[] cert = signer.Export(X509ContentType.Cert);
