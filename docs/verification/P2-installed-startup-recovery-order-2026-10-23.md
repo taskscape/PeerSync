@@ -25,3 +25,7 @@ run had zero failures and zero skips.
 
 This verifies local host ordering. A current package running under the actual
 SCM account, including a crash/restart injection, is separate deployed evidence.
+
+The subsequent [installed scan coordination follow-up](P5-installed-scan-coordination-2026-10-23.md)
+replaced the separate scheduler scanner with the transport coordinator's
+scanner. The pre-exposure recovery check remains in place.

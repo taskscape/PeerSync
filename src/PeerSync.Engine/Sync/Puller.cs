@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
@@ -17,7 +18,12 @@ using Envelope = PeerSync.Core.Sync.SignedRecord;
 
 namespace PeerSync.Engine.Sync;
 
-public sealed record PullPassResult(int Visited, int Applied, int Deferred, int Failed, int Recovered, int Scans, bool MoreWork, long? NextAttemptTicks);
+public sealed record PullPassResult(int Visited, int Applied, int Deferred, int Failed, int Recovered, int Scans, bool MoreWork, long? NextAttemptTicks)
+{
+    public int ScansCompleted { get; init; }
+    public int ScannedEntries { get; init; }
+    public int ScanProblems { get; init; }
+}
 
 /// <summary>One host-owned coordinator per folder. Caller owns index, keys and
 /// transport. Cancel and await hosted/direct work before disposing this object.
@@ -34,6 +40,7 @@ public sealed class Puller : IDisposable
     private readonly FolderSettings settings;
     private readonly NeededSet needed;
     private readonly Scanner scanner;
+    private readonly ConcurrentDictionary<string, byte> recentRemoteWrites = new(StringComparer.Ordinal);
     private readonly FileApplier files;
     private readonly DirectoryApplier directories;
     private readonly StagingCleaner staging;
@@ -49,6 +56,7 @@ public sealed class Puller : IDisposable
     private readonly Channel<PullPassResult> outcomes = Channel.CreateBounded<PullPassResult>(new BoundedChannelOptions(128)
     { SingleReader = false, SingleWriter = false, FullMode = BoundedChannelFullMode.DropOldest, AllowSynchronousContinuations = false });
     public ChannelReader<PullPassResult> Outcomes => outcomes.Reader;
+    internal Scanner Scanner => scanner;
     private byte[]? rootId;
     private bool initialized;
     private bool neededRepairPending = true;
@@ -86,6 +94,25 @@ public sealed class Puller : IDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this); wake.Writer.TryWrite(true);
     }
     public void RequestScan() { Volatile.Write(ref scanRequested, 1); NotifyWorkAvailable(); }
+    internal void RequestWatcherScan(WatchBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.FullScan || batch.RelativePaths.Count == 0 || Volatile.Read(ref publicationScanPending) == 0)
+        { RequestScan(); return; }
+        foreach (string path in batch.RelativePaths)
+        {
+            string key;
+            try { key = PathRules.Key(path); }
+            catch (ArgumentException) { RequestScan(); return; }
+            if (!recentRemoteWrites.ContainsKey(key)) { RequestScan(); return; }
+        }
+        // The current pull batch owns these native writes. A same-path local
+        // edit is still caught by guarded application and the five-minute
+        // publication scan; unrelated paths request a scan immediately.
+        journal?.TryWrite(new("puller.own_write_watch_coalesced", "watch")
+            { Level = DiagnosticLevel.Debug, ItemsDeferred = batch.RelativePaths.Count });
+        NotifyWorkAvailable();
+    }
 
     internal void RecordBlockRoute(string eventName, int attempts, int bytes, Guid? sessionId = null, Exception? error = null)
         => journal?.TryWrite(new(eventName, "block-transfer")
@@ -173,8 +200,8 @@ public sealed class Puller : IDisposable
         finally { gate.Release(); }
     }
 
-    // Installed hosts can run a separate watcher scanner before the first
-    // transport pass. Drain native intents before that scanner is exposed;
+    // Installed hosts expose their scanner to status and watcher registration
+    // before the first transport pass. Drain native intents before exposure;
     // the first pass repeats the check in case new work arrived meanwhile.
     internal async Task RecoverBeforeExternalScanAsync(CancellationToken token = default)
     {
@@ -211,12 +238,12 @@ public sealed class Puller : IDisposable
 
     private async Task<PullPassResult> RunPassCoreAsync(CancellationToken token)
     {
-        int recovered = 0, scans = 0, applied = 0, deferred = 0, failed = 0;
+        int recovered = 0, scans = 0, scansCompleted = 0, scanEntries = 0, scanProblems = 0, applied = 0, deferred = 0, failed = 0;
         bool mustScan = false;
         if (!initialized)
         {
             recovered += await RecoverPendingAsync(token).ConfigureAwait(false);
-            await ScanAsync(rebuild: true, token).ConfigureAwait(false); scans++;
+            await RecordScanAsync(rebuild: true).ConfigureAwait(false);
             rootId = index.Meta.Find("_root-identity")?.Value?.ToArray();
             if (rootId is not { Length: 24 }) throw new InvalidDataException("Startup scan did not bind the index.");
             initialized = true;
@@ -234,10 +261,10 @@ public sealed class Puller : IDisposable
             }
             long now = Now;
             if ((Volatile.Read(ref scanRequested) != 0 || now >= nextScanTicks) && now >= scanRetryTicks)
-            { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+            { await RecordScanAsync(rebuild: false).ConfigureAwait(false); }
         }
         if (await files.PrepareCaseCopiesAsync(fetch, token).ConfigureAwait(false))
-        { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        { await RecordScanAsync(rebuild: false).ConfigureAwait(false); }
         if (publicationScanPending != 0 && !neededRepairPending)
         {
             // New remote work can replace the live backlog between passes.
@@ -245,7 +272,7 @@ public sealed class Puller : IDisposable
             // transition or deletion enters the native mutation path.
             var upcoming = index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority, 1000);
             if (upcoming.Count == 0 || upcoming.Any(row => row.Work!.Stage != 1))
-            { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+            { await RecordScanAsync(rebuild: false).ConfigureAwait(false); }
         }
         if (publications is not null)
         {
@@ -337,6 +364,13 @@ public sealed class Puller : IDisposable
                                 {
                                     publicationScanSinceTicks = publicationScanPending == 0 ? Now : publicationScanSinceTicks;
                                     publicationScanPending++;
+                                    recentRemoteWrites.TryAdd(row.PathKey, 0);
+                                    string parent = ApplyState.Parent(row.PathKey);
+                                    while (parent.Length != 0)
+                                    {
+                                        recentRemoteWrites.TryAdd(parent, 0);
+                                        parent = ApplyState.Parent(parent);
+                                    }
                                 }
                                 else mustScan = true;
                             }
@@ -380,7 +414,7 @@ public sealed class Puller : IDisposable
             || visited < 1000 || nextStage != 1)) mustScan = true;
         if (mustScan)
         {
-            await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++;
+            await RecordScanAsync(rebuild: false).ConfigureAwait(false);
         }
         else if (publicationScanPending != 0)
             journal?.TryWrite(new("puller.publication_scan_deferred", "pull")
@@ -400,7 +434,20 @@ public sealed class Puller : IDisposable
             else { nextStagingTicks = AddSeconds(Now, 3600); stagingRetryAttempt = 0; }
         }
         long finished = Now; long? next = NextWorkTicks(finished);
-        return new(visited, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
+        return new(visited, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next)
+        { ScansCompleted = scansCompleted, ScannedEntries = scanEntries, ScanProblems = scanProblems };
+
+        async Task RecordScanAsync(bool rebuild)
+        {
+            ScanResult? result = await ScanAsync(rebuild, token).ConfigureAwait(false);
+            scans++;
+            if (result is not null)
+            {
+                scansCompleted++;
+                scanEntries = checked(scanEntries + result.Enumerated);
+                scanProblems = checked(scanProblems + result.ProblemCount);
+            }
+        }
     }
 
     private async Task RetryAsync(NeededRow row, Exception? error, CancellationToken token)
@@ -411,7 +458,7 @@ public sealed class Puller : IDisposable
             RetryInMilliseconds = retry is null ? 0 : (int)Math.Clamp((retry.NextTicks - retry.FailedTicks) / TimeSpan.TicksPerMillisecond, 0, 600000), ItemsDeferred = 1 });
     }
 
-    private async Task ScanAsync(bool rebuild, CancellationToken token)
+    private async Task<ScanResult?> ScanAsync(bool rebuild, CancellationToken token)
     {
         Interlocked.Exchange(ref scanRequested, 0);
         bool repairAll = rebuild || neededRepairPending;
@@ -442,10 +489,12 @@ public sealed class Puller : IDisposable
                         ElapsedMilliseconds = Math.Max(0, (Now - publicationScanSinceTicks) / (double)TimeSpan.TicksPerMillisecond) });
                 publicationScanPending = 0;
                 publicationScanSinceTicks = 0;
+                recentRemoteWrites.Clear();
             }
+            return result;
         }
-        catch (CasePreservationCapacityException) when (scanned) { CaseBackpressure(); }
-        catch (DirectoryMetadataCapacityException) when (scanned) { MetadataBackpressure(); }
+        catch (CasePreservationCapacityException) when (scanned) { CaseBackpressure(); return null; }
+        catch (DirectoryMetadataCapacityException) when (scanned) { MetadataBackpressure(); return null; }
         catch { Volatile.Write(ref scanRequested, 1); throw; }
     }
 

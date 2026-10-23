@@ -25,3 +25,7 @@ The older `79d4e46` million-file fresh-peer process runs its original binary
 and cannot validate this code. A new committed-source million-file transfer
 with exact native-byte verification remains required to close P5.3. The local
 case demonstrates fewer scanner passes, not a measured million-file speedup.
+
+The later [installed scheduler follow-up](P5-installed-scan-coordination-2026-10-23.md)
+routes watcher and periodic service work through this same coordinator so
+remote-owned watcher batches can share its deferred publication scan.

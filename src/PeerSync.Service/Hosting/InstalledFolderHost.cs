@@ -166,11 +166,10 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     EnsureFolderMarker(descriptor.Path, descriptor.Id);
                     if (!keys.CanRead) throw new InvalidOperationException("Encrypted-only folders require the opaque engine.");
                     var ignore = new IgnoreMatcher(descriptor.Settings.IgnoreRules);
-                    scanner = new Scanner(descriptor.Path, index, keys, ownDevice, ignore: ignore,
-                        journal: diagnostics, settings: descriptor.Settings);
                     transport = new TransportFolder(descriptor.Path, index, keys, ownDevice, descriptor.Settings,
                         timeProvider: timeProvider, journal: diagnostics, uploadThrottle: uploadThrottle,
                         downloadThrottle: downloadThrottle, ignore: ignore);
+                    scanner = transport.Scanner;
                     await transport.RecoverBeforeExternalScanAsync(cancellationToken).ConfigureAwait(false);
                     registration = status.RegisterFolder(transport, scanner);
                     folders.Add(new(index, keys, scanner, transport, registration, descriptor.Settings, descriptor.Path));
@@ -187,7 +186,6 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                 {
                     registration?.Dispose();
                     if (transport is not null) await transport.DisposeAsync().ConfigureAwait(false);
-                    scanner?.Dispose();
                     if (index is not null) await index.DisposeAsync().ConfigureAwait(false);
                     keys?.Dispose();
                 }
@@ -656,11 +654,10 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             keys ??= await state.ReadFolderKeysAsync(descriptor.Id, actorSid, cancellationToken).ConfigureAwait(false);
             if (!keys.CanRead) throw new InvalidOperationException("Encrypted-only folders require the opaque engine.");
             var ignore = new IgnoreMatcher(descriptor.Settings.IgnoreRules);
-            scanner = new Scanner(descriptor.Path, index, keys, deviceId, ignore: ignore,
-                journal: diagnostics, settings: descriptor.Settings);
             transport = new TransportFolder(descriptor.Path, index, keys, deviceId, descriptor.Settings,
                 timeProvider: null, journal: diagnostics, uploadThrottle: uploadThrottle,
                 downloadThrottle: downloadThrottle, ignore: ignore);
+            scanner = transport.Scanner;
             await transport.RecoverBeforeExternalScanAsync(cancellationToken).ConfigureAwait(false);
             registration = status.RegisterFolder(transport, scanner);
             var result = new FolderRuntime(index, keys, scanner, transport, registration, descriptor.Settings, descriptor.Path);
@@ -671,7 +668,6 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         {
             registration?.Dispose();
             if (transport is not null) await transport.DisposeAsync().ConfigureAwait(false);
-            scanner?.Dispose();
             if (index is not null) await index.DisposeAsync().ConfigureAwait(false);
             keys?.Dispose();
         }
@@ -734,7 +730,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
     private void StartFolderScheduler(FolderRuntime folder)
     {
         var stop = CancellationTokenSource.CreateLinkedTokenSource(stopping.Token);
-        var scheduler = new RescanScheduler([new(folder.Scanner, folder.Interval)], journal: diagnostics);
+        var scheduler = new RescanScheduler([new(folder.Scanner, folder.Interval, Coordinator: folder.Transport)], journal: diagnostics);
         Task task = scheduler.RunAsync(stop.Token);
         folderSchedulers.Add(folder, (stop, task));
         _ = ObserveComponentAsync(task, "service.folder_scheduler_stopped", stop.Token);
@@ -819,9 +815,11 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             foreach (var folder in SnapshotFolders())
             {
                 var folderTimer = System.Diagnostics.Stopwatch.StartNew();
-                var result = await folder.Scanner.ScanAsync(stopping.Token).ConfigureAwait(false);
+                folder.Transport.RequestScan();
+                var result = await folder.Transport.RunPassAsync(stopping.Token).ConfigureAwait(false);
+                if (result.ScansCompleted == 0) throw new IOException("Resume scan was deferred.");
                 diagnostics?.TryWrite(new("service.resume_scan_complete", reason)
-                    { ItemsVisited = result.Enumerated, ItemsDeferred = result.ProblemCount,
+                    { ItemsVisited = result.ScannedEntries, ItemsDeferred = result.ScanProblems,
                         ElapsedMilliseconds = folderTimer.Elapsed.TotalMilliseconds });
             }
         }
@@ -892,7 +890,6 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         {
             registration.Dispose();
             await Transport.DisposeAsync().ConfigureAwait(false);
-            Scanner.Dispose();
             await Index.DisposeAsync().ConfigureAwait(false);
             Keys.Dispose();
         }

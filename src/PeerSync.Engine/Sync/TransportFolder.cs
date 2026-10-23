@@ -7,6 +7,7 @@ using PeerSync.Core.Settings;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Hashing;
+using PeerSync.Engine.Scanning;
 using PeerSync.Net;
 using PeerSync.Protocol.Handshake;
 using PeerSync.Storage.FolderDb;
@@ -83,7 +84,9 @@ public sealed class TransportFolder : IAsyncDisposable
     }
     internal Task RecoverBeforeExternalScanAsync(CancellationToken cancellationToken = default)
     { RequireOpen(); return puller.RecoverBeforeExternalScanAsync(cancellationToken); }
+    internal Scanner Scanner { get { RequireOpen(); return puller.Scanner; } }
     public void RequestScan() { RequireOpen(); puller.RequestScan(); }
+    internal void RequestWatcherScan(WatchBatch batch) { RequireOpen(); puller.RequestWatcherScan(batch); }
     internal void RecordIndexPush(string eventName, long targetSequence, Guid? sessionId = null, Exception? error = null)
         => puller.RecordIndexPush(eventName, targetSequence, sessionId, error);
     public byte[] FolderId { get { RequireOpen(); return folderId.ToArray(); } }

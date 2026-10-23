@@ -435,15 +435,20 @@ public sealed class InstalledFolderHostTests
             await using (var host = await InstalledFolderHost.StartForTestAsync(statePath, deviceId, actorSid, status,
                 journal, TestContext.Current.CancellationToken))
             {
+                var folder = host.ResolveFolder(Convert.ToHexString(keys.FolderId()));
+                ReferenceEquals(folder.Scanner, folder.Transport.Scanner).ShouldBeTrue();
                 var deadline = DateTime.UtcNow.AddSeconds(15);
                 bool scanCompleted = false;
                 while (DateTime.UtcNow < deadline && !scanCompleted)
                 {
                     string journalFile = Path.Combine(logPath, "debug.jsonl");
-                    scanCompleted = File.Exists(journalFile) && File.ReadAllText(journalFile).Contains("\"eventName\":\"scan.complete\"", StringComparison.Ordinal);
+                    scanCompleted = File.Exists(journalFile) && ReadDiagnosticLog(journalFile).Contains("\"eventName\":\"scan.complete\"", StringComparison.Ordinal);
                     if (!scanCompleted) await Task.Delay(100, TestContext.Current.CancellationToken);
                 }
                 scanCompleted.ShouldBeTrue("the service scheduler should complete its startup scan");
+                string events = ReadDiagnosticLog(Path.Combine(logPath, "debug.jsonl"));
+                events.ShouldContain("scheduler.pass_start");
+                events.ShouldNotContain("scheduler.scan_start");
                 status.ReadStatus().ProductionSyncAvailable.ShouldBeFalse();
             }
         }

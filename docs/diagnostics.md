@@ -285,7 +285,9 @@ restarting or modifying the files.
 | `directory.publication_retry` | `errorCode` starts with the failing stage, such as `parent-roots`, `history` or `commit`, followed by the exception category or `pending`. Inspect native error and retry delay. |
 | `puller.publication_scan_deferred` | A full native scan is being shared across consecutive live-file batches. `itemsDeferred` is the installed file count awaiting a parent-snapshot scan; `retryInMs` is the remaining five-minute ceiling. |
 | `puller.publication_scan_flushed` | A completed scan caught up with those installed files. `itemsChanged` is the coalesced count and `elapsedMs` is its age. A missing flush after a deferred event warrants inspection of later scan/retry events. |
-| `puller.startup_recovery_complete`, `puller.startup_recovery_failed` | The installed folder drained pending native apply state before its independent scanner started. The completion event counts recovered intents; a failure records only exception and native-error categories and keeps the folder unavailable. |
+| `puller.own_write_watch_coalesced` | A watcher batch contains only paths recently written by this folder's remote-file coordinator. The pass still runs, but it shares the pending publication scan; `itemsDeferred` is the number of watcher paths. Unrelated paths and overflow request a scan immediately. |
+| `scheduler.pass_start`, `scheduler.pass_complete` | The installed folder scheduler ran the shared transport coordinator, which owns recovery, native scanning, needed-work repair and publication. Completion reports scanned entries, applied work and deferred/problem counts. Direct scanner-only hosts retain `scheduler.scan_start`. |
+| `puller.startup_recovery_complete`, `puller.startup_recovery_failed` | The installed folder drained pending native apply state before exposing its coordinator-owned scanner. The completion event counts recovered intents; a failure records only exception and native-error categories and keeps the folder unavailable. |
 
 These events intentionally omit file paths, content hashes, keys and signed
 records. Counts and session IDs support comparison without disclosing folder
