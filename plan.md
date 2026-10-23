@@ -2360,12 +2360,13 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
   - Done when: the `Relay.Pipe` gRPC stream is spliced as in 10.2. Limits apply: 2 MB/s per device, a total cap below the server uplink, sessions per device, and a 5-minute idle timeout.
 - [ ] **P4.1.5 Abuse controls, bootstrap file and observability**
   - Done when: ASP.NET Core rate limiting is partitioned by IP and DeviceId, with at most 500 folders per device. `/.well-known/peersync.json` is served. `/healthz` responds. OpenTelemetry metrics and the Event Log work. Logs hold no FolderIds.
+  - Local [central diagnostic verification](docs/verification/P4-probe-correlation-2026-10-23.md) now exercises the real HTTP limiter's 120-token burst, 429 responses, a bounded warning and a sanitized ZIP. Required hosted/deployed observability and Gate P4 evidence remain open.
 - [ ] **P4.1.6 `installer/PeerSync.Rendezvous.iss`**
   - Done when: it installs the service under `NT SERVICE\PeerSyncRendezvous`, adds firewall rules for TCP and UDP 99, and upgrades in place.
 
 - [ ] **P4.1.7 Central deployment diagnostics** (`PeerSync.Rendezvous/Diagnostics/`, `docs/diagnostics.md`)
   - Done when: server debug events correlate authentication, presence, introductions, relay joins/leaves, quota/timeout and transport errors with client sessions; health and environment checks distinguish TCP/UDP failures. Central and second-PC bundles diagnose a forced relay failure on LAN and WAN. No FolderIds, keys or plaintext are logged; IP retention stays at most 24 hours.
-  - In progress: `psp probe` sends one correlation ID over HTTP/2 and HTTP/3, reports bounded per-leg transport errors and confirms an echoed ID; the server writes that ID on each reached probe event. Authenticated tracker failure and relay join rejection now write bounded events, including session ID when issued. [Local verification](docs/verification/P4-probe-correlation-2026-10-23.md) includes collected central ZIPs for probe/tracker rejection and a certificate-bound relay failure; physical LAN/WAN forced-relay bundles remain required.
+  - In progress: `psp probe` sends one correlation ID over HTTP/2 and HTTP/3, reports bounded per-leg transport errors and confirms an echoed ID; the server writes that ID on each reached probe event. Authenticated tracker failure, relay join rejection and HTTP 429 now write bounded events, including session ID when issued. [Local verification](docs/verification/P4-probe-correlation-2026-10-23.md) includes collected central ZIPs for probe/tracker rejection, a certificate-bound relay failure and rate-limit denial; physical LAN/WAN forced-relay bundles remain required.
 
 ### 10.1 Code: Kestrel on port 99 (P4.1.1)
 

@@ -226,6 +226,50 @@ public sealed class RendezvousHostTests
         bundleLog.ShouldNotContain("\"remoteAddress\"");
     }
 
+    [Fact]
+    public async Task RateLimitedHttpRequestIsRecordedForCentralDiagnosis()
+    {
+        using RSA serverKey = RSA.Create(2048);
+        using X509Certificate2 serverCertificate = ServerCertificate(serverKey);
+        int port = RendezvousTestPort.Allocate();
+        string origin = $"https://127.0.0.1:{port}";
+        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-rate-limit",
+            Guid.NewGuid().ToString("N")));
+        await using WebApplication app = RendezvousHost.Build(
+            ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
+                "--Rendezvous:LogDirectory=" + logs], serverCertificate, IPAddress.Loopback);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        var rejected = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
+        app.Services.GetRequiredService<DiagnosticJournal>().EntryWritten += (entry, _) =>
+        {
+            if (entry.Event == "rendezvous.http_rate_limited") rejected.Enqueue(entry);
+        };
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        using var handler = Handler(serverCertificate);
+        using var client = new HttpClient(handler);
+        for (int i = 0; i < 123; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, origin + "/healthz")
+            { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+            response.StatusCode.ShouldBe(i < 120 ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests);
+        }
+        rejected.Count.ShouldBe(1);
+        DiagnosticEvent eventData = rejected.Single();
+        eventData.ErrorCode.ShouldBe("http-429");
+        eventData.Transport.ShouldBe(DiagnosticTransport.Http2);
+        eventData.RemoteAddress.ShouldBe(IPAddress.Loopback);
+        string bundle = Path.Combine(Path.GetDirectoryName(logs)!, "rate-limit-" + Guid.NewGuid().ToString("N") + ".zip");
+        DiagnosticBundleCollector.Collect(logs, bundle);
+        using ZipArchive archive = ZipFile.OpenRead(bundle);
+        using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
+        string bundleLog = reader.ReadToEnd();
+        bundleLog.ShouldContain("rendezvous.http_rate_limited");
+        bundleLog.ShouldContain("http-429");
+        bundleLog.ShouldNotContain("\"remoteAddress\"");
+    }
+
     private static GrpcChannel Channel(string origin, SocketsHttpHandler handler)
         => GrpcChannel.ForAddress(origin, new GrpcChannelOptions
         { HttpHandler = handler, HttpVersion = HttpVersion.Version20,

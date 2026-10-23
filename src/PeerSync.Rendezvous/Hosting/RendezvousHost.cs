@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -67,10 +68,25 @@ internal static class RendezvousHost
             "PeerSync.Rendezvous", "logs");
         builder.Services.AddSingleton(new DiagnosticJournal(logs, "rendezvous", options.DebugLogging));
         var ipRateKeys = new EphemeralIpRateKey();
+        var rejectionLogGate = new RejectionLogGate();
         builder.Services.AddSingleton(ipRateKeys);
         builder.Services.AddRateLimiter(limits =>
         {
             limits.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            limits.OnRejected = (rejection, _) =>
+            {
+                HttpContext context = rejection.HttpContext;
+                RendezvousMetrics.RequestsRateLimited.Add(1);
+                if (rejectionLogGate.TryEnter())
+                    context.RequestServices.GetRequiredService<DiagnosticJournal>().TryWrite(
+                        new("rendezvous.http_rate_limited", "http")
+                        {
+                            Level = DiagnosticLevel.Warning, ErrorCode = "http-429", Transport = Transport(context),
+                            RemoteAddress = context.Connection.RemoteIpAddress,
+                            RemotePort = context.Connection.RemotePort,
+                        });
+                return ValueTask.CompletedTask;
+            };
             limits.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 RateLimitPartition.GetTokenBucketLimiter(
                 ipRateKeys.For(context.Connection.RemoteIpAddress), _ => new TokenBucketRateLimiterOptions
@@ -176,4 +192,17 @@ internal static class RendezvousHost
             "HTTP/2" => DiagnosticTransport.Http2,
             _ => DiagnosticTransport.Tcp,
         };
+
+    private sealed class RejectionLogGate
+    {
+        private long lastTicks = Stopwatch.GetTimestamp() - 5 * Stopwatch.Frequency;
+
+        internal bool TryEnter()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Volatile.Read(ref lastTicks);
+            return now - previous >= 5 * Stopwatch.Frequency
+                && Interlocked.CompareExchange(ref lastTicks, now, previous) == previous;
+        }
+    }
 }

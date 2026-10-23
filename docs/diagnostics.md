@@ -67,7 +67,10 @@ The server writes structured events to
 `C:\ProgramData\PeerSync.Rendezvous\logs` with debug events enabled by default.
 It records startup, HTTP/2 or HTTP/3 probes, authentication rejection,
 presence updates, punch introductions, relay joins/leaves, rate limits and
-session close. An authenticated tracker rejection or initial-announcement
+session close. A framework-level HTTP 429 increments the rate-limit counter
+and writes a sampled `rendezvous.http_rate_limited` warning at most once per
+five seconds per server process, with the request protocol and observed endpoint;
+the default bundle removes the endpoint. An authenticated tracker rejection or initial-announcement
 deadline writes `rendezvous.session_failed` under the ID sent in the stream's
 first observed-address response. Relay token/join rejection writes
 `rendezvous.relay_join_rejected` with a fixed code and without the token;
