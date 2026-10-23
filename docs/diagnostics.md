@@ -264,6 +264,7 @@ restarting or modifying the files.
 | `apply.case-route-failover` | Another known peer supplied verified content. The durable hint can be reused on later attempts. |
 | `directory.metadata_deferred` | Snapshot metadata recovery could not advance. Inspect the exception category and native error; missing metadata is never an empty subtree. |
 | `directory.publication_pending` | A bounded child capture needs more passes; visited/changed counts show progress. |
+| `directory.publication_time_prepare`, `_capture`, `_rebase`, `_parent_roots`, `_publication`, `_commit` | Debug-only milliseconds for one queued directory stage, correlated by its session ID. `itemsVisited` reports captured or proven members where relevant. The event name identifies the stage; no directory path is logged. |
 | `directory.queue_unchanged` | A queued directory matched its current signed snapshot and was released without a new local version. Repeated occurrences during a large source publication can indicate rescans restaging completed siblings. |
 | `directory.signed_leaf_cache_hit` | A local-only leaf with a stale global epoch still matched its exact signed child input. `itemsVisited` is its child count; no directory name or hash is logged. |
 | `directory.rebase_pending` | A received original subtree still needs causal verification. `itemsDeferred` distinguishes waiting from budget continuation. |
