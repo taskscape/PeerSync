@@ -6,6 +6,8 @@ work. Its folder database had 181 completed directory caches, 180 of whose
 directories at one read-only observation. A later complete scan temporarily
 restaged already-published siblings even though their direct children had not
 changed. This suggested an opportunity to avoid some global epoch invalidation.
+A later read-only sample showed 210 completed and 790 queued directories:
+the backlog was decreasing, so this observation did not establish a loop.
 
 An experimental scanner shortcut compared the cached signed-child manifest
 against current indexed children when only the global epoch differed. It also

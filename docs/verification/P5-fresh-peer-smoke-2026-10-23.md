@@ -43,3 +43,15 @@ evidence is `artifacts/scale/p5-peer-20261022T235636-f8781ebd002b43d7a6ca93ffdf0
 The already-running 12-hour million-file process started before this wrapper
 edit, so its source and destination diagnostic journals remain the reliable
 live evidence until the wrapper exits.
+
+The progress report now includes path-only counts of source and destination
+directory publications and the pass's visited, deferred, recovered and scan
+counts. This makes a shrinking publication backlog distinguishable from a
+repeated scan without reading raw diagnostic files. A separate-output build
+passed with zero warnings while the million-file process kept its original
+binary. Its 1,000-file retained-corpus control passed: 1,000 native bytes
+verified, 1,001 peer rows, four convergence rounds and 39.870 seconds. The
+new fields showed one pending destination directory at convergence round zero
+and none at completion. The control log is retained locally at
+`artifacts/scale/progress-runner-smoke.log`; the running million-file binary
+predates these fields and remains the actual gate candidate.

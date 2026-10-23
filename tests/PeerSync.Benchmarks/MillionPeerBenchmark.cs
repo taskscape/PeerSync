@@ -120,8 +120,24 @@ internal static class MillionPeerBenchmark
         {
             target = "P5 million-file fresh peer", phase, number, seconds = elapsed.Elapsed.TotalSeconds,
             sourceHighWater = source.ReadIndexHighWater(), peerHighWater = peer.ReadIndexHighWater(),
-            peerRows = peer.LocalFiles.Count(), needed = peer.Needed.Count(), pass.Applied, pass.Failed, pass.MoreWork
+            sourcePendingPublications = CountPendingPublications(source),
+            peerPendingPublications = CountPendingPublications(peer),
+            peerRows = peer.LocalFiles.Count(), needed = peer.Needed.Count(),
+            pass.Visited, pass.Applied, pass.Deferred, pass.Failed, pass.Recovered, pass.Scans, pass.MoreWork
         }));
+
+    private static int CountPendingPublications(FolderIndex index)
+    {
+        int count = 0;
+        string? cursor = null;
+        for (;;)
+        {
+            IReadOnlyList<string> paths = index.ReadDirectoryPublicationPaths(cursor);
+            count += paths.Count;
+            if (paths.Count < 1000) return count;
+            cursor = paths[^1];
+        }
+    }
 
     private static int VerifyNative(string peerRoot, int expectedFiles, Stopwatch elapsed, CancellationToken token)
     {
