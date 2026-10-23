@@ -62,3 +62,12 @@ the VM-only test trust/hosts mapping documented in the
 [two-guest central and relay check](P4-two-guest-central-relay-2026-10-23.md).
 They do not prove physical two-PC sync, provider TCP/UDP 99 admission, home or
 mobile NAT behavior, WAN relay caps, 72-hour soaks or release signing.
+
+A local transfer kit at `artifacts/deploy/PeerSync-P5-field-kit-1.0.16.0.zip`
+contains the two exact signed development setups, their public `.cer` and
+manifests, the scoped firewall helper, and the three operator guides. The
+builder checked both manifest/package hashes, source revision and matching
+public certificate before creating the ZIP; `python -m zipfile -t` passed.
+Its SHA-256 is
+`94D6268FBBE3BDC4CB5C2211F8997CD3698E80399B770FD39EC9CB9C27F07F3E`.
+The kit is local and ignored by Git; it has not been published as a release.
