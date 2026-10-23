@@ -58,7 +58,11 @@ completed in 256.184 seconds for 1,000,000 real files; the unchanged walk
 kept all 1,001,000 rows and took 8.115 seconds without rehash or update. The
 30-second idle sample measured 0.239% CPU and 137,539,584 working-set bytes,
 so the runner's idle-memory target passed. Peak working set was 2,547,621,888
-bytes and remains a separate limitation. Source publication and fresh-peer
-convergence are still running. The 10,000-file control and local tests do not
-meet the million-file transfer target. Physical transport and the P5 release
-gate remain open.
+bytes and remains a separate limitation. The first periodic source rescan then
+finished in 14.686 seconds, with zero changed or hashed files and 54
+`directory.signed_leaf_cache_hit` events in one scan session. A read-only
+snapshot immediately afterward found 57 completed publication caches and 943
+queued directories, exactly the original 1,000: the scan had not restaged the
+completed siblings. Source publication and fresh-peer convergence are still
+running. The 10,000-file control and local tests do not meet the million-file
+transfer target. Physical transport and the P5 release gate remain open.
