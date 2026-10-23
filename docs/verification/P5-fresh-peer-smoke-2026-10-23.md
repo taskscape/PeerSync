@@ -55,3 +55,26 @@ new fields showed one pending destination directory at convergence round zero
 and none at completion. The control log is retained locally at
 `artifacts/scale/progress-runner-smoke.log`; the running million-file binary
 predates these fields and remains the actual gate candidate.
+
+## Whole-run safety ceiling
+
+The active million-file process still has its original 12-hour whole-run
+ceiling. Source publication had completed 610 of 999 queued directories after
+about 2.1 hours; the destination had not begun. P5.3 limits first-index time
+but sets no full fresh-peer convergence-time target, so a whole-run ceiling
+must not turn slow correct convergence into a false engine failure. Future
+runner builds now use a finite 48-hour safety ceiling and include
+`timeoutHours` in the terminal JSON. This does not change the active process,
+remove a correctness assertion or claim a million-file pass.
+
+A separate Release build passed with zero warnings. Its direct 1,000-file
+control converged in four rounds and 40.583 seconds, verified all 1,000 native
+bytes/pathnames, counted 1,001 destination rows, and returned exit 0 with
+`timeoutHours=48`. The retained output is
+`artifacts/scale/p5-peer-timeout-control-20261023.log`. The active million-file
+run remains the primary current candidate until it completes or reaches its
+own 12-hour guard; any new million-file run must record its own binary and
+source provenance. The control EXE SHA-256 is
+`FDB5B1D045CE4B32C2D38CE7F13F31C6D1C56232F26D856CE7EF234C4913F357`;
+the still-running deployed benchmark EXE remains
+`F2B88CF90C96770531056E6EBBE3564B4DBE591B9A28C8324BC870F6EEA1F14A`.

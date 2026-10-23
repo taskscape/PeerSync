@@ -13,6 +13,11 @@ namespace PeerSync.Benchmarks;
 /// peer and its database are intentionally retained for failure inspection.</summary>
 internal static class MillionPeerBenchmark
 {
+    // P5.3 sets an indexing-time target, but no fresh-peer convergence-time
+    // target. Keep a finite stuck-run guard without making the full million-
+    // file transfer fail merely because bounded source publication took hours.
+    private const int MaximumRunHours = 48;
+
     public static async Task<bool> SyncAsync(string fixture, string sourceRoot, FolderIndex sourceIndex,
         FolderKeys keys, int expectedFiles)
     {
@@ -26,9 +31,9 @@ internal static class MillionPeerBenchmark
         var elapsed = Stopwatch.StartNew();
         string phase = "open";
         int round = 0;
-        // Source publication alone takes thousands of bounded 1,000-member
-        // passes at million-file scale; this is a ceiling, not a target time.
-        using var deadline = new CancellationTokenSource(TimeSpan.FromHours(12));
+        // Source publication alone takes about a thousand bounded 1,000-member
+        // passes at million-file scale. This is a safety ceiling, not a target.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromHours(MaximumRunHours));
         using var heartbeatStop = new CancellationTokenSource();
         Task heartbeat = HeartbeatAsync(() => phase, () => round, elapsed, heartbeatStop.Token);
         try
@@ -89,6 +94,7 @@ internal static class MillionPeerBenchmark
             {
                 target = "P5 million-file fresh peer", expectedFiles, verifiedFiles = verified,
                 peerRows, rounds = round + 1, seconds = elapsed.Elapsed.TotalSeconds,
+                timeoutHours = MaximumRunHours,
                 peerRoot, peerDatabase, peerLogs, correct,
                 scope = "two production TransportFolder coordinators over the trusted in-memory test transport; every fresh-peer native byte and pathname checked"
             }));
@@ -100,6 +106,7 @@ internal static class MillionPeerBenchmark
             {
                 target = "P5 million-file fresh peer", status = "failed", phase,
                 rounds = round, seconds = elapsed.Elapsed.TotalSeconds,
+                timeoutHours = MaximumRunHours,
                 peerRoot, peerDatabase, peerLogs, error = error.ToString()
             }));
             return false;
