@@ -102,6 +102,11 @@ On both PCs run `psp diagnostics --logs <service-log-directory> --output
 UTC timestamps and session IDs: `tracker.session_connected`,
 `tracker.peer_list_received`, `tracker.relay_offer_received`,
 `rendezvous.relay_joined`, `service.peer_connected`, and sync-pass events.
+`tracker.outgoing_full` means the bounded tracker stream did not accept a
+relay or punch request; its `errorCode` names only the request kind. The
+connection attempt fails promptly and the maintainer can retry. Folder and
+address changes are coalesced into the latest announcement once the writer
+can send again. A failed writer ends its tracker session and reconnects.
 The default bundles omit network addresses; add `--include-network-addresses`
 only when routing details are needed and review the ZIP before sharing it.
 Diagnostics expire IP-bearing journal files within 24 hours; the collector

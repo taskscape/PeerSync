@@ -2489,6 +2489,7 @@ await tls.AuthenticateAsClientAsync(PeerTls.ClientOptions(deviceCert), ct);
 
 - [ ] **P4.2.1 Tracker client** (`PeerSync.Net/Rendezvous/TrackerClient.cs`)
   - Done when: one `Rendezvous.Session` stream per configured server uses the device certificate for mutual TLS. Announces are sent on start, on folder changes and every 5 minutes. Peer lists feed the connection manager. Reconnects back off up to 5 minutes. All servers in `RendezvousServers` are used.
+  - Local reliability progress: critical relay/punch requests now report a full outbound stream queue instead of being silently dropped, refresh signals retain only the latest announcement, and a failed outbound writer ends the session so it can reconnect. The [tracker queue verification](docs/verification/P4-tracker-outbound-queue-2026-10-23.md) records 57 Net and 17 rendezvous local passes, including the loopback mTLS tracker/relay flow; the [diagnostics guide](docs/diagnostics.md) explains the bounded failure event. Physical server and WAN operation remain open.
 - [ ] **P4.2.2 Port mapping** (`PeerSync.Net/Nat/PortMapper.cs`)
   - Done when: UPnP or NAT-PMP maps the listening port for TCP and UDP, renews every 30 minutes, removes the mapping on stop, and degrades silently when no gateway answers.
   - Code: 10.3.
