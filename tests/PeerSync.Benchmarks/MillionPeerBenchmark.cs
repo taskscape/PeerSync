@@ -72,9 +72,14 @@ internal static class MillionPeerBenchmark
                 deadline.Token.ThrowIfCancellationRequested();
                 await sourceLink.SynchronizeAsync(maxPages: 8, cancellationToken: deadline.Token).ConfigureAwait(false);
                 await peerLink.SynchronizeAsync(maxPages: 8, cancellationToken: deadline.Token).ConfigureAwait(false);
-                PullPassResult sourcePass = await source.RunPassAsync(deadline.Token).ConfigureAwait(false);
-                PullPassResult peerPass = await peer.RunPassAsync(deadline.Token).ConfigureAwait(false);
-                if (round % 10 == 0) Report(phase, elapsed, round, sourceIndex, peerIndex, peerPass);
+                // A deployed source continues its publication/reconciliation
+                // loop while the destination installs files. The two indexes
+                // and roots are independent; serializing these passes in the
+                // harness imposed a delay that real peers do not have.
+                PullPassResult[] passes = await Task.WhenAll(
+                    source.RunPassAsync(deadline.Token), peer.RunPassAsync(deadline.Token)).ConfigureAwait(false);
+                PullPassResult sourcePass = passes[0], peerPass = passes[1];
+                if (round % 10 == 0) Report(phase, elapsed, round, sourceIndex, peerIndex, peerPass, sourcePass);
                 long high = peerIndex.ReadIndexHighWater();
                 bool ready = high == lastHigh && Settled(sourceIndex, sourcePass) && Settled(peerIndex, peerPass)
                     && peerIndex.LocalFiles.Count() == expectedFiles + (expectedFiles + 999) / 1000;
@@ -96,7 +101,7 @@ internal static class MillionPeerBenchmark
                 peerRows, rounds = round + 1, seconds = elapsed.Elapsed.TotalSeconds,
                 timeoutHours = MaximumRunHours,
                 peerRoot, peerDatabase, peerLogs, correct,
-                scope = "two production TransportFolder coordinators over the trusted in-memory test transport; every fresh-peer native byte and pathname checked"
+                scope = "concurrent production TransportFolder coordinators over the trusted in-memory test transport; every fresh-peer native byte and pathname checked"
             }));
             return correct;
         }
@@ -123,14 +128,16 @@ internal static class MillionPeerBenchmark
         && index.ReadPendingCasePreservations().Count == 0 && !index.HasPendingDirectoryPublications();
 
     private static void Report(string phase, Stopwatch elapsed, int number, FolderIndex source, FolderIndex peer,
-        PullPassResult pass) => Console.WriteLine(JsonSerializer.Serialize(new
+        PullPassResult pass, PullPassResult? sourcePass = null) => Console.WriteLine(JsonSerializer.Serialize(new
         {
             target = "P5 million-file fresh peer", phase, number, seconds = elapsed.Elapsed.TotalSeconds,
             sourceHighWater = source.ReadIndexHighWater(), peerHighWater = peer.ReadIndexHighWater(),
             sourcePendingPublications = CountPendingPublications(source),
             peerPendingPublications = CountPendingPublications(peer),
             peerRows = peer.LocalFiles.Count(), needed = peer.Needed.Count(),
-            pass.Visited, pass.Applied, pass.Deferred, pass.Failed, pass.Recovered, pass.Scans, pass.MoreWork
+            pass.Visited, pass.Applied, pass.Deferred, pass.Failed, pass.Recovered, pass.Scans, pass.MoreWork,
+            sourceVisited = sourcePass?.Visited, sourceApplied = sourcePass?.Applied,
+            sourceScans = sourcePass?.Scans, sourceMoreWork = sourcePass?.MoreWork
         }));
 
     private static int CountPendingPublications(FolderIndex index)
