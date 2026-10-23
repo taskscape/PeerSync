@@ -26,11 +26,16 @@ public sealed class PullWorkTests : IDisposable
         await using var index = await PrepareAsync();
         await index.Needed.UpsertAsync([
             Row("z/child", 0), Row("z", 0), Row("a", size: 30, mtime: 20), Row("b", size: 10, mtime: 30), Row("c", size: 20, mtime: 10),
-            Row("delete-file", 2), Row("delete-dir", 3), Row("delete-dir/child", 3), new("legacy", Peer, 0)
+            Row("delete-file", 2) with { SourceDevice = Hash(9) }, Row("delete-dir", 3) with { SourceDevice = Hash(9) },
+            Row("delete-dir/child", 3) with { SourceDevice = Hash(9) }, new("legacy", Peer, 0)
         ], Token);
         string[] expected = ["Z", "Z/CHILD", first, second, third, "DELETE-FILE", "DELETE-DIR/CHILD", "DELETE-DIR"];
         index.ReadDuePullWork(Root, Now, priority).Select(r => r.PathKey).ShouldBe(expected);
         index.ReadDuePullWork(Root, Now, priority, 3).Select(r => r.PathKey).ShouldBe(expected.Take(3));
+        await index.LocalFiles.UpsertAsync([new LocalFileRow("z", 1, 0, Now, 0, false, Now, null,
+            new Dictionary<ulong, ulong>(), null, new byte[16])], Token);
+        index.ReadScheduledPullWork(Root, Hash(9), Now, priority).Select(r => r.PathKey).ShouldBe(expected);
+        index.ReadScheduledPullWork(Root, Hash(9), Now, priority, 3).Select(r => r.PathKey).ShouldBe(expected.Take(3));
         index.Needed.Find("legacy")!.Work.ShouldBeNull();
     }
 

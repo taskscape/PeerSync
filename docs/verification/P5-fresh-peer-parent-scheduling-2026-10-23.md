@@ -35,3 +35,21 @@ The active `79d4e46` process is intentionally unchanged by this source edit.
 A fresh committed-source million-file run, with its own binary provenance and
 exact native-byte verification, remains required for P5.3. Physical two-PC
 validation and the other open phase gates remain separate.
+
+## Bounded scheduler query follow-up
+
+Scheduled selection now reads stages 0-3 separately, preserving the established
+directory-depth, priority, size/time and deletion order while giving the
+million-row stage-1 default-priority query an index-compatible ordering.
+Read-only `EXPLAIN QUERY PLAN` against the retained peer database reports
+`SEARCH n USING INDEX ix_needed_work (work_stage=?)` for that selection and no
+temporary sort. Next-wake checks for any due work first; when none is due it
+reads future deadlines from `pull_retries` rather than aggregating every
+`needed` row. This is a query-plan observation, not a measured million-file
+speedup or a fresh-peer pass.
+
+After this query change, the local Storage suite passed 305/305, the Engine
+suite passed 1,043/1,043, and the Release solution built with zero warnings
+and errors. The five priority-mode scheduler cases compare scheduled stage
+ordering with the legacy due-work ordering while explicitly making test
+deletions eligible under the remote-range rule.
