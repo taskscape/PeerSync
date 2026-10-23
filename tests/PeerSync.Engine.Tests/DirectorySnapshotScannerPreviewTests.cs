@@ -13,6 +13,55 @@ namespace PeerSync.Engine.Tests;
 public sealed partial class DirectorySnapshotCaptureTests
 {
     [Fact]
+    public async Task LocalOnlyLeafCacheSurvivesUnrelatedPublicationButDetectsChangedSignedChild()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "alpha"));
+        Directory.CreateDirectory(Path.Combine(Root, "beta"));
+        File.WriteAllText(Path.Combine(Root, "alpha", "file"), "first");
+        File.WriteAllText(Path.Combine(Root, "beta", "file"), "second");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        (await PreviewScan(index)).Problems.ShouldBeEmpty();
+        (await Worker(index).RunAsync(token: Token)).ChangedPaths.ShouldContain("alpha");
+        index.ReadDirectoryPublicationCache("alpha")!.InputEpoch.ShouldBeLessThan(index.ReadDirectoryCaptureEpoch());
+        long high = index.ReadIndexHighWater();
+
+        string logs = Path.Combine(fixture, "leaf-cache-logs");
+        using (var journal = new PeerSync.Core.Diagnostics.DiagnosticJournal(logs, "leaf-cache", debugEnabled: true))
+        using (var scanner = new Scanner(Root, index, keys, device, journal: journal) { StageDirectorySnapshots = true })
+            (await scanner.ScanAsync(Token)).Updated.ShouldBe(0);
+        index.ReadDirectoryPublication("alpha").ShouldBeNull();
+        index.ReadDirectoryPublication("beta").ShouldBeNull();
+        index.ReadIndexHighWater().ShouldBe(high);
+        string events = File.ReadAllText(Path.Combine(logs, "debug.jsonl"));
+        events.ShouldContain("directory.signed_leaf_cache_hit");
+        events.ShouldNotContain(Root);
+        events.ShouldNotContain("alpha/file");
+
+        File.WriteAllText(Path.Combine(Root, "alpha", "file"), "changed");
+        (await PreviewScan(index)).Updated.ShouldBe(1);
+        index.ReadDirectoryPublication("alpha").ShouldNotBeNull();
+        index.ReadDirectoryPublication("beta").ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task RemoteStateKeepsStaleLeafCacheOnConservativePublicationPath()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "alpha"));
+        Directory.CreateDirectory(Path.Combine(Root, "beta"));
+        File.WriteAllText(Path.Combine(Root, "alpha", "file"), "first");
+        File.WriteAllText(Path.Combine(Root, "beta", "file"), "second");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        await PreviewScan(index); await Worker(index).RunAsync(token: Token);
+        index.ReadDirectoryPublicationCache("alpha")!.InputEpoch.ShouldBeLessThan(index.ReadDirectoryCaptureEpoch());
+        var existing = index.LocalFiles.Find("beta/file")!;
+        byte[] remote = new byte[32]; remote[0] = 77;
+        await index.RemoteFiles.UpsertAsync([new(remote, existing.Path, existing.Vector, existing.Record!)], Token);
+
+        await PreviewScan(index);
+        index.ReadDirectoryPublication("alpha").ShouldNotBeNull();
+    }
+
+    [Fact]
     public async Task ScannerPreviewPublishesFilesFirstAndNestedSnapshotsConvergeWithoutMtimeFeedback()
     {
         Directory.CreateDirectory(Path.Combine(Root, "topic", "nested")); File.WriteAllText(Path.Combine(Root, "topic", "nested", "a"), "bytes");

@@ -1,5 +1,9 @@
+using System.Buffers.Binary;
+using System.Text;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Paths;
 using PeerSync.Core.Sync;
+using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
 using PeerSync.Storage.FolderDb;
 
@@ -42,6 +46,9 @@ public sealed partial class Scanner
             cursor = paths[^1]; if (paths.Count < 1000) break;
         }
         if (!keys.CanWrite) return;
+        // Keep the common remote-peer path bounded even when its remote table
+        // contains a very large corpus. A late arrival is checked again below.
+        bool hasExternalState = index.RemoteFiles.Count() != 0 || index.Needed.Count() != 0;
         var children = entries.Where(pair => !pair.Value.Unsyncable && !Under(pair.Key, protectedPrefixes))
             .GroupBy(pair => ParentKey(pair.Key), StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.Select(pair => pair.Key).Order(StringComparer.Ordinal), StringComparer.Ordinal);
         foreach (var pair in entries.Where(pair => pair.Value.Native.IsDirectory && !pair.Value.Unsyncable).OrderByDescending(pair => pair.Key.Count(value => value == '/')))
@@ -93,11 +100,60 @@ public sealed partial class Scanner
         bool CacheMatchesIdentity(LocalFileRow row, byte[] identity, WalkEntry observed, DirectoryChildInventory? inventory, long? epoch)
         {
             var cache = index.ReadDirectoryPublicationCache(row.Path);
-            return cache is not null && row.Record is not null && cache.RootId.AsSpan().SequenceEqual(identity)
-                && cache.NativeId.AsSpan().SequenceEqual(observed.Native.FileId)
-                && cache.RecordSourceId.AsSpan().SequenceEqual(CaseConflictPolicy.SourceId(VersionView.Open(row.Record, keys, device)))
-                && (epoch is null || cache.InputEpoch == epoch)
-                && (inventory is null || cache.MemberCount == inventory.Count && cache.ExpectedKeysHash.AsSpan().SequenceEqual(inventory.Hash));
+            if (cache is null || row.Record is null || !cache.RootId.AsSpan().SequenceEqual(identity)
+                || !cache.NativeId.AsSpan().SequenceEqual(observed.Native.FileId)) return false;
+            var currentVersion = VersionView.Open(row.Record, keys, device);
+            if (!cache.RecordSourceId.AsSpan().SequenceEqual(CaseConflictPolicy.SourceId(currentVersion))) return false;
+            if (inventory is null || epoch is null) return true;
+            if (cache.MemberCount != inventory.Count || !cache.ExpectedKeysHash.AsSpan().SequenceEqual(inventory.Hash)) return false;
+            if (cache.InputEpoch == epoch) return true;
+            // A global epoch change may come from another directory. Only a
+            // local-only leaf can safely validate its exact signed input here;
+            // remote and nested causal work keeps the conservative restage.
+            if (!currentVersion.ModifiedBy.SequenceEqual(device)
+                || currentVersion.Vector.Keys.Any(source => source != deviceShort)
+                || hasExternalState
+                || index.HasPendingChildDirectoryPublication(row.Path)
+                || children.TryGetValue(PathRules.Key(row.Path), out var names)
+                    && names.Any(name => entries[name].Native.IsDirectory)) return false;
+            bool validated = SameSignedLeafInput(row.Path, cache.InputHash, cache.MemberCount)
+                && index.ReadDirectoryCaptureEpoch() == epoch
+                && index.RemoteFiles.Count() == 0 && index.Needed.Count() == 0;
+            if (validated) journal?.TryWrite(new("directory.signed_leaf_cache_hit", "directory-scan")
+                { SessionId = scanSession, Level = DiagnosticLevel.Debug, ItemsVisited = cache.MemberCount });
+            return validated;
+        }
+        bool SameSignedLeafInput(string parent, byte[] expectedHash, long expectedCount)
+        {
+            using var digest = Blake3.Hasher.New();
+            digest.Update("PeerSync directory capture input v1"u8);
+            byte[] path = Encoding.UTF8.GetBytes(parent); Span<byte> length = stackalloc byte[4];
+            BinaryPrimitives.WriteInt32LittleEndian(length, path.Length); digest.Update(length); digest.Update(path);
+            string? cursor = null; long count = 0;
+            do
+            {
+                token.ThrowIfCancellationRequested();
+                var batch = index.ReadDirectorySnapshotChildren(parent, cursor);
+                foreach (var child in batch.Rows)
+                {
+                    if (child.Record is null || child.Deleted || child.Type != 0) return false;
+                    var member = VersionView.Open(child.Record, keys, device);
+                    string key = PathRules.Key(member.Path);
+                    if (member.Deleted || member.Type != 0 || ApplyState.Parent(key) != PathRules.Key(parent)
+                        || key != PathRules.Key(child.Path) || child.Size != member.Size
+                        || child.FileHash is null || !member.FileHash.SequenceEqual(child.FileHash)
+                        || !member.ModifiedBy.SequenceEqual(device)
+                        || member.Vector.Keys.Any(source => source != deviceShort)
+                        || cursor is not null && StringComparer.Ordinal.Compare(cursor, key) >= 0) return false;
+                    digest.Update(CaseConflictPolicy.SourceId(member)); cursor = key;
+                    count = checked(count + 1);
+                }
+                if (batch.More && (batch.Rows.Count == 0 || batch.NextKey != cursor)) return false;
+                if (!batch.More) break;
+            } while (true);
+            Span<byte> countBytes = stackalloc byte[8];
+            BinaryPrimitives.WriteInt64LittleEndian(countBytes, count); digest.Update(countBytes);
+            return count == expectedCount && digest.Finalize().AsSpan().SequenceEqual(expectedHash);
         }
         static string ParentKey(string key) { int separator = key.LastIndexOf('/'); return separator < 0 ? "" : key[..separator]; }
         void Log(string kind, Guid session, string reason) => journal?.TryWrite(new("directory." + kind, "directory-scan")
