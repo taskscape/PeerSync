@@ -108,7 +108,26 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                 }
             }
         }
-        catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            diagnostics.TryWrite(new("rendezvous.session_cancelled", "tracker")
+            { SessionId = session.SessionId, Level = DiagnosticLevel.Debug, Transport = Transport(context),
+                ErrorCode = context.CancellationToken.IsCancellationRequested ? "client-cancelled" : "presence-ended" });
+        }
+        catch (RpcException error)
+        {
+            diagnostics.TryWrite(new("rendezvous.session_failed", "tracker")
+            { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
+                ErrorCode = error.StatusCode.ToString(), HResult = error.HResult });
+            throw;
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException)
+        {
+            diagnostics.TryWrite(new("rendezvous.transport_failed", "tracker")
+            { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
+                ErrorCode = error.GetType().Name, HResult = error.HResult });
+            throw;
+        }
         finally
         {
             RendezvousMetrics.ActiveTrackerSessions.Add(-1);
@@ -116,6 +135,13 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
             await linked.CancelAsync().ConfigureAwait(false);
             try { await writer.ConfigureAwait(false); }
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            catch (Exception error) when (error is RpcException or IOException or InvalidOperationException)
+            {
+                diagnostics.TryWrite(new("rendezvous.transport_failed", "tracker")
+                { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
+                    ErrorCode = error is RpcException rpc ? rpc.StatusCode.ToString() : error.GetType().Name,
+                    HResult = error.HResult });
+            }
             session.Lifetime.Dispose();
             diagnostics.TryWrite(new("rendezvous.session_closed", "tracker") { SessionId = session.SessionId });
         }

@@ -60,6 +60,35 @@ public sealed class RelayRegistryTests
     }
 
     [Fact]
+    public async Task RevokedOfferReportsAbortedToWaitingParticipant()
+    {
+        using var registry = new RelayRegistry(new RendezvousOptions());
+        PresenceSession first = Session(1), second = Session(2);
+        registry.TryOffer(first, second).ShouldBeTrue();
+        RelayOffer offer = Offer(first);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<RelayRegistry.RelayJoin> joining = registry.JoinAsync(offer.Token.Memory,
+            first.DeviceId, new TestWriter(), timeout.Token).AsTask();
+        registry.AbortAll();
+        RpcException result = await Should.ThrowAsync<RpcException>(async () => await joining);
+        result.StatusCode.ShouldBe(StatusCode.Aborted);
+    }
+
+    [Fact]
+    public async Task CallerCancellationRemainsCancellationWhileWaitingForPartner()
+    {
+        using var registry = new RelayRegistry(new RendezvousOptions());
+        PresenceSession first = Session(1), second = Session(2);
+        registry.TryOffer(first, second).ShouldBeTrue();
+        RelayOffer offer = Offer(first);
+        using var cancelled = new CancellationTokenSource();
+        Task<RelayRegistry.RelayJoin> joining = registry.JoinAsync(offer.Token.Memory,
+            first.DeviceId, new TestWriter(), cancelled.Token).AsTask();
+        await cancelled.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await joining);
+    }
+
+    [Fact]
     public async Task LowConfiguredRateStillAcceptsOneMaximumSizedChunk()
     {
         using var registry = new RelayRegistry(new RendezvousOptions

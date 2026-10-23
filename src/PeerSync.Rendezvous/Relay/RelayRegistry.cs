@@ -94,6 +94,14 @@ internal sealed class RelayRegistry : IDisposable
             RelayLeg partner = await leg.Partner.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
             return new RelayJoin(ticket, leg, partner);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            bool ended = ticket.Idle.IsCancellationRequested;
+            Leave(ticket);
+            throw new RpcException(new Status(ended ? StatusCode.Aborted : StatusCode.DeadlineExceeded,
+                ended ? "Relay offer ended before both participants joined."
+                    : "Second relay participant did not join in time."));
+        }
         catch
         {
             Leave(ticket);

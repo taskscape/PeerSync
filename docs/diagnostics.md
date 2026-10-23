@@ -67,7 +67,15 @@ The server writes structured events to
 `C:\ProgramData\PeerSync.Rendezvous\logs` with debug events enabled by default.
 It records startup, HTTP/2 or HTTP/3 probes, authentication rejection,
 presence updates, punch introductions, relay joins/leaves, rate limits and
-session close. Application Event Log entries from `PeerSyncRendezvous` contain
+session close. An authenticated tracker rejection or initial-announcement
+deadline writes `rendezvous.session_failed` under the ID sent in the stream's
+first observed-address response. Relay token/join rejection writes
+`rendezvous.relay_join_rejected` with a fixed code and without the token;
+relay forwarding quota failures retain their joined session ID. A probe ID
+belongs only to the two unauthenticated health legs and is separate from any
+later tracker or relay session ID. An offer revoked before both relay participants
+join reports `Aborted`; an unanswered join deadline reports `DeadlineExceeded`.
+Application Event Log entries from `PeerSyncRendezvous` contain
 warning/error event names, operation, session ID and error code. They omit IPs,
 FolderIds, keys, paths and payloads. The configured OTLP endpoint exports
 aggregate counters for tracker/relay sessions, relay bytes, rejected auth,

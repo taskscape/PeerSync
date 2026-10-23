@@ -36,9 +36,12 @@ public sealed class RendezvousHostTests
         await app.StartAsync(TestContext.Current.CancellationToken);
         Guid probeSession = Guid.NewGuid();
         var probes = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
         app.Services.GetRequiredService<DiagnosticJournal>().EntryWritten += (entry, _) =>
         {
             if (entry.Event == "rendezvous.probed") probes.Enqueue(entry);
+            if (entry.Event is "rendezvous.session_failed" or "rendezvous.relay_join_rejected")
+                failures.Enqueue(entry);
         };
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
@@ -101,6 +104,34 @@ public sealed class RendezvousHostTests
         session.ResponseStream.Current.PeerList.FolderId.Length.ShouldBe(32);
         session.ResponseStream.Current.PeerList.Peers.ShouldBeEmpty();
         await session.RequestStream.CompleteAsync();
+
+        using (var invalidSession = new PeerSync.Rendezvous.Contracts.V1.Rendezvous.RendezvousClient(deviceChannel)
+            .Session(cancellationToken: timeout.Token))
+        {
+            (await invalidSession.ResponseStream.MoveNext(timeout.Token)).ShouldBeTrue();
+            Guid rejectedSessionId = new(invalidSession.ResponseStream.Current.ObservedAddress.SessionId.ToByteArray());
+            await invalidSession.RequestStream.WriteAsync(new ClientMessage(), timeout.Token);
+            RpcException invalid = await Should.ThrowAsync<RpcException>(async () =>
+                await invalidSession.ResponseStream.MoveNext(timeout.Token));
+            invalid.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+            DiagnosticEvent trackerFailure = failures.Single(entry => entry.Event == "rendezvous.session_failed");
+            trackerFailure.SessionId.ShouldBe(rejectedSessionId);
+            trackerFailure.ErrorCode.ShouldBe("InvalidArgument");
+            trackerFailure.Transport.ShouldBe(DiagnosticTransport.Http2);
+        }
+
+        using (var invalidRelay = new PeerSync.Rendezvous.Contracts.V1.Relay.RelayClient(deviceChannel)
+            .Pipe(cancellationToken: timeout.Token))
+        {
+            RpcException rejected = await Should.ThrowAsync<RpcException>(async () =>
+                await invalidRelay.ResponseStream.MoveNext(timeout.Token));
+            rejected.StatusCode.ShouldBe(StatusCode.Unauthenticated);
+            DiagnosticEvent relayFailure = failures.Single(entry => entry.Event == "rendezvous.relay_join_rejected");
+            relayFailure.ErrorCode.ShouldBe("missing-or-invalid-token");
+            relayFailure.Transport.ShouldBe(DiagnosticTransport.Http2);
+            relayFailure.RemoteAddress.ShouldBe(IPAddress.Loopback);
+            relayFailure.RemotePort.GetValueOrDefault().ShouldBeGreaterThan(0);
+        }
     }
 
     private static GrpcChannel Channel(string origin, SocketsHttpHandler handler)

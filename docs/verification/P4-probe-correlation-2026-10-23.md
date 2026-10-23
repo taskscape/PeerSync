@@ -12,14 +12,24 @@ Local release verification:
 
 | Check | Result |
 | --- | --- |
-| `dotnet test tests/PeerSync.Rendezvous.Tests/PeerSync.Rendezvous.Tests.csproj -c Release --no-restore` | 13 passed, zero failed |
+| `dotnet test tests/PeerSync.Rendezvous.Tests/PeerSync.Rendezvous.Tests.csproj -c Release --no-restore` | 15 passed, zero failed |
 | `dotnet test tests/PeerSync.Cli.Tests/PeerSync.Cli.Tests.csproj -c Release --no-restore` | 6 passed, zero failed |
 | `dotnet build src/PeerSync.Cli/PeerSync.Cli.csproj -c Release --no-restore` | Zero warnings and errors |
 | `psp probe 127.0.0.1:1` | Exit 1; TCP classified `refused` with `ConnectionRefused` / native 10061; UDP classified `unreachable` with `HostUnreachable` / native 10065 on this host |
 
 The loopback HTTP/3 host test verifies that the response and the written
 diagnostic event carry the same ID, and a malformed ID is neither echoed nor
-admitted to the journal. The refused loopback check verifies the deployed CLI
+admitted to the journal. The same hosted test sends an invalid first tracker
+message through an authenticated HTTP/2 stream and verifies that
+`rendezvous.session_failed` records `InvalidArgument` under the observed
+session ID. A certificate-authenticated relay stream without a token records
+`rendezvous.relay_join_rejected` with a fixed code and no token value. The
+server also logs tracker deadline/transport failure categories and relay join
+cancellation categories through these bounded event paths. A revoked relay
+offer reports `Aborted` to its waiting participant; a join wait deadline
+reports `DeadlineExceeded`, while caller cancellation remains cancellation.
+The refused loopback
+check verifies the deployed CLI
 JSON shape but does not test a deployed rendezvous endpoint or external UDP
 reachability. Physical two-PC LAN/WAN forced-relay bundles and production
 server certificate/network checks remain open under Gate P4.
