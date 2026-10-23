@@ -2,8 +2,9 @@
 
 `psp probe` now assigns one random session ID to its exact HTTP/2 (TCP) and
 HTTP/3 (UDP) requests. The rendezvous `/probe` handler accepts only a 32-hex
-GUID, writes it on `rendezvous.probed` with the observed protocol, and echoes
-it. The CLI reports whether each successful leg echoed the ID. Failures
+hyphenated GUID, writes it on `rendezvous.probed` with the observed protocol,
+and echoes it. The format matches the journal's `sessionId` for direct bundle
+searches. The CLI reports whether each successful leg echoed the ID. Failures
 include bounded categories and available HTTP, QUIC, socket, native and
 HRESULT codes; exception messages are not printed.
 
