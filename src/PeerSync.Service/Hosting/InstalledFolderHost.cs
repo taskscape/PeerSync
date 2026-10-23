@@ -819,7 +819,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                 var folderTimer = System.Diagnostics.Stopwatch.StartNew();
                 var result = await folder.Scanner.ScanAsync(stopping.Token).ConfigureAwait(false);
                 diagnostics?.TryWrite(new("service.resume_scan_complete", reason)
-                    { ItemsVisited = result.Enumerated, ItemsDeferred = result.Problems.Count,
+                    { ItemsVisited = result.Enumerated, ItemsDeferred = result.ProblemCount,
                         ElapsedMilliseconds = folderTimer.Elapsed.TotalMilliseconds });
             }
         }

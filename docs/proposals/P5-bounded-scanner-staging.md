@@ -1,22 +1,27 @@
 # P5.3 bounded scanner staging design
 
-Status: partial implementation. Native observations and pending signed updates
-are disk-backed; staged local rows now commit in one SQLite transaction, and a
-large changed-path set triggers a streamed needed-work rebuild. Missing-path
-rename candidates and native change-time cache updates are also staged on
-disk. This is not a completed scale gate. The measured
-million-file first walk uses about 1.28 GB at the commit checkpoint, and an
-immediate unchanged walk reaches about 2.55 GB. Its 135-138 MB idle result
-does not prove a 300 MB peak. P5.3 therefore still requires a bounded scanner
-path and another committed-source million-file run.
+Status: partial implementation. Native observations, pending signed updates,
+walk directories, protected/ignored/uncertain path keys, unencodable native
+names, missing-path rename candidates and native change-time cache updates are
+disk-backed. Staged local rows commit in one SQLite transaction, and a large
+changed-path set triggers a streamed needed-work rebuild. This is not a
+completed scale gate. The historical pre-staging
+million-file first walk used about 1.28 GB at the commit checkpoint, and its
+immediate unchanged walk reached about 2.55 GB. The staged `ab14f0b` run
+passed first indexing in 315.662 seconds with a 132,759,552-byte OS peak
+working set, but it did not sample peak private bytes continuously. The
+`512091f` run passed with a 139,038,720-byte sampled/OS working-set peak and
+89,448,448-byte sampled private-byte peak. Fresh-peer delivery remains open.
 
 ## Current allocation boundary
 
 `Scanner.ScanCoreAsync` now pages native observations, prior rows and signed
 updates. It streams prior path names without materializing signed rows for
 unchanged entries, and pages missing-path rename candidates and cache stamp
-updates through the private workspace. Protected prefixes and reported
-problems remain in memory and can grow with an adversarial tree.
+updates through the private workspace. The walk queue and safety prefixes use
+the same workspace; the public problem list retains at most 1,000 entries and
+an overflow marker while reporting the exact count. The later safety-state
+source has not yet had its own million-file measurement.
 The former million-row `ChangedPaths` result is capped: scans with more than
 10,000 changed rows request a full needed-work rebuild over three ordered
 index cursors. Measure the current peak before judging the remaining work.

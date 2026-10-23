@@ -165,11 +165,16 @@ internal static class ScanningBenchmark
         public ProcessMemorySampler() => timer = new Timer(_ => Sample(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(250));
         private void Sample()
         {
-            using var process = Process.GetCurrentProcess();
-            process.Refresh();
-            Raise(ref peakWorkingSet, process.WorkingSet64);
-            Raise(ref peakPrivate, process.PrivateMemorySize64);
-            Interlocked.Increment(ref samples);
+            try
+            {
+                using var process = Process.GetCurrentProcess();
+                process.Refresh();
+                Raise(ref peakWorkingSet, process.WorkingSet64);
+                Raise(ref peakPrivate, process.PrivateMemorySize64);
+                Interlocked.Increment(ref samples);
+            }
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
+            { /* A failed telemetry sample is visible in the sample count. */ }
         }
         private static void Raise(ref long peak, long value)
         {

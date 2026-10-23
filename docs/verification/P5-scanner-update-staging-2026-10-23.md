@@ -38,14 +38,37 @@ The 20,000-file corpus and both resulting indexes are retained at
 while the older, separate million-file fresh-peer process and 24-hour fuzz
 campaign were active. The older process does not use this scanner source.
 
-This evidence does not complete P5.3: a committed-source million-file run must
-sample peak working set and private bytes under 300,000,000 bytes throughout
-the first and unchanged walks, meet the 20-minute first-index target, and
-verify fresh-peer delivery. An adversarial tree with a million unreadable or
-colliding paths could still retain reported problems or protected prefixes;
-the boundedness of those paths needs review. The scale runner now samples
-working set and private bytes every 250 ms through both scans and applies the
-exact 300,000,000-byte ceiling to both sampled peaks and the OS working-set
-peak; the preceding `ab14f0b` binary did not yet have this sampler. Full
-Simulation has not yet been
-rerun on this exact source, and hosted GitHub Actions remain blocked by budget.
+The committed `ab14f0b` million-file scan over the retained physical corpus
+passed: first index 315.662 seconds, 1,000,000 native files hashed, 1,001,000
+rows, unchanged walk 137.079 seconds with zero rehashes/updates, sequence
+preserved, `changedPathsBounded=true`, and 0.00434% idle CPU. Its OS peak
+working set was 132,759,552 bytes; idle working set and private bytes were
+103,768,064 and 50,753,536. The commit and unchanged checkpoints show
+private bytes below 75 MB. The runner did not continuously sample private
+bytes, and its `targetMet=true` used an older idle-memory check, so this is
+supporting evidence rather than the final peak-private assertion. The log,
+binary hashes and retained index are under
+`artifacts/scale/p5-scanner-ab14f0b-valid/`. An empty-tree preflight caused by
+pointing at the log folder instead of the corpus exited before scale work; its
+separate error log is under `artifacts/scale/p5-scanner-ab14f0b/`.
+
+The committed `512091f` million-file scanner run passed against the same
+retained corpus with 250 ms working-set/private-byte sampling. First index
+took 298.652 seconds, with 1,000,000 files hashed and 1,001,000 total rows.
+The unchanged scan took 164.238 seconds with zero rehashes/updates and all
+sequences preserved. Across both scans, sampled peak working set was
+139,038,720 bytes, sampled peak private bytes 89,448,448 bytes, and the OS
+working-set peak 139,038,720 bytes. Idle CPU was 0.00868%; idle working set
+and private bytes were 98,807,808 and 46,678,016 bytes. The runner reported
+`correct=true`, `changedPathsBounded=true` and `targetMet=true` under its
+exact 300,000,000-byte threshold. Its separate binary and run provenance are under
+`artifacts/deploy/p5-scanner-512091f/` and
+`artifacts/scale/p5-scanner-512091f-valid/`.
+
+This passes the P5.3 first-index, idle-CPU and measured peak-memory targets
+for that committed source. The later [adversarial safety-state staging](P5-scanner-adversarial-state-2026-10-23.md)
+still needs its own large-tree verification. Fresh-peer delivery of the full
+million-file folder, full final-source Simulation and hosted GitHub Actions
+remain open. The scale runner samples working set and private bytes every
+250 ms through both scans and applies the exact 300,000,000-byte ceiling to
+both sampled peaks and the OS working-set peak.

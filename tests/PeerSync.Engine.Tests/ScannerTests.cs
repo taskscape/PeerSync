@@ -247,6 +247,25 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task AdversarialInvalidNamesKeepScanProblemsAndPrefixesBounded()
+    {
+        const int invalidNames = 1100;
+        for (int i = 0; i < invalidNames; i++)
+            await Write($"e\u0301-{i:D4}", "invalid native name");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device);
+        var result = await scanner.ScanAsync(Token);
+
+        result.Enumerated.ShouldBe(invalidNames);
+        result.Unsyncable.ShouldBe(invalidNames);
+        result.ProblemCount.ShouldBe(invalidNames);
+        result.Problems.Count.ShouldBe(1001);
+        result.Problems.ShouldContain(problem => problem.Code == "problem-overflow");
+        index.LocalFiles.Count().ShouldBe(invalidNames);
+        (await scanner.ScanAsync(Token)).Updated.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task IncompleteSubtreePreservesOldChildrenAndNeverInventsDeletions()
     {
         await Write("dir/child", "keep");

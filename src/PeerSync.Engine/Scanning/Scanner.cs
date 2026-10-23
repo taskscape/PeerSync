@@ -26,6 +26,7 @@ public sealed record ScanProblem(string RelativePath, string Code, int? NativeEr
 public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int Renamed, int Updated,
     int Deleted, int Ignored, int Unsyncable, TimeSpan Elapsed, IReadOnlyList<ScanProblem> Problems)
 {
+    public int ProblemCount { get; init; }
     internal Guid SessionId { get; init; }
     public bool RequiresFollowupScan { get; init; }
     internal IReadOnlyList<string> ChangedPaths { get; init; } = [];
@@ -176,13 +177,11 @@ public sealed partial class Scanner : IDisposable
 
             bool hasPrevious = index.LocalFiles.Count() != 0;
             using var entries = new ScanObservations(index.DatabasePath, root.Identity, session, journal);
-            var protectedPrefixes = new HashSet<string>(StringComparer.Ordinal);
-            var ignoredPrefixes = new HashSet<string>(StringComparer.Ordinal);
             var problems = new ConcurrentBag<ScanProblem>();
+            int problemCount = 0;
             int ignored = 0;
-            var directories = new Stack<string>();
-            directories.Push("");
-            while (directories.TryPop(out string? directory))
+            entries.PushDirectory("");
+            while (entries.TryPopDirectory(out string directory))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
@@ -200,29 +199,29 @@ public sealed partial class Scanner : IDisposable
                             // Only ignored directories can shield descendants.
                             // Individual ignored files are rechecked against the
                             // matcher when prior rows are streamed below.
-                            if (native.IsDirectory) ignoredPrefixes.Add(key);
+                            if (native.IsDirectory) entries.IgnoreDirectory(key);
                             continue;
                         }
                         var entry = new WalkEntry(path, native, !valid || native.IsReparse);
                         if (!entries.TryAdd(key, entry))
                         {
                             // A case-sensitive Windows directory can contain two names for one wire key.
-                            protectedPrefixes.Add(key);
-                            problems.Add(new(path, "case-collision"));
+                            entries.Protect(key);
+                            RecordProblem(path, "case-collision");
                             continue;
                         }
                         if (entry.Unsyncable)
                         {
-                            protectedPrefixes.Add(key);
-                            problems.Add(new(path, native.IsReparse ? "reparse" : "invalid-name"));
+                            entries.Protect(key);
+                            RecordProblem(path, native.IsReparse ? "reparse" : "invalid-name");
                         }
-                        else if (native.IsDirectory) directories.Push(path);
+                        else if (native.IsDirectory) entries.PushDirectory(path);
                     }
                 }
                 catch (Exception error) when (IsFileError(error))
                 {
-                    protectedPrefixes.Add(directory.ToUpperInvariant());
-                    problems.Add(new(directory, "enumeration-failed", NativeCode(error)));
+                    entries.Protect(directory.ToUpperInvariant());
+                    RecordProblem(directory, "enumeration-failed", NativeCode(error));
                     journal?.TryWrite(new("scan.enumeration_failed", "scan") { SessionId = session,
                         Level = DiagnosticLevel.Warning, HResult = error.HResult, NativeError = NativeCode(error) });
                 }
@@ -239,7 +238,7 @@ public sealed partial class Scanner : IDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string key = oldPath.ToUpperInvariant();
-                if (entries.ContainsKey(key) || Under(key, protectedPrefixes) || Under(key, ignoredPrefixes)) continue;
+                if (entries.ContainsKey(key) || entries.UnderProtection(key) || entries.UnderIgnoredDirectory(key)) continue;
                 var candidate = index.LocalFiles.Find(key);
                 if (candidate is not { Deleted: false, Type: 0, Record: not null, Flags: LocalFileState.None, FileId: not null }
                     || ignore.IsIgnored(candidate.Path, false)) continue;
@@ -266,7 +265,7 @@ public sealed partial class Scanner : IDisposable
                 string key = entry.Path.ToUpperInvariant();
                 previousPage.TryGetValue(key, out var old);
                 // An incomplete directory listing must not produce changes in that subtree.
-                if (Under(key, protectedPrefixes, includeExact: !entry.Unsyncable)) return;
+                if (entries.UnderProtection(key, includeExact: !entry.Unsyncable)) return;
                 if (entry.Unsyncable)
                 {
                     Interlocked.Increment(ref unsyncable);
@@ -388,14 +387,14 @@ public sealed partial class Scanner : IDisposable
                     updates = new ConcurrentBag<LocalFileRow>();
                 }
                 string key = oldPath.ToUpperInvariant();
-                if (!Under(key, ignoredPrefixes) && (entries.ContainsKey(key) || Under(key, protectedPrefixes) || IsInternal(oldPath))) continue;
+                if (!entries.UnderIgnoredDirectory(key) && (entries.ContainsKey(key) || entries.UnderProtection(key) || IsInternal(oldPath))) continue;
                 var old = index.LocalFiles.Find(key) ?? throw new IOException("Local scan row disappeared during the operation gate.");
-                if (Under(key, ignoredPrefixes))
+                if (entries.UnderIgnoredDirectory(key))
                 {
                     if ((old.Flags & LocalFileState.Ignored) == 0) updates.Add(old with { Flags = old.Flags | LocalFileState.Ignored });
                     continue;
                 }
-                if (entries.ContainsKey(key) || Under(key, protectedPrefixes) || IsInternal(old.Path)) continue;
+                if (entries.ContainsKey(key) || entries.UnderProtection(key) || IsInternal(old.Path)) continue;
                 // Ignore rules can also match paths that disappeared before this walk.
                 if (PathRules.IsValid(old.Path) && ignore.IsIgnored(old.Path, old.Type == 1))
                 {
@@ -455,13 +454,13 @@ public sealed partial class Scanner : IDisposable
                 await index.UpdateNativeChangeTimesAsync(cacheBatch, cancellationToken).ConfigureAwait(false);
             int written = await index.CommitScanRowsAsync(entries.ReadUpdates(), cancellationToken).ConfigureAwait(false);
             if (StageDirectorySnapshots)
-                await StageDirectoriesAsync(root.Identity, entries, protectedPrefixes, ignoredPrefixes, problems, session, cancellationToken).ConfigureAwait(false);
+                await StageDirectoriesAsync(root.Identity, entries, session, cancellationToken).ConfigureAwait(false);
             Checkpoint?.Invoke("after-upsert");
             LogMemoryStage("scan.memory_committed", session, entries.Count, stopwatch);
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
-                ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
+                ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problemCount });
             // A very large change set rebuilds needed work from the durable
             // index union; no million-path result list survives this scan.
             const int changedPathLimit = 10_000;
@@ -471,12 +470,25 @@ public sealed partial class Scanner : IDisposable
                 .Distinct(StringComparer.Ordinal).ToArray());
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { SessionId = session, RequiresFollowupScan = followup, ChangedPaths = changedPaths,
+                { SessionId = session, ProblemCount = problemCount, RequiresFollowupScan = followup, ChangedPaths = changedPaths,
                     RequiresNeededRebuild = rebuildNeeded };
+
+            void RecordProblem(string path, string code, int? native = null)
+            {
+                // A million unreadable paths cannot become a million retained
+                // diagnostic objects. The overflow marker forces consumers to
+                // treat the scan as incomplete even if later errors are hidden.
+                int ordinal = Interlocked.Increment(ref problemCount);
+                if (ordinal <= 1000) problems.Add(new(path, code, native));
+                else if (ordinal == 1001) problems.Add(new("", "problem-overflow"));
+                if (code is "enumeration-failed" or "case-collision" or "read-failed"
+                    or "changed-during-read" or "published-content-verification-failed")
+                    entries.MarkUncertain(path.ToUpperInvariant());
+            }
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {
-                problems.Add(new(path, code, native));
+                RecordProblem(path, code, native);
                 if (old is not null && (old.Flags & LocalFileState.NeedsRescan) == 0)
                     updates.Add(old with { Flags = old.Flags | LocalFileState.NeedsRescan });
                 journal?.TryWrite(new("scan.defer", "scan")
@@ -544,19 +556,6 @@ public sealed partial class Scanner : IDisposable
         && PathSpelling.SameLeaf(row.Path, entry.Path) && row.Size == entry.Native.Length && row.Attributes == (uint)entry.Native.Attributes
         && (entry.Native.IsDirectory || row.MtimeTicks == entry.Native.MtimeTicks)
         && row.FileId is not null && row.FileId.AsSpan().SequenceEqual(entry.Native.FileId);
-
-    private static bool Under(string key, HashSet<string> prefixes, bool includeExact = true)
-    {
-        if (prefixes.Contains("")) return true;
-        if (includeExact && prefixes.Contains(key)) return true;
-        int separator = key.IndexOf('/');
-        while (separator >= 0)
-        {
-            if (prefixes.Contains(key[..separator])) return true;
-            separator = key.IndexOf('/', separator + 1);
-        }
-        return false;
-    }
 
     /// <summary>Stop scheduling scans and await outstanding scans before disposing.</summary>
     public void Dispose() => scanGate.Dispose();

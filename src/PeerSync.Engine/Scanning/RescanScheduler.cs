@@ -78,7 +78,7 @@ public sealed class RescanScheduler
                 {
                     journal?.TryWrite(new("scheduler.scan_start", "rescan") { SessionId = session });
                     result = await folder.Scanner.ScanAsync(stopped.Token).ConfigureAwait(false);
-                    if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed"))
+                    if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed" or "problem-overflow"))
                         errorCode = "scan-deferred";
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or System.Security.Cryptography.CryptographicException

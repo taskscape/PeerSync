@@ -322,7 +322,7 @@ public sealed class Puller : IDisposable
             else if (result.ChangedPaths.Count != 0) await needed.RecomputeAsync(result.ChangedPaths.Where(PathRules.IsValid), token).ConfigureAwait(false);
             neededRepairPending = false;
             long now = Now; nextScanTicks = AddSeconds(now, settings.RescanIntervalSeconds);
-            bool incomplete = result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed");
+            bool incomplete = result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed" or "problem-overflow");
             if (incomplete)
             {
                 scanRetryTicks = AddSeconds(now, RescanScheduler.BackoffSeconds(scanAttempt)); scanAttempt = Math.Min(6, scanAttempt + 1);

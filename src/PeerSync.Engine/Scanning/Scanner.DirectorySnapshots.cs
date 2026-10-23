@@ -13,18 +13,9 @@ public sealed partial class Scanner
 {
     // Scanner owns the folder gate and has already committed file versions and
     // tombstones. Queue staging never replaces an advertised directory row.
-    private async Task StageDirectoriesAsync(byte[] root, ScanObservations entries, HashSet<string> protectedPrefixes,
-        HashSet<string> ignoredPrefixes, IEnumerable<ScanProblem> problems, Guid scanSession, CancellationToken token)
+    private async Task StageDirectoriesAsync(byte[] root, ScanObservations entries, Guid scanSession, CancellationToken token)
     {
         long now = clock.GetUtcNow().UtcTicks;
-        var uncertain = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var problem in problems.Where(problem => problem.Code is "enumeration-failed" or "case-collision" or "read-failed" or "changed-during-read" or "published-content-verification-failed"))
-        {
-            string path = problem.RelativePath.ToUpperInvariant(); uncertain.Add(path);
-            for (int separator = path.LastIndexOf('/'); separator >= 0; separator = path.LastIndexOf('/'))
-            { path = path[..separator]; uncertain.Add(path); }
-            if (problem.RelativePath.Length == 0) uncertain.Add("");
-        }
         // Include paused/backed-off work; due-only reads cannot reconcile stale
         // namespace barriers. Path-only pages avoid loading all signed templates.
         string? cursor = null;
@@ -34,10 +25,10 @@ public sealed partial class Scanner
             foreach (string path in paths)
             {
                 token.ThrowIfCancellationRequested(); var queued = index.ReadDirectoryPublication(path)!;
-                bool unknown = uncertain.Contains("") || uncertain.Contains(path) || Under(path, protectedPrefixes) || index.HasIncompleteDirectoryCaseCopy(path);
+                bool unknown = entries.IsUncertain(path) || entries.UnderProtection(path) || index.HasIncompleteDirectoryCaseCopy(path);
                 if (unknown) { await index.PauseDirectoryPublicationAsync(queued, true, now, token).ConfigureAwait(false); Log("queue_paused", queued.Version, "incomplete-walk"); continue; }
                 if (!keys.CanWrite || (index.LocalFiles.Find(path)?.LocalSequence ?? 0) != queued.ExpectedLocalSequence
-                    || Under(path, ignoredPrefixes) || !entries.TryGetValue(path, out var found) || found.Unsyncable || !found.Native.IsDirectory)
+                    || entries.UnderIgnoredDirectory(path) || !entries.TryGetValue(path, out var found) || found.Unsyncable || !found.Native.IsDirectory)
                 {
                     await index.DiscardDirectoryPublicationAsync(queued, token).ConfigureAwait(false);
                     Log("queue_discarded", queued.Version, "complete-walk");
@@ -54,7 +45,7 @@ public sealed partial class Scanner
             token.ThrowIfCancellationRequested(); string key = pair.Key; var entry = pair.Value;
             if (entry.Unsyncable) continue;
             if (index.HasIncompleteDirectoryCaseCopy(entry.Path)) { Log("case_copy_publication_held", scanSession, "members-pending"); continue; }
-            if (uncertain.Contains("") || uncertain.Contains(key) || Under(key, protectedPrefixes)) continue;
+            if (entries.IsUncertain(key) || entries.UnderProtection(key)) continue;
             var old = index.LocalFiles.Find(entry.Path);
             bool sameNative = old is { Type: 1, Deleted: false, Flags: LocalFileState.None } && MetadataEqual(old, entry);
             // Reconstruct the exact received root without blocking missing child
@@ -71,7 +62,7 @@ public sealed partial class Scanner
             bool hasDirectoryChild = false;
             foreach (var child in entries.ReadChildren(key))
             {
-                if (child.Unsyncable || Under(child.Key, protectedPrefixes)) continue;
+                if (child.Unsyncable || entries.UnderProtection(child.Key)) continue;
                 fingerprint.Add(child.Key); hasDirectoryChild |= child.IsDirectory;
             }
             var inventory = fingerprint.Complete(index.ReadDirectoryCaptureEpoch());

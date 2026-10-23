@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -24,7 +25,17 @@ public sealed partial class Scanner
         private SqliteCommand? insert;
         private SqliteCommand? exists;
         private SqliteCommand? find;
-        private readonly Dictionary<string, WalkEntry> unencodable = new(StringComparer.Ordinal);
+        private SqliteCommand? insertPrefix;
+        private SqliteCommand? findPrefix;
+        private SqliteCommand? insertDirectory;
+        private SqliteCommand? popDirectory;
+        private SqliteCommand? deleteDirectory;
+        private SqliteCommand? insertUnencodable;
+        private SqliteCommand? existsUnencodable;
+        private SqliteCommand? findUnencodable;
+        private readonly object prefixGate = new();
+        private readonly int[] prefixCounts = new int[3];
+        private int unencodableCount;
         private bool disposed;
         internal int Count { get; private set; }
 
@@ -65,6 +76,12 @@ public sealed partial class Scanner
                         + "CREATE INDEX rename_by_file ON rename_candidates(file_id,id); "
                         + "CREATE TABLE staged_cache (id INTEGER PRIMARY KEY, path TEXT NOT NULL, sequence INTEGER NOT NULL, "
                         + "file_id BLOB NOT NULL, change_time INTEGER NOT NULL); "
+                        + "CREATE TABLE scan_prefixes (kind INTEGER NOT NULL, path_key BLOB NOT NULL, "
+                        + "PRIMARY KEY(kind,path_key)) WITHOUT ROWID; "
+                        + "CREATE TABLE walk_pending (id INTEGER PRIMARY KEY, path TEXT NOT NULL); "
+                        + "CREATE TABLE unencodable (path_key BLOB PRIMARY KEY, path BLOB NOT NULL, name BLOB NOT NULL, "
+                        + "attributes INTEGER NOT NULL, length INTEGER NOT NULL, last_write INTEGER NOT NULL, "
+                        + "change_time INTEGER NOT NULL, file_id BLOB NOT NULL) WITHOUT ROWID; "
                         + "CREATE TABLE scan_owner(root_identity BLOB NOT NULL);";
                     schema.ExecuteNonQuery();
                 }
@@ -79,6 +96,23 @@ public sealed partial class Scanner
                 foreach (string name in new[] { "$key", "$path", "$name", "$attributes", "$length", "$last", "$change", "$file", "$unsafe", "$parent", "$depth", "$sort" })
                     insert.Parameters.AddWithValue(name, DBNull.Value);
                 insert.Prepare();
+                insertPrefix = connection.CreateCommand(); insertPrefix.Transaction = write;
+                insertPrefix.CommandText = "INSERT OR IGNORE INTO scan_prefixes(kind,path_key) VALUES($kind,$key);";
+                insertPrefix.Parameters.Add("$kind", SqliteType.Integer);
+                insertPrefix.Parameters.Add("$key", SqliteType.Blob); insertPrefix.Prepare();
+                insertDirectory = connection.CreateCommand(); insertDirectory.Transaction = write;
+                insertDirectory.CommandText = "INSERT INTO walk_pending(path) VALUES($path);";
+                insertDirectory.Parameters.Add("$path", SqliteType.Text); insertDirectory.Prepare();
+                popDirectory = connection.CreateCommand(); popDirectory.Transaction = write;
+                popDirectory.CommandText = "SELECT id,path FROM walk_pending ORDER BY id DESC LIMIT 1;";
+                deleteDirectory = connection.CreateCommand(); deleteDirectory.Transaction = write;
+                deleteDirectory.CommandText = "DELETE FROM walk_pending WHERE id=$id;";
+                deleteDirectory.Parameters.Add("$id", SqliteType.Integer); deleteDirectory.Prepare();
+                insertUnencodable = connection.CreateCommand(); insertUnencodable.Transaction = write;
+                insertUnencodable.CommandText = "INSERT OR IGNORE INTO unencodable VALUES($key,$path,$name,$attributes,$length,$last,$change,$file);";
+                foreach (string name in new[] { "$key", "$path", "$name", "$attributes", "$length", "$last", "$change", "$file" })
+                    insertUnencodable.Parameters.AddWithValue(name, DBNull.Value);
+                insertUnencodable.Prepare();
             }
             catch
             {
@@ -90,10 +124,93 @@ public sealed partial class Scanner
             }
         }
 
+        internal void PushDirectory(string path)
+        {
+            insertDirectory!.Parameters[0].Value = path;
+            insertDirectory.ExecuteNonQuery();
+        }
+
+        internal bool TryPopDirectory(out string path)
+        {
+            using var reader = popDirectory!.ExecuteReader();
+            if (!reader.Read()) { path = ""; return false; }
+            long id = reader.GetInt64(0); path = reader.GetString(1);
+            reader.Close();
+            deleteDirectory!.Parameters[0].Value = id;
+            deleteDirectory.ExecuteNonQuery();
+            return true;
+        }
+
+        internal void Protect(string key) => AddPrefix(0, key);
+        internal void IgnoreDirectory(string key) => AddPrefix(1, key);
+        internal void MarkUncertain(string key)
+        {
+            AddPrefix(2, key);
+            for (int separator = key.LastIndexOf('/'); separator >= 0; separator = key.LastIndexOf('/'))
+            { key = key[..separator]; AddPrefix(2, key); }
+        }
+
+        internal bool UnderProtection(string key, bool includeExact = true) => UnderPrefix(0, key, includeExact);
+        internal bool UnderIgnoredDirectory(string key) => UnderPrefix(1, key, true);
+        internal bool IsUncertain(string key) => HasPrefix(2, "") || HasPrefix(2, key);
+
+        private void AddPrefix(int kind, string key)
+        {
+            lock (prefixGate)
+            {
+                insertPrefix!.Parameters[0].Value = kind;
+                // SQLite text cannot preserve a lone UTF-16 surrogate. Blob keys
+                // retain the exact Windows name and its ordinal lookup semantics.
+                insertPrefix.Parameters[1].Value = Utf16Bytes(key);
+                if (insertPrefix.ExecuteNonQuery() != 0) prefixCounts[kind]++;
+            }
+        }
+
+        private bool UnderPrefix(int kind, string key, bool includeExact)
+        {
+            if (Volatile.Read(ref prefixCounts[kind]) == 0) return false;
+            if (HasPrefix(kind, "") || includeExact && HasPrefix(kind, key)) return true;
+            int separator = key.IndexOf('/');
+            while (separator >= 0)
+            {
+                if (HasPrefix(kind, key[..separator])) return true;
+                separator = key.IndexOf('/', separator + 1);
+            }
+            return false;
+        }
+
+        private bool HasPrefix(int kind, string key)
+        {
+            if (Volatile.Read(ref prefixCounts[kind]) == 0) return false;
+            lock (prefixGate)
+            {
+                findPrefix!.Parameters[0].Value = kind;
+                findPrefix.Parameters[1].Value = Utf16Bytes(key);
+                return findPrefix.ExecuteScalar() is not null;
+            }
+        }
+
+        private static byte[] Utf16Bytes(string value)
+        {
+            byte[] bytes = new byte[checked(value.Length * 2)];
+            for (int i = 0; i < value.Length; i++)
+                BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2, 2), value[i]);
+            return bytes;
+        }
+
+        private static string Utf16String(byte[] bytes)
+        {
+            if ((bytes.Length & 1) != 0) throw new InvalidDataException("Invalid UTF-16 scan observation.");
+            return string.Create(bytes.Length / 2, bytes, static (chars, source) =>
+            {
+                for (int i = 0; i < chars.Length; i++)
+                    chars[i] = (char)BinaryPrimitives.ReadUInt16LittleEndian(source.AsSpan(i * 2, 2));
+            });
+        }
+
         internal bool TryAdd(string key, WalkEntry entry)
         {
             if (write is null || insert is null) throw new InvalidOperationException("Observation walk is complete.");
-            if (unencodable.ContainsKey(key)) return false;
             try { _ = new UTF8Encoding(false, true).GetByteCount(entry.Path); }
             catch (EncoderFallbackException)
             {
@@ -101,7 +218,24 @@ public sealed partial class Scanner
                 duplicate.CommandText = "SELECT 1 FROM observed WHERE path_key=$key;";
                 duplicate.Parameters.AddWithValue("$key", key);
                 if (duplicate.ExecuteScalar() is not null) return false;
-                unencodable.Add(key, entry); Count = checked(Count + 1); return true;
+                insertUnencodable!.Parameters["$key"].Value = Utf16Bytes(key);
+                insertUnencodable.Parameters["$path"].Value = Utf16Bytes(entry.Path);
+                insertUnencodable.Parameters["$name"].Value = Utf16Bytes(entry.Native.Name);
+                insertUnencodable.Parameters["$attributes"].Value = (long)entry.Native.Attributes;
+                insertUnencodable.Parameters["$length"].Value = entry.Native.Length;
+                insertUnencodable.Parameters["$last"].Value = entry.Native.LastWriteFileTime;
+                insertUnencodable.Parameters["$change"].Value = entry.Native.ChangeFileTime;
+                insertUnencodable.Parameters["$file"].Value = entry.Native.FileId;
+                bool addedUnsafe = insertUnencodable.ExecuteNonQuery() == 1;
+                if (addedUnsafe) { Count = checked(Count + 1); unencodableCount++; }
+                return addedUnsafe;
+            }
+            if (unencodableCount != 0) using (var duplicate = connection.CreateCommand())
+            {
+                duplicate.Transaction = write;
+                duplicate.CommandText = "SELECT 1 FROM unencodable WHERE path_key=$key;";
+                duplicate.Parameters.AddWithValue("$key", Utf16Bytes(key));
+                if (duplicate.ExecuteScalar() is not null) return false;
             }
             int separator = key.LastIndexOf('/');
             insert.Parameters["$key"].Value = key;
@@ -136,22 +270,43 @@ public sealed partial class Scanner
             exists.Parameters.AddWithValue("$key", ""); exists.Prepare();
             find = connection.CreateCommand(); find.CommandText = "SELECT path,name,attributes,length,last_write,change_time,file_id,unsyncable FROM observed WHERE path_key=$key;";
             find.Parameters.AddWithValue("$key", ""); find.Prepare();
+            insertPrefix!.Transaction = null;
+            findPrefix = connection.CreateCommand();
+            findPrefix.CommandText = "SELECT 1 FROM scan_prefixes WHERE kind=$kind AND path_key=$key;";
+            findPrefix.Parameters.Add("$kind", SqliteType.Integer);
+            findPrefix.Parameters.Add("$key", SqliteType.Blob); findPrefix.Prepare();
+            insertUnencodable?.Dispose(); insertUnencodable = null;
+            existsUnencodable = connection.CreateCommand();
+            existsUnencodable.CommandText = "SELECT 1 FROM unencodable WHERE path_key=$key;";
+            existsUnencodable.Parameters.Add("$key", SqliteType.Blob); existsUnencodable.Prepare();
+            findUnencodable = connection.CreateCommand();
+            findUnencodable.CommandText = "SELECT path,name,attributes,length,last_write,change_time,file_id FROM unencodable WHERE path_key=$key;";
+            findUnencodable.Parameters.Add("$key", SqliteType.Blob); findUnencodable.Prepare();
+            insertDirectory?.Dispose(); insertDirectory = null;
+            popDirectory?.Dispose(); popDirectory = null;
+            deleteDirectory?.Dispose(); deleteDirectory = null;
         }
 
         internal bool ContainsKey(string key)
         {
-            if (unencodable.ContainsKey(key)) return true;
             exists!.Parameters["$key"].Value = key;
-            return exists.ExecuteScalar() is not null;
+            if (exists.ExecuteScalar() is not null) return true;
+            if (unencodableCount == 0) return false;
+            existsUnencodable!.Parameters[0].Value = Utf16Bytes(key);
+            return existsUnencodable.ExecuteScalar() is not null;
         }
 
         internal bool TryGetValue(string key, out WalkEntry entry)
         {
-            if (unencodable.TryGetValue(key, out entry!)) return true;
             find!.Parameters["$key"].Value = key;
             using var reader = find.ExecuteReader();
-            if (!reader.Read()) { entry = null!; return false; }
-            entry = ReadEntry(reader); return true;
+            if (reader.Read()) { entry = ReadEntry(reader); return true; }
+            reader.Close();
+            if (unencodableCount == 0) { entry = null!; return false; }
+            findUnencodable!.Parameters[0].Value = Utf16Bytes(key);
+            using var unsafeReader = findUnencodable.ExecuteReader();
+            if (!unsafeReader.Read()) { entry = null!; return false; }
+            entry = ReadUnencodable(unsafeReader); return true;
         }
 
         internal IEnumerable<WalkEntry> ReadAll()
@@ -162,7 +317,11 @@ public sealed partial class Scanner
             command.CommandText = "SELECT path,name,attributes,length,last_write,change_time,file_id,unsyncable FROM observed ORDER BY path_key;";
             using var reader = command.ExecuteReader();
             while (reader.Read()) yield return ReadEntry(reader);
-            foreach (var entry in unencodable.Values) yield return entry;
+            if (unencodableCount == 0) yield break;
+            using var unsafeConnection = OpenReader(); using var unsafeCommand = unsafeConnection.CreateCommand();
+            unsafeCommand.CommandText = "SELECT path,name,attributes,length,last_write,change_time,file_id FROM unencodable ORDER BY path_key;";
+            using var unsafeReader = unsafeCommand.ExecuteReader();
+            while (unsafeReader.Read()) yield return ReadUnencodable(unsafeReader);
         }
 
         // Close every observation reader before the hash workers stage their
@@ -190,7 +349,28 @@ public sealed partial class Scanner
                 if (page.Count == 0) break;
                 yield return page.ToArray();
             }
-            foreach (var page in unencodable.Values.Chunk(RowRepository<LocalFileRow>.BatchSize)) yield return page;
+            if (unencodableCount == 0) yield break;
+            byte[] afterUnsafe = [];
+            while (true)
+            {
+                var page = new List<WalkEntry>(RowRepository<LocalFileRow>.BatchSize);
+                using (var readerConnection = OpenReader())
+                using (var command = readerConnection.CreateCommand())
+                {
+                    command.CommandText = "SELECT path_key,path,name,attributes,length,last_write,change_time,file_id "
+                        + "FROM unencodable WHERE path_key>$after ORDER BY path_key LIMIT $limit;";
+                    command.Parameters.AddWithValue("$after", afterUnsafe);
+                    command.Parameters.AddWithValue("$limit", RowRepository<LocalFileRow>.BatchSize);
+                    using var reader = command.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        afterUnsafe = reader.GetFieldValue<byte[]>(0);
+                        page.Add(ReadUnencodable(reader, 1));
+                    }
+                }
+                if (page.Count == 0) break;
+                yield return page.ToArray();
+            }
         }
 
         internal int UpdateCount { get; private set; }
@@ -377,8 +557,8 @@ public sealed partial class Scanner
                 + "FROM observed WHERE (attributes & 16) != 0 ORDER BY depth DESC,sort_key;";
             using var reader = command.ExecuteReader();
             while (reader.Read()) yield return new(reader.GetString(0), ReadEntry(reader, 1));
-            foreach (var entry in unencodable)
-                if (entry.Value.Native.IsDirectory) yield return entry;
+            // Every unencodable name is unsyncable; it cannot authorize a
+            // signed directory publication or produce descendants.
         }
 
         internal IEnumerable<(string Key, bool IsDirectory, bool Unsyncable)> ReadChildren(string parent)
@@ -403,6 +583,14 @@ public sealed partial class Scanner
                 reader.GetInt64(start + 3), reader.GetInt64(start + 4), reader.GetInt64(start + 5),
                 (byte[])reader.GetValue(start + 6));
             return new(reader.GetString(start), native, reader.GetInt64(start + 7) != 0);
+        }
+
+        private static WalkEntry ReadUnencodable(SqliteDataReader reader, int start = 0)
+        {
+            var native = new NativeEntry(Utf16String(reader.GetFieldValue<byte[]>(start + 1)),
+                (FileAttributes)reader.GetInt64(start + 2), reader.GetInt64(start + 3),
+                reader.GetInt64(start + 4), reader.GetInt64(start + 5), reader.GetFieldValue<byte[]>(start + 6));
+            return new(Utf16String(reader.GetFieldValue<byte[]>(start)), native, true);
         }
 
         private static void CleanupAbandoned(string directory, string prefix, DiagnosticJournal? journal)
@@ -430,7 +618,10 @@ public sealed partial class Scanner
         public void Dispose()
         {
             if (disposed) return; disposed = true;
-            insert?.Dispose(); write?.Dispose(); find?.Dispose(); exists?.Dispose(); connection.Dispose();
+            insert?.Dispose(); write?.Dispose(); find?.Dispose(); exists?.Dispose();
+            insertPrefix?.Dispose(); findPrefix?.Dispose(); insertDirectory?.Dispose();
+            popDirectory?.Dispose(); deleteDirectory?.Dispose(); insertUnencodable?.Dispose();
+            existsUnencodable?.Dispose(); findUnencodable?.Dispose(); connection.Dispose();
             bool removed = false;
             try { File.Delete(path); removed = true; }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)

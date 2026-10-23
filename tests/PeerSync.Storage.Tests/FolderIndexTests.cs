@@ -38,11 +38,14 @@ public sealed class FolderIndexTests : IDisposable
     public async Task NeededRebuildPathMergeDeduplicatesAcrossThreeIndexes()
     {
         await using var index = await FolderIndex.OpenAsync(DatabasePath, TestContext.Current.CancellationToken);
-        await index.LocalFiles.UpsertAsync([Row("alpha"), Row("éclair")], TestContext.Current.CancellationToken);
+        await index.LocalFiles.UpsertAsync([Row("alpha"), Row("éclair"), Row("ﬁ")], TestContext.Current.CancellationToken);
         await index.RemoteFiles.UpsertAsync([new(Peer, "ALPHA", new Dictionary<ulong, ulong>(), Row("alpha").Record!),
-            new(Peer, "zulu", new Dictionary<ulong, ulong>(), Row("zulu").Record!)], TestContext.Current.CancellationToken);
-        await index.Needed.UpsertAsync([new("ZULU", Peer, 0)], TestContext.Current.CancellationToken);
-        index.ReadAllNeededPathKeys().ToArray().ShouldBe(["ALPHA", "ZULU", "ÉCLAIR"]);
+            new(Peer, "zulu", new Dictionary<ulong, ulong>(), Row("zulu").Record!),
+            new(Peer, "🐉", new Dictionary<ulong, ulong>(), Row("🐉").Record!)], TestContext.Current.CancellationToken);
+        await index.Needed.UpsertAsync([new("ZULU", Peer, 0), new("🐉", Peer, 0)], TestContext.Current.CancellationToken);
+        // SQLite orders UTF-8 bytes; .NET ordinal strings order UTF-16 code
+        // units. The merged cursors must use SQLite's order across planes.
+        index.ReadAllNeededPathKeys().ToArray().ShouldBe(["ALPHA", "ZULU", "ÉCLAIR", "ﬁ", "🐉"]);
     }
 
     [Fact]
