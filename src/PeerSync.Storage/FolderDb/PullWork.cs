@@ -72,6 +72,14 @@ public sealed partial class FolderIndex
     private const string PullRangeFilter = " AND ($own IS NULL OR n.work_stage<2 OR n.source_device=$own OR EXISTS("
         + "SELECT 1 FROM remote_index_ranges q JOIN devices d ON d.device_id=q.device_id WHERE q.device_id=n.source_device AND d.last_seq_received>=q.target_sequence)) ";
 
+    // Signed file records can precede their parent directory records in a
+    // large index. Do not repeatedly attempt native work whose direct parent
+    // has not been installed. Parent installation updates local_files and
+    // makes the child eligible on the next scheduling pass.
+    private const string PullParentFilter = " AND ($own IS NULL OR n.work_stage NOT IN (0,1) OR instr(n.path_key,'/')=0 OR EXISTS("
+        + "SELECT 1 FROM local_files p WHERE p.path_key=rtrim(rtrim(n.path_key,replace(n.path_key,'/','')),'/') "
+        + "AND p.type=1 AND p.deleted=0 AND p.flags=0 AND p.ntfs_file_id IS NOT NULL)) ";
+
     private System.Collections.ObjectModel.ReadOnlyCollection<NeededRow> ReadDuePullWorkCore(byte[] rootId, long nowTicks, TransferPriority priority, int limit, byte[]? own)
     {
         byte[] root = FreezeSweep(rootId, nowTicks, 1, limit); if (!Enum.IsDefined(priority)) throw new ArgumentOutOfRangeException(nameof(priority));
@@ -79,7 +87,7 @@ public sealed partial class FolderIndex
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT n.path_key,n.source_device,n.priority,n.work_stage,n.work_size,n.work_mtime,n.work_hash FROM needed n "
             + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root "
-            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) " + PullRangeFilter
+            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) " + PullRangeFilter + PullParentFilter
             + "ORDER BY n.work_stage,CASE WHEN n.work_stage=0 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END,"
             + "CASE WHEN n.work_stage=3 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END DESC,n.priority DESC,"
             + "CASE WHEN n.work_stage=1 AND $priority=1 THEN n.work_size END,CASE WHEN n.work_stage=1 AND $priority=2 THEN n.work_size END DESC,"
@@ -95,7 +103,7 @@ public sealed partial class FolderIndex
         using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true); RequireBlockReferenceRoot(connection, transaction, root);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT MIN(CASE WHEN r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now THEN $now ELSE r.next_ticks END) FROM needed n "
-            + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root WHERE n.work_stage IS NOT NULL " + PullRangeFilter;
+            + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root WHERE n.work_stage IS NOT NULL " + PullRangeFilter + PullParentFilter;
         command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$own", localDevice);
         return command.ExecuteScalar() is long ticks ? ticks : null;
     }

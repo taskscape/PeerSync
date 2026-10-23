@@ -54,6 +54,30 @@ public sealed class PullerTests : IDisposable
     }
 
     [Fact]
+    public async Task FileIndexPageBeforeParentDirectoryWaitsWithoutNativeFailureThenApplies()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var puller = Coordinator(index);
+        await puller.RunPassAsync(Token);
+        await puller.AnnounceIndexRangeAsync(Peer, 2, Token);
+        await puller.ReceiveIndexAsync(Peer, 0, 1, [Record(index, "folder/child", 1, New)], Token);
+
+        var waiting = await puller.RunPassAsync(Token);
+        waiting.Visited.ShouldBe(0);
+        waiting.Failed.ShouldBe(0);
+        index.Needed.Find("folder/child").ShouldNotBeNull();
+        index.ReadPullRetry("folder/child").ShouldBeNull();
+        Directory.Exists(Disk("folder")).ShouldBeFalse();
+
+        await puller.ReceiveIndexAsync(Peer, 1, 2, [Record(index, "folder", 2, type: 1)], Token);
+        var applied = await puller.RunPassAsync(Token);
+        applied.Applied.ShouldBe(2);
+        applied.Failed.ShouldBe(0);
+        File.ReadAllBytes(Disk("folder/child")).ShouldBe(New);
+        index.Needed.Count().ShouldBe(0);
+    }
+
+    [Fact]
     public async Task LockedTargetBacksOffAcrossCoordinatorRestartWhileIndependentPathProgresses()
     {
         File.WriteAllBytes(Disk("locked"), Old); File.WriteAllBytes(Disk("good"), Old);

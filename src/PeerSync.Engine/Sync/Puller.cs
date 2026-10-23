@@ -233,55 +233,82 @@ public sealed class Puller : IDisposable
                 { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Debug, ItemsChanged = retired });
             await index.CompactCompletedCaseSourcesAsync(rootId!, Now, limit: 64, cancellationToken: token).ConfigureAwait(false);
         }
-        IReadOnlyList<NeededRow> work = neededRepairPending ? [] : index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
-        foreach (var row in work)
+        int visited = 0;
+        bool installedDirectory;
+        bool workAllowed = !neededRepairPending;
+        bool deleting = false;
+        do
         {
-            token.ThrowIfCancellationRequested();
-            try
+            // A newly installed parent makes its queued children eligible.
+            // Refill only after such a change, within the normal 1,000-work
+            // pass budget, so a file-first index does not create retry churn.
+            IReadOnlyList<NeededRow> work = !workAllowed ? [] :
+                index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority, 1000 - visited);
+            if (work.Count == 0) break;
+            installedDirectory = false;
+            foreach (var row in work)
             {
-                FileApplyOutcome outcome; bool requiresScan;
-                bool opensDirectory = row.Work!.Stage is 0 or 2 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
-                if (row.Work!.Stage is 0 or 3)
+                // A parent can unlock more live children than were visible at
+                // the start of the pass. Finish live work before tombstones,
+                // preserving the stage order across refreshed batches.
+                if ((row.Work!.Stage >= 2) != deleting) continue;
+                visited++;
+                token.ThrowIfCancellationRequested();
+                try
                 {
-                    var result = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
-                    outcome = result.Outcome; requiresScan = result.RequiresScan;
-                    if (outcome == FileApplyOutcome.Deferred && !requiresScan)
+                    FileApplyOutcome outcome; bool requiresScan;
+                    bool opensDirectory = row.Work!.Stage is 0 or 2 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
+                    if (row.Work!.Stage is 0 or 3)
                     {
-                        var transition = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
-                        outcome = transition.Outcome; requiresScan = transition.RequiresScan;
+                        var result = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
+                        outcome = result.Outcome; requiresScan = result.RequiresScan;
+                        if (outcome == FileApplyOutcome.Deferred && !requiresScan)
+                        {
+                            var transition = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
+                            outcome = transition.Outcome; requiresScan = transition.RequiresScan;
+                        }
+                    }
+                    else
+                    {
+                        var result = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
+                        outcome = result.Outcome; requiresScan = result.RequiresScan;
+                        if (outcome == FileApplyOutcome.Deferred && !requiresScan)
+                        {
+                            var transition = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
+                            outcome = transition.Outcome; requiresScan = transition.RequiresScan;
+                        }
+                    }
+                    mustScan |= requiresScan;
+                    if (outcome is FileApplyOutcome.Applied or FileApplyOutcome.Unchanged)
+                    {
+                        if (outcome == FileApplyOutcome.Applied)
+                        {
+                            applied++; mustScan |= publications is not null;
+                            if (opensDirectory) { neededRepairPending = true; mustScan = true; }
+                            if (row.Work.Stage == 0 && index.LocalFiles.Find(row.PathKey) is { Type: 1, Deleted: false, FileId: not null })
+                                installedDirectory = true;
+                        }
+                        else await needed.RecomputeAsync([row.PathKey], token).ConfigureAwait(false);
+                        await index.ClearPullRetryAsync(row.PathKey, row.Work.Fingerprint, token).ConfigureAwait(false);
+                    }
+                    else { deferred++; await RetryAsync(row, null, token).ConfigureAwait(false); }
+                }
+                catch (Exception error) when (Retryable(error))
+                {
+                    failed++; await RetryAsync(row, error, token).ConfigureAwait(false);
+                    if (index.ReadApplyIntents().Any())
+                    {
+                        // Stage recovery releases a locked target's intent before another
+                        // independent path. Prepared recovery may itself require folder retry.
+                        Volatile.Write(ref scanRequested, 1); mustScan = true;
+                        recovered += await files.RecoverAsync(token).ConfigureAwait(false);
                     }
                 }
-                else
-                {
-                    var result = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
-                    outcome = result.Outcome; requiresScan = result.RequiresScan;
-                    if (outcome == FileApplyOutcome.Deferred && !requiresScan)
-                    {
-                        var transition = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
-                        outcome = transition.Outcome; requiresScan = transition.RequiresScan;
-                    }
-                }
-                mustScan |= requiresScan;
-                if (outcome is FileApplyOutcome.Applied or FileApplyOutcome.Unchanged)
-                {
-                    if (outcome == FileApplyOutcome.Applied) { applied++; mustScan |= publications is not null; if (opensDirectory) { neededRepairPending = true; mustScan = true; } }
-                    else await needed.RecomputeAsync([row.PathKey], token).ConfigureAwait(false);
-                    await index.ClearPullRetryAsync(row.PathKey, row.Work.Fingerprint, token).ConfigureAwait(false);
-                }
-                else { deferred++; await RetryAsync(row, null, token).ConfigureAwait(false); }
             }
-            catch (Exception error) when (Retryable(error))
-            {
-                failed++; await RetryAsync(row, error, token).ConfigureAwait(false);
-                if (index.ReadApplyIntents().Any())
-                {
-                    // Stage recovery releases a locked target's intent before another
-                    // independent path. Prepared recovery may itself require folder retry.
-                    Volatile.Write(ref scanRequested, 1); mustScan = true;
-                    recovered += await files.RecoverAsync(token).ConfigureAwait(false);
-                }
-            }
+            if (deleting) break;
+            if (!installedDirectory) deleting = true;
         }
+        while (visited < 1000);
         if (mustScan) { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
         if (Now >= nextStagingTicks && !neededRepairPending && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0 && !index.ReadApplyIntents().Any())
         {
@@ -295,7 +322,7 @@ public sealed class Puller : IDisposable
             else { nextStagingTicks = AddSeconds(Now, 3600); stagingRetryAttempt = 0; }
         }
         long finished = Now; long? next = NextWorkTicks(finished);
-        return new(work.Count, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
+        return new(visited, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
     }
 
     private async Task RetryAsync(NeededRow row, Exception? error, CancellationToken token)

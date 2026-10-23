@@ -248,6 +248,38 @@ public sealed class PullWorkTests : IDisposable
         index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBe(Now);
     }
 
+    [Fact]
+    public async Task ScheduledChildrenWaitForInstalledParentWithoutHidingRootWorkOrDeletes()
+    {
+        await using var index = await PrepareAsync(); byte[] own = Hash(9);
+        await index.Needed.UpsertAsync(Enumerable.Range(0, 1000)
+            .Select(i => Row($"missing/{i:D4}")).Append(Row("folder/sub", 0))
+            .Append(Row("folder/child")).Append(Row("root-dir", 0))
+            .Append(Row("root-file")).Append(Row("gone/child", 2)).ToArray(), Token);
+
+        index.ReadScheduledPullWork(Root, own, Now, limit: 2).Select(row => row.PathKey)
+            .ShouldBe(["ROOT-DIR", "ROOT-FILE"]);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBe(Now);
+        await index.Needed.DeleteAsync(["root-dir"], Token);
+        await index.Needed.DeleteAsync(["root-file"], Token);
+        await index.Needed.DeleteAsync(["gone/child"], Token);
+        index.ReadScheduledPullWork(Root, own, Now).ShouldBeEmpty();
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+
+        var parent = new LocalFileRow("folder", 1, 0, Now, 0, false, Now, null,
+            new Dictionary<ulong, ulong>(), null, null);
+        await index.LocalFiles.UpsertAsync([parent], Token);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+        await index.LocalFiles.UpsertAsync([parent with { FileId = new byte[16], Flags = LocalFileState.NeedsRescan }], Token);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+        await index.LocalFiles.UpsertAsync([parent with { FileId = new byte[16] }], Token);
+        index.ReadScheduledPullWork(Root, own, Now, limit: 2).Select(row => row.PathKey)
+            .ShouldBe(["FOLDER/SUB", "FOLDER/CHILD"]);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBe(Now);
+        await index.LocalFiles.UpsertAsync([parent with { FileId = new byte[16], Deleted = true }], Token);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+    }
+
     private async Task<FolderIndex> PrepareAsync()
     {
         var index = await FolderIndex.OpenAsync(Database, Token);

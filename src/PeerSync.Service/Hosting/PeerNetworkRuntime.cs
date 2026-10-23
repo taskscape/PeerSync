@@ -154,7 +154,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             runtime.predefinedHosts.Start();
             if (deviceSettings.UsePortMapping)
             {
-                runtime.portMapper = new PortMapper(deviceSettings.ListenPort, diagnostics);
+                runtime.portMapper = new PortMapper(deviceSettings.ListenPort, diagnostics, runtime.timeProvider);
                 runtime.portMapper.MappingsChanged += runtime.RefreshTrackerAnnouncements;
                 runtime.portMapper.Start();
             }
