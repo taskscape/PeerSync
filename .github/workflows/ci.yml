@@ -189,6 +189,11 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
+      - name: Verify WER exclusion ownership controls
+        shell: pwsh
+        run: |
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./build/Test-WerPolicy.ps1
+          if ($LASTEXITCODE -ne 0) { throw "WER policy controls failed ($LASTEXITCODE)." }
       - name: Build and verify signed development installers
         shell: pwsh
         run: ./build/Run-InstallerCi.ps1

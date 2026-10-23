@@ -1,5 +1,8 @@
 # P5.2 crash-dump boundary proposal
 
+Approved by the user on 2026-10-23. The design and `plan.md` now use this
+scoped acceptance boundary; implementation and independent review remain open.
+
 ## Why the current wording needs a decision
 
 `plan.md` says that keys must be absent from crash dumps. A running sync
@@ -45,7 +48,7 @@ memory capture separately:
    installed candidate. No claim is made that a mini dump can never contain a
    key.
 
-This proposal changes the literal P5.2 acceptance sentence. Until approved,
-P5.2 stays open. The independent reviewer, physical attack checks and release
-gate remain mandatory. The installed VM registry observation is only a
-configuration snapshot, not a proof of absent dumps.
+This proposal changes the literal P5.2 acceptance sentence. P5.2 stays open
+until the installed policy, LocalDumps audit, independent review, physical
+attack checks and release gate pass. The earlier installed VM registry
+observation is only a configuration snapshot, not a proof of absent dumps.

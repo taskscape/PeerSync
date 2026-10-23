@@ -119,6 +119,34 @@ Windows service; never run both against the same database and listener.
 Detailed event names, privacy rules and failure classification are in
 [diagnostics.md](diagnostics.md).
 
+## Crash-report policy
+
+Setup excludes `PeerSync.Service.exe`, `PeerSync.exe` and `psp.exe` from
+automatic machine-wide Windows Error Reporting. It leaves any exclusion
+already created by an administrator alone, maintains its own exclusions on
+upgrade and removes only its own entries at uninstall. Check the policy after
+install or upgrade:
+
+```powershell
+$wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
+Get-ItemProperty -LiteralPath "$wer\ExcludedApplications" -ErrorAction SilentlyContinue |
+    Select-Object 'PeerSync.Service.exe', 'PeerSync.exe', 'psp.exe'
+Get-ItemProperty -LiteralPath "$wer\LocalDumps" -ErrorAction SilentlyContinue
+Get-ItemProperty -LiteralPath "$wer\LocalDumps\PeerSync.Service.exe" -ErrorAction SilentlyContinue
+Get-ItemProperty -LiteralPath "$wer\LocalDumps\PeerSync.exe" -ErrorAction SilentlyContinue
+Get-ItemProperty -LiteralPath "$wer\LocalDumps\psp.exe" -ErrorAction SilentlyContinue
+```
+
+An administrator-configured global or per-executable `LocalDumps` policy can
+still create dumps even when automatic reporting is excluded. Review both
+locations before production use. If local dumps are required by your
+organization, restrict them as secret material and never attach them to a
+PeerSync support bundle. A privileged live/full dump of a running process may
+contain folder keys; PeerSync cannot remove keys it must actively use from
+an administrator-created memory capture. See the [approved security
+boundary](proposals/P5-crash-dump-boundary.md) and [Microsoft's LocalDumps
+documentation](https://learn.microsoft.com/en-us/windows/win32/wer/collecting-user-mode-dumps).
+
 For an uninstall that preserves synchronized files, use the client
 uninstaller without data removal. `PeerSync.Service.exe --remove-data` is an
 explicit destructive administration command: it removes PeerSync application

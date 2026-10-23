@@ -1302,6 +1302,7 @@ All randomness comes from `RandomNumberGenerator`. No home-made ciphers: the onl
 | Hostile paths in records | Reject `..`, absolute or UNC paths, drive letters, `:` (alternate streams), reserved names (`CON`, `NUL`...), trailing dots and spaces. Fuzz-test this check. |
 | Oversized or flooding input | Max frame 16 MiB, max 1,000 records per batch, per-peer request quotas, and a connection limit per IP. |
 | Local user abuses the control pipe | The pipe ACL allows only Administrators and a local `PeerSync Users` group the installer creates. |
+| Automatic crash reporting captures live folder keys | Installed PeerSync executables opt out of automatic Windows Error Reporting. PeerSync creates no dumps and excludes them from logs and support bundles. Administrators audit global and per-executable `LocalDumps` before deployment; any configured or manually captured dump is privileged secret material. A running process necessarily holds keys, so an administrator-created full/live dump is outside the application's key-confidentiality guarantee. Independent review verifies this boundary on an installed candidate. |
 
 ### Encrypted (untrusted) peers, phase 6
 

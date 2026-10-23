@@ -57,6 +57,7 @@ Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
 Source: "Update-Helper.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Set-WerPolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\service\*.exe"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
 Source: "{#StageRoot}\service\*.dll"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
@@ -229,6 +230,10 @@ begin
   RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--init');
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\tools\Set-WerPolicy.ps1') +
+    '" -ExecutableNames PeerSync.Service.exe,PeerSync.exe,psp.exe');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\tools\Update-Helper.ps1') + '" -Register');
   RunCommand(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall delete rule name="PeerSync"');
@@ -260,4 +265,8 @@ begin
       'Your synced folders and their files are not touched.',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--remove-data');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\tools\Set-WerPolicy.ps1') +
+    '" -ExecutableNames PeerSync.Service.exe,PeerSync.exe,psp.exe -Remove');
 end;

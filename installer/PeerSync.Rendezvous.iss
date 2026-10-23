@@ -42,6 +42,7 @@ Name: "{commonappdata}\PeerSync.Rendezvous\logs"; Flags: uninsneveruninstall
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
 Source: "Grant-RendezvousCertificate.ps1"; Flags: dontcopy noencryption
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Set-WerPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 Source: "After-RendezvousRenewal.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 #ifndef UnsignedDevelopment
@@ -174,6 +175,9 @@ begin
     '"' + ExpandConstant('{commonappdata}\PeerSync.Rendezvous\logs') + '" /grant "NT SERVICE\PeerSyncRendezvous:(OI)(CI)M"');
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Grant-RendezvousCertificate.ps1') + '"');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\Set-WerPolicy.ps1') + '" -ExecutableNames PeerSync.Rendezvous.exe');
   RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous TCP 99"');
   RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous UDP 99"');
   RequireSuccess(ExpandConstant('{sys}\netsh.exe'),
@@ -197,4 +201,7 @@ begin
     end;
     if not IsServiceStopped then RaiseException('PeerSyncRendezvous did not stop before uninstall.');
   end;
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\Set-WerPolicy.ps1') + '" -ExecutableNames PeerSync.Rendezvous.exe -Remove');
 end;

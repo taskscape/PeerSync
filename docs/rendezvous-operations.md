@@ -50,6 +50,17 @@ The service identity must not be able to edit the administrator-run renewal
 scripts in the parent data directory. Setup removes that inherited grant when
 upgrading an earlier development installation.
 
+Setup also excludes `PeerSync.Rendezvous.exe` from automatic machine-wide
+Windows Error Reporting, preserving a pre-existing administrator exclusion
+and removing only a setup-owned entry at uninstall. Check that executable
+under `HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\ExcludedApplications`
+after installation. Audit both the global `LocalDumps` key and
+`LocalDumps\PeerSync.Rendezvous.exe` before public deployment; those
+administrator-configured dumps operate independently of the automatic-report
+exclusion. Protect any retained dump as privileged secret material. The
+[approved dump boundary](proposals/P5-crash-dump-boundary.md) also applies to
+this server process.
+
 ```powershell
 Get-Service PeerSyncRendezvous
 Get-NetTCPConnection -State Listen -LocalPort 99
