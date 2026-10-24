@@ -53,3 +53,11 @@ P4.1.4/5/7 and P4.2 still retain their own acceptance criteria, including
 native NAT choice, relay capacity/diagnostics and physical WAN results.
 Development code signing is not a public release signature; Gate P4 and Gate
 P5 remain open.
+
+The development-signed 1.0.21.0 rendezvous installer was sent to the physical
+server's Tailscale Taildrop inbox on 2026-10-24. The sender-side command exited
+0. Its local Authenticode status was Valid and SHA-256 was
+`8194A9382219AE2F8D431EF64305FB544684F149B3A88B6985A73BC52E894EBA`.
+This was package delivery only: the server still needs a recipient-side hash
+check, installed upgrade, and deployed diagnostics before the open P4 checks
+can be credited.
