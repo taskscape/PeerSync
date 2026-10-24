@@ -97,5 +97,7 @@ stream, became peer-ready and ran folder sync passes. Combined with the
 on-link Ethernet route, it confirms a live native LAN QUIC session between
 the physical PCs. This was observed before the source selected-route events
 were deployed, and the journal does not correlate the previously reported
-file's blocks to this specific session. The separate 1 GiB mutual-certificate
-QUIC throughput run remains pending.
+file's blocks to this specific session. A separate 1 GiB mutual-certificate
+QUIC throughput run subsequently passed on this same physical LAN; see
+[the correlated spike evidence](P0-physical-lan-quic-2026-10-24.md). That run
+does not identify the session used by the earlier product file transfers.
