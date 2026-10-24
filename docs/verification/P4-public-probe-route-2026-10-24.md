@@ -28,3 +28,7 @@ These checks do **not** prove public provider admission from a separate
 network. They also do not validate native NAT traversal, direct/relay path
 selection, or the deferred mobile/CGNAT matrix. Keep P4.3.3/P4.3.4 and Gate
 P4 open until a probe from a genuinely independent network is retained.
+
+A later [third-PC mobile-hotspot probe](P4-mobile-hotspot-probe-2026-10-24.md)
+supplies that independent network result and closes P4.3.3/P4.3.4 and the
+Gate P4 UDP-99 item. The peer-sync, native NAT/relay and soak gates remain open.

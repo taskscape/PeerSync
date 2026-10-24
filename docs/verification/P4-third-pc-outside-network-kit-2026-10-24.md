@@ -29,3 +29,8 @@ connection, and retain the route, observed address, correlated HTTP/2 and
 HTTP/3 results, and exit code. A successful probe closes only outside-network
 rendezvous admission. A joined-folder transfer, direct/relay classification,
 NAT variants, and the 72-hour WAN soak still require separate field evidence.
+
+The operator subsequently ran the probe from the third PC on a mobile hotspot.
+Its [retained result](P4-mobile-hotspot-probe-2026-10-24.md) passed both
+protocols over an independent route. The joined-folder and NAT/relay tests
+remain open.

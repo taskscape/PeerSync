@@ -2578,14 +2578,16 @@ public sealed class PortMapper(int port, ILogger<PortMapper> log) : IAsyncDispos
 - [x] **P4.3.2 Certificate with win-acme**
   - Done when: a Let's Encrypt certificate for `sync.taskscape.com` is in `LocalMachine\My`, renewal is scheduled, and the post-renewal script restarts `PeerSyncRendezvous`.
   - The [server deployment](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) verified the current Let's Encrypt certificate with a working machine key in `My`, the existing scheduled win-acme renewal configured for `My`, and a successful manual run of the renewal hook that regranted access and restarted the service. A future real issuance has not yet exercised that configuration.
-- [ ] **P4.3.3 Port 99 free and open**
+- [x] **P4.3.3 Port 99 free and open**
   - Done when: nothing else listens on 99, the Windows Firewall rules exist, and the provider allows TCP 99 (confirmed) and UDP 99 (to verify).
   - Run the packaged deployment preflight on the server to identify local listener/rule/certificate blockers. Its local result cannot prove provider admission; retain the outside-network probe as the acceptance check.
-  - The [2026-10-23 preflight](docs/verification/P4-public-endpoint-preflight-2026-10-23.md) timed out before server installation. The [installed server](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) now owns both ports and passes local health. Public-name probes from both installed PCs pass both protocols, but their [routes and observed addresses](docs/verification/P4-public-probe-route-2026-10-24.md) are consistent with a shared local router, so independent provider admission remains unverified.
-- [ ] **P4.3.4 Install and verify**
+  - The [2026-10-23 preflight](docs/verification/P4-public-endpoint-preflight-2026-10-23.md) timed out before server installation. The [installed server](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) now owns both ports and passes local health. Public-name probes from the first two installed PCs pass both protocols, but their [routes and observed addresses](docs/verification/P4-public-probe-route-2026-10-24.md) were consistent with a shared local router; they alone did not establish independent provider admission.
+  - A [third PC on a separate mobile-hotspot route](docs/verification/P4-mobile-hotspot-probe-2026-10-24.md) now reaches the installed server over correlated HTTP/2/TCP and HTTP/3/UDP 99 with exit 0, closing the independent provider-admission check. Peer sync and NAT path selection remain separate gates.
+- [x] **P4.3.4 Install and verify**
   - Done when: the rendezvous installer has run, `/healthz` answers, and `psp probe sync.taskscape.com:99` passes from an outside network for both TCP and UDP. If UDP fails, ask the provider to open UDP 99 and record the outcome in section 2.
-  - Installer 1.0.17.0 completed on the server, local `/healthz` passed, and both PCs' installed CLIs reached the public DNS name over HTTP/2 and HTTP/3; see [deployment evidence](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) and [route evidence](docs/verification/P4-public-probe-route-2026-10-24.md). Those private-source routes may be hairpinned and do not close the required independent outside-network check. The 2026-10-23 pre-install failure remains historical evidence.
-  - A [single-file x64 client kit for a third PC](docs/verification/P4-third-pc-outside-network-kit-2026-10-24.md) is packaged and hash-verified for a mobile-hotspot probe. The outside-network result is pending; packaging does not close this item.
+  - Installer 1.0.17.0 completed on the server, local `/healthz` passed, and both first PCs' installed CLIs reached the public DNS name over HTTP/2 and HTTP/3; see [deployment evidence](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) and [route evidence](docs/verification/P4-public-probe-route-2026-10-24.md). Those private-source routes may have been hairpinned and did not alone close the required independent outside-network check. The 2026-10-23 pre-install failure remains historical evidence.
+  - A [single-file x64 client kit for a third PC](docs/verification/P4-third-pc-outside-network-kit-2026-10-24.md) was packaged and hash-verified for a mobile-hotspot probe. Packaging alone did not close this item.
+  - The [third-PC mobile-hotspot probe](docs/verification/P4-mobile-hotspot-probe-2026-10-24.md) completed with an independent Wi-Fi route, server-observed public address, correlated HTTP/2 and HTTP/3 success, and exit 0. It closes this deployment check, not the folder-transfer or relay gates.
 
 ### 10.4 Server commands (P4.3)
 
@@ -2628,7 +2630,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [ ] Complete deferred P0.2.2: record same-LAN, full-cone home NAT, port-restricted home NAT and mobile/CGNAT outcomes for the required binding alternatives, log the final transport decision and reconcile P4.2.3, then close P0.2.2. Tailscale and rendezvous reachability do not substitute for these checks.
 - [ ] Sync works between two home networks behind different NATs, and with one PC behind a mobile hotspot (CGNAT).
 - [ ] With direct paths blocked, the relay carries the sync. Its rate caps hold, and taskscape.com stays responsive (load test attached).
-- [ ] UDP 99 verified end to end, or the TCP-only outcome is logged with its impact.
+- [x] UDP 99 verified end to end from a separate mobile-hotspot network: the [third-PC probe](docs/verification/P4-mobile-hotspot-probe-2026-10-24.md) completed correlated HTTP/3 and HTTP/2 admission with exit 0.
 - [ ] A 72-hour soak across the WAN with zero data loss.
   - The same [physical soak procedure](docs/physical-soak.md) can retain hourly WAN comparisons and correlated diagnostic bundles. The local two-guest control does not satisfy this gate.
 
