@@ -51,3 +51,19 @@ exited 0 on 2026-10-24. This is an independent package-delivery path, not a
 PeerSync file-convergence result. The sender cannot read the third PC's
 Downloads folder with its current Windows credentials, so recipient-side hash,
 installation and diagnostic collection still require field confirmation.
+
+A later physical first-PC upgrade [verified forced dashboard closure](P3-open-dashboard-upgrade-repair-2026-10-24.md),
+so the current third-PC kit is now
+`artifacts/deploy/PeerSync-OutsidePC-1.0.23.0-x64-upgrade.zip` (166,410,038
+bytes, SHA-256
+`51CA6DCC25B059CC579AEE97CCECCFFA555987045E701782906D2603AA7E9A24`).
+Its embedded development-signed 1.0.23.0 setup has SHA-256
+`A3CAF857296B42175A455ADB46F51651B8CFF9C6DB738BD318C6E32FFCA1CCC0`,
+matching the standalone signed installer; the ZIP contains exactly six named
+entries and no private key or folder capability. The reproducible builder is
+`build/field/Build-OutsidePcKit.ps1`, and the collector now says explicitly to
+transfer the output ZIP independently when folder sync is stalled. The sender
+used Tailscale Taildrop to send this exact new kit to the third PC; the command
+exited 0. Recipient-side hash, installation, actual socket diagnosis and file
+convergence are still unverified. Tailscale remains an overlay path; a native
+NAT result requires disabling its peer route during that separate test.

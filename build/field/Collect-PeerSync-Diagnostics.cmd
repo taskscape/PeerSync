@@ -15,7 +15,7 @@ if errorlevel 1 (
     exit /b 3
 )
 
-echo Collecting a sanitized PeerSync diagnostic ZIP in this shared folder...
+echo Collecting a sanitized PeerSync diagnostic ZIP beside this collector...
 "%PSP%" diagnostics
 set "RESULT=%ERRORLEVEL%"
 popd
@@ -27,6 +27,6 @@ if not "%RESULT%"=="0" (
 )
 
 echo The new PeerSync-diagnostics-*.zip is beside this collector.
-echo Leave it in the joined folder so PeerSync can deliver it to the first PC.
+echo Transfer the ZIP through a trusted channel if PeerSync sync is stalled.
 pause
 exit /b 0
