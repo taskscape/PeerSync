@@ -196,7 +196,9 @@ and double-click it there; the sanitized `PeerSync-diagnostics-*.zip` is
 created beside it and can sync to the other PC. The helper does not request
 elevation, change configuration, include network addresses, or install an
 update. Its window stays open to show a collection error. Review the ZIP
-before sharing it outside the test group.
+before sharing it outside the test group. A local double-click-equivalent
+smoke of the `.cmd` returned exit 0 and created a sanitized ZIP under
+`artifacts/field/diagnostic-collector-batch-smoke-20261024/`.
 
 `build/Collect-Diagnostics.ps1` remains a legacy development-probe collector.
 It copies source event lines and does not apply the CLI's strict field
