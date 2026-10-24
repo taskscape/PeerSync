@@ -74,3 +74,12 @@ The selected LAN/public/relay candidate is not recorded in the installed
 version's sanitized status output; the new `connection.candidate_selected`
 diagnostic event will make that path directly identifiable after deployment
 of a build containing it.
+
+A later first-PC LAN preflight at 2026-10-24 09:36:28 UTC found a direct
+on-link Ethernet route from `192.168.0.176` to the second PC's
+`192.168.0.183`, a reachable neighbor entry and a 1 Gbps local NIC. The
+first-PC service journal also recorded LAN discovery of `192.168.0.183`.
+These observations establish that a physical LAN candidate is available;
+they do not identify the selected path of either active PeerSync session or
+measure the required 1 GiB throughput. The bounded raw preflight is retained
+at `artifacts/field/p0-quic-lan-20261024/first-pc-preflight.json`.
