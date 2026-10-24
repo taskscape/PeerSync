@@ -14,6 +14,12 @@ to an immutable run directory at
 `prepared.json` retains the source, hash, fixture, UTC preparation time and
 free-space observation.
 
+At repository head `2380b02`, a source diff from `dafd167` is empty for the
+benchmark, Core, Crypto, Protocol, Storage, Engine and `PeerSync.Net/InMemory`
+paths used by this scenario. Later ConnectionManager and PortMapper changes
+are outside the in-memory scale transport. This establishes unchanged relevant
+inputs for the queued fixed binary, not a whole-repository current-head build.
+
 The retained fixture is
 `artifacts/scale/p5-20261022T223804-81cef95f6d244dc09c796b053430f8be-fixture`.
 It contains the million-file native source tree and canonical `index.db`.

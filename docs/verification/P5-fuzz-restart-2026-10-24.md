@@ -23,6 +23,12 @@ outside the fuzz inputs were dirty; the fuzz inputs were not. The published
 A three-second seven-target smoke produced 1,165 seeds and zero crashes.
 `launch.json` retains this provenance and smoke result.
 
+At repository head `2380b02`, a source diff from `30bf923` is empty for the
+fuzz harness and its Core, Crypto, Protocol, Engine and Storage inputs. Later
+networking, rendezvous and documentation edits do not change the seven fuzz
+targets being exercised by this fixed binary. This is input-path provenance,
+not a claim that the binary contains every later repository edit.
+
 `PeerSync-P5-Fuzz-20261024` started the exact binary with `--seconds 86400` at
 2026-10-24 09:05:58 UTC as a hidden SYSTEM scheduled task with a 26-hour
 execution limit. Its child PID was 52808. The companion
