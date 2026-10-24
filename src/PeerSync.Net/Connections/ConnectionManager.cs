@@ -2,6 +2,9 @@ using System.Collections.Concurrent;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Net.Quic;
+using PeerSync.Net.Relay;
+using PeerSync.Net.Tcp;
 
 namespace PeerSync.Net.Connections;
 
@@ -17,6 +20,8 @@ public sealed class ConnectionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<string, ManagedPeerConnection> active = new(StringComparer.Ordinal);
     private readonly object gate = new();
     private bool disposed;
+
+    private readonly record struct CandidateAttempt(ConnectionCandidate Candidate, ManagedPeerConnection Session);
 
     public ConnectionManager(ReadOnlySpan<byte> localDeviceId, DiagnosticJournal? diagnostics = null)
         : this(localDeviceId, diagnostics, (duration, token) => Task.Delay(duration, token)) { }
@@ -68,15 +73,17 @@ public sealed class ConnectionManager : IAsyncDisposable
         var pending = ordered.Select((candidate, index) => ConnectCandidateAsync(candidate, index,
             expectedBytes, attempts.Token)).ToList();
         ManagedPeerConnection? winner = null;
+        ConnectionCandidate? winnerCandidate = null;
         ManagedPeerConnection? selected = null;
         try
         {
             while (pending.Count != 0 && selected is null)
             {
-                Task<ManagedPeerConnection?> completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                Task<CandidateAttempt?> completed = await Task.WhenAny(pending).ConfigureAwait(false);
                 pending.Remove(completed);
-                ManagedPeerConnection? candidate = await completed.ConfigureAwait(false);
-                if (candidate is null) continue;
+                CandidateAttempt? authenticated = await completed.ConfigureAwait(false);
+                if (authenticated is not { } attempt) continue;
+                ManagedPeerConnection candidate = attempt.Session;
                 if (cancellationToken.IsCancellationRequested)
                 {
                     try { await candidate.DisposeAsync().ConfigureAwait(false); }
@@ -96,6 +103,7 @@ public sealed class ConnectionManager : IAsyncDisposable
                     selected = await InstallAsync(candidate,
                         expectedBytes ?? candidate.RemoteDeviceId).ConfigureAwait(false);
                     winner = candidate;
+                    winnerCandidate = attempt.Candidate;
                 }
                 catch (IOException) when (candidate.Closed.IsCompleted)
                 {
@@ -125,6 +133,11 @@ public sealed class ConnectionManager : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
         }
         if (selected is null) throw new IOException("No transport candidate completed authenticated connection.");
+        if (winnerCandidate is not null && ReferenceEquals(selected, winner) && !selected.Closed.IsCompleted)
+        {
+            diagnostics?.TryWrite(new("connection.candidate_selected", CandidateOperation(winnerCandidate))
+                { SessionId = selected.SessionId, Transport = CandidateTransport(winnerCandidate, selected) });
+        }
         return selected;
     }
 
@@ -191,7 +204,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         return TimeSpan.FromTicks(Math.Min(InitialReconnectDelay.Ticks * multiplier, MaximumReconnectDelay.Ticks));
     }
 
-    private async Task<ManagedPeerConnection?> ConnectCandidateAsync(ConnectionCandidate candidate, int index,
+    private async Task<CandidateAttempt?> ConnectCandidateAsync(ConnectionCandidate candidate, int index,
         byte[]? expectedRemoteDeviceId, CancellationToken cancellationToken)
     {
         try
@@ -203,7 +216,7 @@ public sealed class ConnectionManager : IAsyncDisposable
                 await delay(TimeSpan.FromTicks(AttemptStagger.Ticks * index), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             diagnostics?.TryWrite(new("connection.candidate_started", CandidateOperation(candidate))
-                { Level = DiagnosticLevel.Debug, Transport = candidate.Transport,
+                { Level = DiagnosticLevel.Debug, Transport = CandidateTransport(candidate),
                     RemoteAddress = candidate.RemoteAddress, RemotePort = candidate.RemotePort });
             ManagedPeerConnection session = await candidate.ConnectAsync(cancellationToken).ConfigureAwait(false);
             if (expectedRemoteDeviceId is not null
@@ -212,7 +225,9 @@ public sealed class ConnectionManager : IAsyncDisposable
                 await session.DisposeAsync().ConfigureAwait(false);
                 throw new AuthenticationException("Authenticated candidate has a different device identity.");
             }
-            return session;
+            diagnostics?.TryWrite(new("connection.candidate_authenticated", CandidateOperation(candidate))
+                { SessionId = session.SessionId, Transport = CandidateTransport(candidate, session) });
+            return new CandidateAttempt(candidate, session);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -221,7 +236,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("connection.candidate_failed", CandidateOperation(candidate))
-                { Level = DiagnosticLevel.Warning, Transport = candidate.Transport,
+                { Level = DiagnosticLevel.Warning, Transport = CandidateTransport(candidate),
                     RemoteAddress = candidate.RemoteAddress, RemotePort = candidate.RemotePort,
                     ErrorCode = SafeError(error), HResult = error.HResult });
             return null;
@@ -235,6 +250,18 @@ public sealed class ConnectionManager : IAsyncDisposable
             ? $"candidate.{source}.{transport.ToString().ToLowerInvariant()}"
             : $"candidate.{source}";
     }
+
+    private static DiagnosticTransport? CandidateTransport(ConnectionCandidate candidate,
+        ManagedPeerConnection? session = null)
+        => candidate.Transport ?? (candidate.Source == ConnectionSource.Relay
+            ? DiagnosticTransport.Relay
+            : session?.Session switch
+            {
+                QuicPeerSession => DiagnosticTransport.Quic,
+                TcpPeerProtocolSession => DiagnosticTransport.Tcp,
+                RelayPeerProtocolSession => DiagnosticTransport.Relay,
+                _ => null,
+            });
 
     private async ValueTask<ManagedPeerConnection> InstallAsync(ManagedPeerConnection candidate, ReadOnlyMemory<byte> expectedRemoteId)
     {
@@ -332,15 +359,15 @@ public sealed class ConnectionManager : IAsyncDisposable
         }
     }
 
-    private static async Task DisposeLateAttemptsAsync(IEnumerable<Task<ManagedPeerConnection?>> pending)
+    private static async Task DisposeLateAttemptsAsync(IEnumerable<Task<CandidateAttempt?>> pending)
     {
         var tasks = pending.ToArray();
         if (tasks.Length == 0) return;
         try
         {
-            ManagedPeerConnection?[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
+            CandidateAttempt?[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
             foreach (var result in results)
-                if (result is not null) await result.DisposeAsync().ConfigureAwait(false);
+                if (result is { } attempt) await attempt.Session.DisposeAsync().ConfigureAwait(false);
         }
         catch { }
     }

@@ -62,3 +62,15 @@ demonstrates basic two-way synchronization after separately installing the
 clients. It does not establish the P3 unassisted, app-only, under-ten-minute
 screen-recorded gate, a native direct or relay route, or the P2/P4 physical
 network and soak requirements.
+
+A fresh second-PC `psp status --json` later reported the same installation
+instance `c0223abf-fc92-4bbb-b23c-8f7135514fd7` at sequence 9703, with
+`productionSyncAvailable=true`, two connected rows for the first-PC device,
+and `clockState=Accepted` on both. An earlier sequence-99 status with no peers
+was a pre-join snapshot. The first PC also reported connected, accepted rows
+in a separate local check. Those snapshots were taken at different times and
+their session IDs differ, so they are not a correlated same-session capture.
+The selected LAN/public/relay candidate is not recorded in the installed
+version's sanitized status output; the new `connection.candidate_selected`
+diagnostic event will make that path directly identifiable after deployment
+of a build containing it.

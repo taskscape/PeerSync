@@ -267,6 +267,14 @@ public sealed class ConnectionManagerTests
             failed.RootElement.GetProperty("errorCode").GetString().ShouldBe("IOException");
             records.ShouldContain(line => line.Contains("candidate.public.tcp", StringComparison.Ordinal)
                 && line.Contains("\"transport\":\"Tcp\"", StringComparison.Ordinal));
+            foreach (string eventName in new[] { "connection.candidate_authenticated", "connection.candidate_selected" })
+            {
+                using JsonDocument path = JsonDocument.Parse(records.Single(line => line.Contains(eventName, StringComparison.Ordinal)));
+                path.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.public.tcp");
+                path.RootElement.GetProperty("sessionId").GetGuid().ShouldBe(winner.SessionId);
+                path.RootElement.GetProperty("transport").GetString().ShouldBe("Tcp");
+                path.RootElement.TryGetProperty("remoteAddress", out _).ShouldBeFalse();
+            }
         }
         finally
         {
