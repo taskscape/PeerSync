@@ -25,7 +25,25 @@ dashboard.
 An unsigned-development x64 ISCC compile of the changed script succeeded and
 produced `artifacts/tests/installer-close-apps/PeerSync-Setup-CloseApps-Compile.exe`
 (166,911,043 bytes). This is syntax/package validation, not a signed or
-installed upgrade. A later field or VM upgrade with the dashboard deliberately
-left open must verify that setup closes it, exits 0, restarts the service, and
-preserves settings and joined-folder bytes before this repair is called
-deployment-verified.
+installed upgrade. The following field check therefore left the dashboard
+deliberately open and compared service, settings and joined-folder state.
+
+That field check subsequently passed on the first physical PC. The signed
+development x64 1.0.23.0 installer (166,904,416 bytes, SHA-256
+`A3CAF857296B42175A455ADB46F51651B8CFF9C6DB738BD318C6E32FFCA1CCC0`)
+was built from revision `57b95c9` and verified with a Valid Authenticode
+signature. An installed 1.0.21.0 dashboard process was deliberately left
+running in the interactive session while `/VERYSILENT /SUPPRESSMSGBOXES
+/NORESTART` setup ran. Setup exited 0; its log records `Shutting down
+applications using our files. (forced)`, and the dashboard process exited.
+The installed app advanced to 1.0.23.0 and the PeerSync service was Running.
+The settings SHA-256 and all seven pre-upgrade text-file hashes in the joined
+test folder matched the saved pre-upgrade snapshot. All three installed
+executables had Valid Authenticode signatures, and `psp status --json`
+reported authenticated, clock-accepted sessions with both existing remote
+devices after the restart. The bounded before/after JSON snapshots and setup
+log are in `artifacts/field/client-force-close-upgrade-20261024/`.
+
+This verifies the forced-close upgrade path on this physical Windows client.
+It does not establish standard-user UI behavior, other OS builds, third-PC
+installation, or the release-signed deployment gate.
