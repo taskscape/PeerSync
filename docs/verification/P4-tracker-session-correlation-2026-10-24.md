@@ -53,3 +53,32 @@ the TRX reports are in `artifacts/tests/http2-keepalive/`. These short local
 tests establish that the mTLS tracker/relay flow still works. They do not
 exercise a 319-second network path or prove that the deployed server responds
 to PINGs, so the field check remains open.
+
+Development-signed 1.0.21.0 x64 client and rendezvous installers were built
+from committed source `42b52983390b1387893e7ce2c7d6fcad978cb4fe`.
+The client installer is 166,884,512 bytes with SHA-256
+`785C51B2F87562122C534AAA433BA20B02B88532085DDB99EE4EB9A410CE68C5`;
+the rendezvous installer is 66,299,784 bytes with SHA-256
+`8194A9382219AE2F8D431EF64305FB544684F149B3A88B6985A73BC52E894EBA`.
+Both Authenticode signatures are Valid and their hashes match their manifests.
+The installers are explicitly development-only, not release-signed.
+
+The first PC upgraded from 1.0.19.0 to 1.0.21.0. The installer log records
+successful commands and no Windows restart. The service is Running with
+production sync available and four connected peer entries. The settings hash
+and all three test text-file hashes match the pre-upgrade snapshot. The
+installed `PeerSync.Service.exe` and `PeerSync.Net.dll` signatures are Valid and
+their SHA-256 hashes match the just-published payloads. The before/after
+records and setup log are under
+`artifacts/field/client-keepalive-upgrade-20261024/`. A new tracker session
+connected and logged its server-issued session ID. At 12:30:47 UTC, that
+session had remained on the same established TCP connection for 11 minutes,
+completed refreshes at 12:24:47 and 12:29:47 UTC, and logged zero tracker
+failures or disconnects. Its exact bounded observation is retained as
+`tracker-observation.json` beside the setup evidence. Four earlier 1.0.19.0
+sessions had reset after roughly 319 seconds, so this is a field improvement
+across two former failure windows. The server still runs the older version;
+its new keepalive setting and enhanced failure journal have not been deployed.
+The observation does not expose the PING frames or prove whether an idle
+middlebox, server behavior or another cause produced the earlier resets.
+Longer operation, same-session server logs and the third-PC bundle remain open.
