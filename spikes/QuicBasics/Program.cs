@@ -30,7 +30,12 @@ if ((args.Length != requiredArgs && args.Length != requiredArgs + 2)
     PrintUsage();
     return 2;
 }
-using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+// A listener may be started well before the remote operator is ready. Extend
+// its accept window for a longer requested transfer timeout, while preserving
+// the existing three-minute minimum for short timeout diagnostics. The transfer
+// gets a fresh budget after authentication; dial attempts retain three minutes.
+using var timeout = new CancellationTokenSource(server
+    ? TimeSpan.FromSeconds(Math.Max(180, transferTimeoutSeconds)) : TimeSpan.FromMinutes(3));
 string logDirectory = Path.Combine(AppContext.BaseDirectory, "logs", Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
 using var log = new DiagnosticJournal(logDirectory, "QuicBasics", true);
 Console.Error.WriteLine($"LOGS {logDirectory}");
