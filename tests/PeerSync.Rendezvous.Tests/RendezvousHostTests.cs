@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography;
@@ -34,6 +35,16 @@ public sealed class RendezvousHostTests
         string origin = $"https://127.0.0.1:{port}";
         string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-host",
             Guid.NewGuid().ToString("N")));
+        var measurements = new System.Collections.Concurrent.ConcurrentDictionary<string, long>();
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == RendezvousMetrics.MeterName)
+                listener.EnableMeasurementEvents(instrument);
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
+            measurements.AddOrUpdate(instrument.Name, value, (_, previous) => previous + value));
+        meterListener.Start();
         await using WebApplication app = RendezvousHost.Build(
         ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
             "--Rendezvous:LogDirectory=" + logs,
@@ -59,6 +70,17 @@ public sealed class RendezvousHostTests
             using HttpResponseMessage healthResponse = await client.SendAsync(health, timeout.Token);
             healthResponse.IsSuccessStatusCode.ShouldBeTrue();
             healthResponse.Version.ShouldBe(HttpVersion.Version20);
+
+            using var bootstrap = new HttpRequestMessage(HttpMethod.Get,
+                origin + "/.well-known/peersync.json")
+            { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            using HttpResponseMessage bootstrapResponse = await client.SendAsync(bootstrap, timeout.Token);
+            bootstrapResponse.IsSuccessStatusCode.ShouldBeTrue();
+            using JsonDocument bootstrapBody = JsonDocument.Parse(
+                await bootstrapResponse.Content.ReadAsStringAsync(timeout.Token));
+            bootstrapBody.RootElement.GetProperty("schema").GetString().ShouldBe("peersync-bootstrap-v1");
+            bootstrapBody.RootElement.GetProperty("tracker").GetString().ShouldBe(origin);
+            bootstrapBody.RootElement.GetProperty("relay").GetString().ShouldBe(origin);
 
             using var probe = new HttpRequestMessage(HttpMethod.Get, origin + "/probe")
             { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
@@ -103,7 +125,8 @@ public sealed class RendezvousHostTests
         observed.SessionId.Length.ShouldBe(16);
         observed.Endpoint.Address.ShouldBe("127.0.0.1");
         var announce = new Announce { ListenPort = 47821 };
-        announce.FolderIds.Add(ByteString.CopyFrom(new byte[32]));
+        byte[] folderId = RandomNumberGenerator.GetBytes(32);
+        announce.FolderIds.Add(ByteString.CopyFrom(folderId));
         await session.RequestStream.WriteAsync(new ClientMessage { Announce = announce }, timeout.Token);
         (await session.ResponseStream.MoveNext(timeout.Token)).ShouldBeTrue();
         session.ResponseStream.Current.PeerList.FolderId.Length.ShouldBe(32);
@@ -157,6 +180,18 @@ public sealed class RendezvousHostTests
         bundleLog.ShouldNotContain("\"remoteAddress\"");
         bundleLog.ShouldNotContain("\"remotePort\"");
         bundleLog.ShouldNotContain("\"folderId\"");
+        bundleLog.ShouldNotContain(Convert.ToHexString(folderId));
+        bundleLog.ShouldNotContain(Convert.ToBase64String(folderId));
+        string rawLog = string.Join("\n", Directory.GetFiles(logs, "*.jsonl")
+            .Select(File.ReadAllText));
+        rawLog.ShouldNotContain(Convert.ToHexString(folderId));
+        rawLog.ShouldNotContain(Convert.ToBase64String(folderId));
+        measurements.TryGetValue("peersync.probe.requests", out long probeMeasurements).ShouldBeTrue();
+        probeMeasurements.ShouldBeGreaterThanOrEqualTo(1);
+        measurements.TryGetValue("peersync.tracker.sessions.opened", out long trackerMeasurements).ShouldBeTrue();
+        trackerMeasurements.ShouldBeGreaterThanOrEqualTo(1);
+        measurements.TryGetValue("peersync.authentication.rejected", out long authMeasurements).ShouldBeTrue();
+        authMeasurements.ShouldBeGreaterThanOrEqualTo(1);
     }
 
     [Fact]
