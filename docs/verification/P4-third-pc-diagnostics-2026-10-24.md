@@ -56,15 +56,20 @@ whether it was created in the third PC's actual joined folder. A new
 50-byte `outside-pc-20261024.txt` was placed in the first PC's physical test
 folder at 19:19 UTC; its SHA-256 is
 `A3C33CC68FB65F591D79CEAC7B94B96EA421556AA6527C42AC7A920AD837407A`.
-Its arrival and native hash on the third PC remain to be checked.
-The first PC has since indexed this new path locally and received an index
-record for it from each of the two connected devices; the needed-work table
-remains empty. This is evidence of metadata propagation, not a read of the
-third PC's native file bytes.
+The first PC indexed this new path locally and received an index record for
+it from each of the two connected devices; the needed-work table remained
+empty. The operator then verified the native file at
+`C:\Users\offic\Documents\PeerSync-WAN-Test\outside-pc-20261024.txt` on the
+third PC with `Get-FileHash`; its SHA-256 matched the first PC's value above.
+That closes this specific byte-for-byte first-to-third delivery check. The third PC
+had been reconnected to Tailscale after diagnostic collection and was on
+Tailscale when the hash was checked. This run did not isolate the native WAN
+path, so it cannot close the NAT or forced-relay gates.
 
 The independent hotspot probe also passed correlated HTTP/2/TCP and
 HTTP/3/UDP rendezvous checks with `productionSyncAvailable=true` and
 connected, clock-accepted peers. These results close the diagnostic gap for
-the original socket warning and show actual relay authentication. They do
-not close Gate P4's native NAT matrix, WAN file convergence, forced relay
-byte-transfer/load check or soak.
+the original socket warning, show actual relay authentication, and verify
+one file's bytes on the first and third PCs while Tailscale was available.
+They do not close Gate P4's native NAT matrix, Tailscale-free WAN file
+convergence, forced relay byte-transfer/load check or soak.
