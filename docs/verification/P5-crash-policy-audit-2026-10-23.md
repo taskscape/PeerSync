@@ -33,3 +33,15 @@ start by the GitHub Actions budget. P5.2 stays open.
 Microsoft documents that LocalDumps settings operate independently of normal
 WER reporting and can be set globally or per application:
 [Collecting user-mode dumps](https://learn.microsoft.com/en-us/windows/win32/wer/collecting-user-mode-dumps).
+
+On 2026-10-24, the packaged audit ran after the signed 1.0.23.0 upgrades on
+both physical Windows clients. The first PC used its installed script; the
+second used a one-time SYSTEM task running its own installed script, removed
+immediately afterward. Both outputs report all three client executables
+excluded from automatic WER reports, no configured global LocalDumps values
+and no configured per-executable LocalDumps values. The two read-only JSON
+results are retained under
+`artifacts/field/client-1.0.23-crash-policy-20261024/`. This is deployed
+policy evidence for those two clients at that time. The third PC and physical
+Rendezvous server still require their own installed audits, and an independent
+reviewer must still verify the approved crash-dump boundary.
