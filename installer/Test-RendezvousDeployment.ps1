@@ -75,8 +75,26 @@ try {
         @($_.Extensions | Where-Object { $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } |
             ForEach-Object { @($_.EnhancedKeyUsages | Where-Object Value -eq $serverAuth) }).Count -gt 0
     })
-    $result.certificate = [ordered]@{ eligibleInLocalMachineMy = $eligible.Count -gt 0; count = $eligible.Count; serviceKeyAccess = 'not directly inspected' }
+    $keyUsable = $false
+    $grantScript = Join-Path $InstallDirectory 'Grant-RendezvousCertificate.ps1'
+    if (Test-Path -LiteralPath $grantScript -PathType Leaf) {
+        try {
+            $check = @(& $grantScript -DnsName $hostName -CheckOnly)
+            $keyUsable = @($check | Where-Object { $_ -like 'CERTIFICATE *' }).Count -eq 1
+        } catch {
+            # The grant helper also checks that signing works, the public key
+            # verifies it and the private-key file is machine-owned. Do not
+            # include certificate or provider details in the public JSON.
+        }
+    }
+    $result.certificate = [ordered]@{
+        eligibleInLocalMachineMy = $eligible.Count -gt 0
+        count = $eligible.Count
+        usableMachinePrivateKeyForCaller = $keyUsable
+        serviceKeyAccess = 'not directly inspected'
+    }
     if ($eligible.Count -eq 0) { $issues.Add('server-certificate-unavailable') }
+    elseif (-not $keyUsable) { $issues.Add('server-certificate-key-unusable') }
 } catch {
     $result.certificate = [ordered]@{ checked = $false; errorType = $_.Exception.GetType().Name }
     $issues.Add('certificate-check-unavailable')

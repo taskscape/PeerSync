@@ -89,10 +89,11 @@ with Setup from an elevated Windows PowerShell session:
 
 It returns one JSON object and exits 0 only when its local checks pass. The
 `issues` array distinguishes a stopped service, absent or foreign TCP/UDP
-listener, missing matching server-authentication certificate, absent inbound
+listener, missing or unusable matching server-authentication certificate, absent inbound
 allow rule, DNS lookup failure, and a loopback health/TLS failure. The
-certificate check does not prove the service identity can use the private key;
-the listener and health checks supply runtime evidence. The script reads the
+certificate check signs and verifies a challenge with a machine private key
+accessible to the caller. It cannot alone prove that the service identity can
+use that key; the listener and health checks supply runtime evidence. The script reads the
 installed `appsettings.json` and does not inspect service-process environment
 overrides. It omits certificate thumbprints, private keys, paths and resolved
 IP addresses from its JSON. Its health request emits one ordinary diagnostic
@@ -111,9 +112,13 @@ Read `issues` in this order. For `settings-unavailable` or
 `public-url-mismatch`, inspect the installed `appsettings.json` and any
 service-level `PEERSYNC_` overrides. For `server-certificate-unavailable`,
 install or renew the Server Authentication certificate for the configured
-host in `LocalMachine\My`; if the service remains stopped with an eligible
-certificate, inspect its Application Event Log entries and rerun the packaged
-certificate-grant helper. For `service-not-running`, inspect those events and
+host in `LocalMachine\My`. For `server-certificate-key-unusable`, the certificate
+metadata matches but its machine private key cannot sign or its public key
+cannot verify the signature. Check the win-acme renewal's `My` store target and
+key availability; copying a public `.cer` cannot restore a missing private key.
+If the service remains stopped with a usable certificate, inspect its
+Application Event Log entries and rerun the packaged certificate-grant helper.
+For `service-not-running`, inspect those events and
 the service account before restarting the service. A
 `tcp-listener-missing-or-foreign` or `udp-listener-missing-or-foreign` result
 means port 99 is unbound or held by another process; inspect the reported
