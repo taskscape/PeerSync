@@ -8,6 +8,11 @@ authenticated session, not completed file convergence or the cause of the
 third PC's socket failure. Its local diagnostics are still needed to identify
 the failing operation and native socket error.
 
+The operator's [rendered Windows screenshot](P3-third-pc-error-toast-2026-10-24.png)
+is retained as evidence that the error notification actually appeared on the
+third PC. It is evidence for that notification type on the older build, not
+for the current repair or the pending-device/overwrite notification types.
+
 The source path explained the notification flood: `ControlStatusRuntime`
 projected every diagnostic warning and error into `ControlEvent.Errors`, and
 `DashboardViewModel` treated each new event timestamp as a fresh toast.

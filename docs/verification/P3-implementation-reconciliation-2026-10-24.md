@@ -20,10 +20,20 @@ acceptance test.
 | P3.3.2 | `InitializeSetup` refuses downgrade; `PrepareToInstall` stops the service before file replacement, and post-install `--init` and service start preserve settings. The installed first PC upgraded from 1.0.13 to 1.0.16 with its joined folder and files intact; see [physical two-PC evidence](P3-P4-physical-two-PC-2026-10-24.md). |
 | P3.3.4 | Signed development x64/Arm64 setup builds, signed uninstaller and installed silent cycles are in [local installer evidence](P5-local-installer-ci-2026-10-23.md) and [Server 2022 cycles](P3-server2022-uninstall-cycle-2026-10-23.md). Public release signing is still open. |
 
-P3.2.5 remains open because current notifications use WinForms
-`NotifyIcon.ShowBalloonTip`; the required rendered Windows toast behavior has
-not been demonstrated. P3.2.6 remains open until an unauthorized standard
-user sees the offer and connects after authorization in the same logon.
+P3.2.5 remains open. A [third-PC screenshot](P3-third-pc-error-toast-2026-10-24.png)
+shows that an error notification from `NotifyIcon.ShowBalloonTip` renders in
+Windows. That older build flooded the desktop with transient socket warnings;
+the [notification repair](P4-third-pc-notification-flood-2026-10-24.md) has
+not yet been checked in the rendered third-PC app. Pending-device and
+overwritten-version notifications also lack rendered field evidence.
+
+For P3.2.6, source inspection shows that the unelevated app passes its own
+user SID to the elevated helper. The authorized control RPC persists that SID;
+the helper restarts the service so the new pipe ACL includes it, and the app's
+controller reconnects. Direct SID admission does not require an updated group
+token. This explains the intended no-sign-out path, but an installed
+unauthorized standard-user check remains open.
+
 P3.3.3 remains open for its interactive uninstall prompt. All three Gate P3
 boxes remain open: the unassisted ten-minute app-only flow, the clean Windows
 11/Server 2022 installer matrix, and the installed standard-user check.

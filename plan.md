@@ -2321,10 +2321,11 @@ Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
   - Done when: approve, deny and block show the DeviceId fingerprint. Preferences edit `DeviceSettings` through `UpdateSettings`.
 - [ ] **P3.2.5 Tray and toasts** [WIP @Codex 2026-10-22]
   - Done when: the icon reflects the overall state, the menu offers Pause for 30 min, 1 h or until resumed, and toasts appear for overwritten edits, errors and pending devices.
-  - Tray state, pause menu and event notifications are implemented with `NotifyIcon.ShowBalloonTip`. A rendered Windows notification check is still needed before treating the specified toast behavior as complete; see the [P3 reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md).
+  - Tray state, pause menu and event notifications are implemented with `NotifyIcon.ShowBalloonTip`. A [third-PC screenshot](docs/verification/P3-third-pc-error-toast-2026-10-24.png) now proves the older build rendered an error notification; the current notification repair and the pending-device/overwrite notifications still need rendered checks. See the [P3 reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md).
   - A [third-PC notification flood](docs/verification/P4-third-pc-notification-flood-2026-10-24.md) exposed that every retriable network warning was projected as a new error toast. Current source retains warnings in the journal, projects only error-level events to the dashboard and limits repeated notices per code/source to once per 30 minutes. Focused App and Service suites pass. A development-signed 1.0.18.0 package upgraded the first PC, preserving its service, settings and five test files; the installed third PC still needs an update and rendered check.
 - [ ] **P3.2.6 "Authorize this account"** [WIP @Codex 2026-10-22]
   - Done when: a user outside `PeerSync Users` is offered elevation. Afterwards the app connects without signing out (5, rule 7).
+  - Source inspection confirms the app passes the unelevated user's SID to the elevated helper, the service persists direct-SID authorization, the helper restarts the pipe host with an updated ACL, and the dashboard reconnects. This does not replace an installed standard-user attempt in the same logon; see the [P3 reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md).
 
 ### P3.3 Installer (Inno Setup)
 
