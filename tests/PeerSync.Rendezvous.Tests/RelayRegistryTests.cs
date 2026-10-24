@@ -89,7 +89,7 @@ public sealed class RelayRegistryTests
     }
 
     [Fact]
-    public async Task LowConfiguredRateStillAcceptsOneMaximumSizedChunk()
+    public async Task LowConfiguredRateThrottlesMaximumSizedChunkWithoutOversizedInitialBurst()
     {
         using var registry = new RelayRegistry(new RendezvousOptions
         { RelayPerDeviceBytesPerSecond = 1024, RelayTotalBytesPerSecond = 1024 });
@@ -101,8 +101,42 @@ public sealed class RelayRegistryTests
             first.DeviceId, new TestWriter(), timeout.Token).AsTask();
         RelayRegistry.RelayJoin secondJoin = await registry.JoinAsync(offer.Token.Memory,
             second.DeviceId, new TestWriter(), timeout.Token);
-        await registry.ThrottleAsync(await joining, 64 * 1024, timeout.Token);
+        Task throttled = registry.ThrottleAsync(await joining, 64 * 1024, timeout.Token).AsTask();
+        await Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        throttled.IsCompleted.ShouldBeFalse();
+        await timeout.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await throttled);
         registry.Leave(secondJoin);
+    }
+
+    [Fact]
+    public async Task TotalRateBudgetIsSharedAcrossDifferentDevicePairs()
+    {
+        using var registry = new RelayRegistry(new RendezvousOptions
+        { RelayPerDeviceBytesPerSecond = 64 * 1024, RelayTotalBytesPerSecond = 64 * 1024 });
+        PresenceSession first = Session(1), second = Session(2), third = Session(3), fourth = Session(4);
+        registry.TryOffer(first, second).ShouldBeTrue();
+        registry.TryOffer(third, fourth).ShouldBeTrue();
+        RelayOffer firstOffer = Offer(first), secondOffer = Offer(third);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<RelayRegistry.RelayJoin> firstJoin = registry.JoinAsync(firstOffer.Token.Memory,
+            first.DeviceId, new TestWriter(), timeout.Token).AsTask();
+        RelayRegistry.RelayJoin firstPartner = await registry.JoinAsync(firstOffer.Token.Memory,
+            second.DeviceId, new TestWriter(), timeout.Token);
+        Task<RelayRegistry.RelayJoin> secondJoin = registry.JoinAsync(secondOffer.Token.Memory,
+            third.DeviceId, new TestWriter(), timeout.Token).AsTask();
+        RelayRegistry.RelayJoin secondPartner = await registry.JoinAsync(secondOffer.Token.Memory,
+            fourth.DeviceId, new TestWriter(), timeout.Token);
+
+        RelayRegistry.RelayJoin firstConnected = await firstJoin;
+        await registry.ThrottleAsync(firstConnected, 64 * 1024, timeout.Token);
+        Task competing = registry.ThrottleAsync(await secondJoin, 64 * 1024, timeout.Token).AsTask();
+        await Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        competing.IsCompleted.ShouldBeFalse();
+        await timeout.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await competing);
+        registry.Leave(firstPartner);
+        registry.Leave(secondPartner);
     }
 
     private static PresenceSession Session(byte marker)

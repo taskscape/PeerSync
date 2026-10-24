@@ -127,13 +127,28 @@ internal sealed class RelayRegistry : IDisposable
             state.LastUsedUtc = time.GetUtcNow();
             limiter = state.Limiter;
         }
-        using RateLimitLease deviceLease = await limiter.AcquireAsync(bytes, cancellationToken).ConfigureAwait(false);
-        if (!deviceLease.IsAcquired)
-            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Device relay quota exceeded."));
-        using RateLimitLease totalLease = await totalLimiter.AcquireAsync(bytes, cancellationToken).ConfigureAwait(false);
-        if (!totalLease.IsAcquired)
-            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Server relay quota exceeded."));
-        join.Ticket.Touch(IdleTimeout);
+        // A low configured rate may be smaller than one 64 KiB wire chunk.
+        // Acquire both budgets in slices rather than granting a full chunk's
+        // worth of initial tokens or exceeding TokenLimit in AcquireAsync.
+        int sliceLimit = Math.Min(options.RelayPerDeviceBytesPerSecond,
+            options.RelayTotalBytesPerSecond);
+        for (int remaining = bytes; remaining > 0;)
+        {
+            int slice = Math.Min(remaining, sliceLimit);
+            using RateLimitLease deviceLease = await limiter.AcquireAsync(slice, cancellationToken)
+                .ConfigureAwait(false);
+            if (!deviceLease.IsAcquired)
+                throw new RpcException(new Status(StatusCode.ResourceExhausted, "Device relay quota exceeded."));
+            using RateLimitLease totalLease = await totalLimiter.AcquireAsync(slice, cancellationToken)
+                .ConfigureAwait(false);
+            if (!totalLease.IsAcquired)
+                throw new RpcException(new Status(StatusCode.ResourceExhausted, "Server relay quota exceeded."));
+            remaining -= slice;
+            // A legitimately slow configured rate can take longer than the
+            // idle window to admit one wire chunk. Progress on the rate budget
+            // is active work even before the chunk reaches the other peer.
+            join.Ticket.Touch(IdleTimeout);
+        }
     }
 
     internal void Leave(RelayJoin join) => Leave(join.Ticket);
@@ -186,7 +201,7 @@ internal sealed class RelayRegistry : IDisposable
 
     private static TokenBucketRateLimiter CreateLimiter(int bytesPerSecond) => new(new TokenBucketRateLimiterOptions
     {
-        TokenLimit = Math.Max(bytesPerSecond, 64 * 1024),
+        TokenLimit = bytesPerSecond,
         TokensPerPeriod = bytesPerSecond,
         ReplenishmentPeriod = TimeSpan.FromSeconds(1),
         AutoReplenishment = true,
