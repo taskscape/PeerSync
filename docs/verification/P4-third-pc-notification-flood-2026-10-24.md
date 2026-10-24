@@ -26,7 +26,35 @@ verify warning preservation in the raw journal, error-only control projection,
 different error kinds, cooldown expiry and suppression across reconnects.
 TRX files are under `artifacts/tests/third-pc-notification/`.
 
-These are source checks. The currently installed third-PC package predates
-this repair. Its own log classification, installed update and rendered Windows
-notification behavior remain open. This does not close P3.2.5 or physical
-WAN/NAT/file-convergence gates.
+The development-signed x64 1.0.18.0 installer was built from commit
+`a441cdb302221f75b5557219537f9f2087d5cc76`, with the same signing
+certificate as the installed 1.0.16.0 package. Its Authenticode status is
+Valid and its SHA-256 is
+`C893DF2D783ADE60AFD032537FCF5F82814CEA2D668F7C70BA4A78DB71A8A042`.
+The manifest marks the worktree dirty because an unrelated pre-existing
+untracked `Sync.zip.tmp` remains; the repair itself was committed before
+building. The package is development-signed, not a public release build.
+
+The first PC upgraded silently from 1.0.16.0 to 1.0.18.0 with setup exit 0.
+Its PeerSync service is Running, the installed App and service report
+1.0.18.0, and `config/settings.json` retained SHA-256
+`A9B29B4F662B62F6C712E61F8DE5E817E26109C2C86F978FC9E7AB7A46006243`.
+The five existing test-folder files remained present with matching hashes,
+including `post-upgrade-first-pc.txt` at
+`1DA04139ED14F8290E4453DA841F42E46F3E38F580007C3D7B4597EB5878ACEB`.
+The service reconnected to both prior peers with accepted clocks. The setup
+log is retained at `artifacts/field/client-notification-upgrade-20261024/setup.log`.
+
+The first PC's current raw journal shows a failed public TCP candidate to the
+mobile peer's observed public address, followed by an authenticated QUIC
+candidate to its `100.x` address. `Find-NetRoute` selected the Tailscale
+interface for that QUIC path. This is a real connected peer across the
+hotspot, but it is an overlay route and does not prove native Internet NAT
+traversal or relay. The failed candidate is a normal retriable warning; it
+would have generated the old repeated toast. The third PC's exact
+`SocketException` and native error still require its own log output.
+
+The third PC still runs the earlier package and needs this upgrade before the
+notification fix can be observed there. Its rendered Windows notification
+behavior and `third-pc-check.txt` file convergence remain open. This does not
+close P3.2.5 or physical WAN/NAT/file-convergence gates.
