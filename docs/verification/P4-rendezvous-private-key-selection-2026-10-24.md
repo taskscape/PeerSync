@@ -19,3 +19,14 @@ read-only `-CheckOnly` path selected a present localhost Server Authentication
 machine certificate and signed and verified successfully. These local checks
 do not prove the physical server has installed the revised helper or that its
 service account can open the Let's Encrypt key after the next real renewal.
+
+The x64 Rendezvous 1.0.24.0 development installer was built from commit
+`628d8e7ed011bf237e99560c3d7c11584d812969`. Inno Setup 7.1 compiled
+successfully. Authenticode reports Valid for the setup, and its SHA-256
+`632CE35C4171A4075A99B899FFF46DE110B7C4F25BB3687AAC0A230D12EF5419`
+matches the manifest; the setup is 66,257,048 bytes. The manifest records a
+dirty worktree solely because the pre-existing untracked `Sync.zip.tmp` remains
+outside this change. The signed setup was sent to the server node `i9-win-iis`
+through Tailscale Taildrop, which exited 0. The recipient's installation and
+post-upgrade local preflight remain unverified. This development signature is
+not a public release signature.
