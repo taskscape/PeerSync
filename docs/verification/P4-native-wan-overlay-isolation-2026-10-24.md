@@ -45,4 +45,18 @@ program-and-interface-scoped firewall rule and a temporary SYSTEM scheduled
 task both registered and were removed successfully. The live five-minute
 mobile-PC test has **not** run yet. The script's SHA-256 is
 `F532E12841C445C849AD1BA0C8F84D3FD0759BCBA314A287B9003AA789383363`;
-Taildrop to the third PC returned exit 0, but recipient execution is pending.
+Taildrop to the third PC returned exit 0.
+
+The first third-PC launcher run reached preflight with installed service
+version 1.0.23.0, Tailscale Up, and the rendezvous route over physical Wi-Fi.
+After the scoped overlay rules were applied, the first service restart failed
+before `READY`. The script reported `rulesRemoved=True` and
+`recoveryTaskRemoved=True`; it wrote
+`C:\Users\offic\Downloads\NativeWAN-result-758cae296384.json` and exited 1.
+No native-WAN transfer was measured. The exact service state after cleanup and
+the failure cause are still unknown. A bounded `Run-Inspect-NativeWanFailure.cmd`
+helper was sent to the third PC. It reads the result and recent service/SCM
+events, checks for remaining test rules, and attempts one service start only
+if it is stopped and no test rules remain. It writes a text report beside the
+launcher for Taildrop return. Do not retry the five-minute isolation test
+until service startup is understood.
