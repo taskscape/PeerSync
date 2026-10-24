@@ -1,5 +1,4 @@
 using System.Net;
-using System.Threading.Channels;
 using Google.Protobuf;
 using Grpc.Core;
 using PeerSync.Core.Diagnostics;
@@ -43,7 +42,7 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         });
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken,
             session.Lifetime.Token);
-        Task writer = WriteLoopAsync(session.Outgoing.Reader, responses, linked.Token);
+        Task writer = WriteLoopAsync(session, responses, linked.Token);
         try
         {
             bool first = true;
@@ -147,11 +146,12 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         }
     }
 
-    private static async Task WriteLoopAsync(ChannelReader<ServerMessage> messages,
+    private async Task WriteLoopAsync(PresenceSession session,
         IServerStreamWriter<ServerMessage> responses, CancellationToken cancellationToken)
     {
-        await foreach (ServerMessage message in messages.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            await responses.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+        await foreach (ServerMessage queued in session.Outgoing.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            if (presence.TryMaterialize(session, queued, out ServerMessage? message))
+                await responses.WriteAsync(message!, cancellationToken).ConfigureAwait(false);
     }
 
     private static DiagnosticTransport Transport(ServerCallContext context)

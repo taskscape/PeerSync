@@ -24,16 +24,16 @@ public sealed class PresenceRegistryTests
         registry.Announce(second, Announcement(common, 41002));
         registry.Announce(unrelated, Announcement(privateFolder, 41003));
 
-        PeerList firstList = LastList(first);
+        PeerList firstList = LastList(registry, first);
         firstList.FolderId.Span.SequenceEqual(common).ShouldBeTrue();
         firstList.Peers.Count.ShouldBe(1);
         firstList.Peers[0].DeviceId.Span.SequenceEqual(Id(2)).ShouldBeTrue();
         firstList.Peers[0].Endpoints.Single().Address.ShouldBe("203.0.113.2");
         firstList.Peers[0].Endpoints.Single().Port.ShouldBe(41002u);
-        PeerList secondList = LastList(second);
+        PeerList secondList = LastList(registry, second);
         secondList.Peers.Count.ShouldBe(1);
         secondList.Peers[0].DeviceId.Span.SequenceEqual(Id(1)).ShouldBeTrue();
-        LastList(unrelated).Peers.ShouldBeEmpty();
+        LastList(registry, unrelated).Peers.ShouldBeEmpty();
         registry.TryGetShared(first, unrelated.DeviceId, common, out _).ShouldBeFalse();
     }
 
@@ -52,7 +52,7 @@ public sealed class PresenceRegistryTests
         clock.Advance(TimeSpan.FromMinutes(6));
 
         registry.Expire().ShouldBe(1);
-        LastList(first).Peers.ShouldBeEmpty();
+        LastList(registry, first).Peers.ShouldBeEmpty();
         registry.TryGetShared(first, second.DeviceId, folder, out _).ShouldBeFalse();
     }
 
@@ -93,11 +93,66 @@ public sealed class PresenceRegistryTests
             registry.Announce(session, announce);
             last = session;
         }
-        PeerList list = LastList(last!);
+        PeerList list = LastList(registry, last!);
         list.Peers.Count.ShouldBe(PresenceRegistry.MaximumPeersPerFolder - 1);
         new ServerMessage { PeerList = list }.CalculateSize().ShouldBeLessThan(256 * 1024);
         PresenceSession overflow = registry.Open(Id(65), Remote("203.0.113.65"));
         Should.Throw<ArgumentException>(() => registry.Announce(overflow, Announcement(folder, 41065)));
+    }
+
+    [Fact]
+    public void RepeatedAnnouncementsQueueOnlyTheLatestListPerFolder()
+    {
+        var registry = new PresenceRegistry();
+        PresenceSession reader = registry.Open(Id(1), Remote("203.0.113.1"));
+        PresenceSession sender = registry.Open(Id(2), Remote("203.0.113.2"));
+        Announce allFolders = Announcement(FolderId(0), 41001);
+        for (int index = 1; index < 500; index++)
+            allFolders.FolderIds.Add(ByteString.CopyFrom(FolderId(index)));
+        registry.Announce(reader, allFolders);
+        Drain(registry, reader);
+
+        for (uint port = 41002; port <= 41012; port++)
+        {
+            Announce repeated = allFolders.Clone();
+            repeated.ListenPort = port;
+            registry.Announce(sender, repeated);
+        }
+
+        reader.Outgoing.Reader.Count.ShouldBe(500);
+        reader.PendingPeerLists.Count.ShouldBe(500);
+        reader.Outgoing.Reader.TryPeek(out ServerMessage? queued).ShouldBeTrue();
+        queued!.PeerList.Peers.ShouldBeEmpty();
+        var receivedFolders = new HashSet<string>(StringComparer.Ordinal);
+        while (registry.TryReadOutgoing(reader, out ServerMessage? message))
+        {
+            PeerList list = message!.PeerList;
+            receivedFolders.Add(Convert.ToHexString(list.FolderId.Span)).ShouldBeTrue();
+            list.Peers.Single().Endpoints.Single().Port.ShouldBe(41012u);
+        }
+        receivedFolders.Count.ShouldBe(500);
+        reader.PendingPeerLists.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void FullOutputQueuePreservesOlderMessagesAndAllowsPresenceRetry()
+    {
+        var registry = new PresenceRegistry();
+        byte[] folder = Id(10);
+        PresenceSession reader = registry.Open(Id(1), Remote("203.0.113.1"));
+        PresenceSession sender = registry.Open(Id(2), Remote("203.0.113.2"));
+        registry.Announce(reader, Announcement(folder, 41001));
+        Drain(registry, reader);
+        for (int index = 0; index < 2048; index++)
+            reader.Outgoing.Writer.TryWrite(new ServerMessage()).ShouldBeTrue();
+
+        registry.Announce(sender, Announcement(folder, 41002));
+        reader.Outgoing.Reader.Count.ShouldBe(2048);
+        reader.PendingPeerLists.ShouldBeEmpty();
+
+        Drain(registry, reader);
+        registry.Announce(sender, Announcement(folder, 41003));
+        LastList(registry, reader).Peers.Single().Endpoints.Single().Port.ShouldBe(41003u);
     }
 
     [Fact]
@@ -151,7 +206,7 @@ public sealed class PresenceRegistryTests
 
         registry.Announce(sender, announce);
 
-        PeerList list = LastList(reader);
+        PeerList list = LastList(registry, reader);
         list.Peers.Single().Endpoints.Select(endpoint => endpoint.Address)
             .ShouldContain("100.72.94.33");
     }
@@ -166,12 +221,12 @@ public sealed class PresenceRegistryTests
         PresenceSession second = registry.Open(Id(2), Remote("203.0.113.2"));
         registry.Announce(first, Announcement(folder, 41001));
         registry.Announce(second, Announcement(folder, 41002));
-        Drain(first); Drain(second);
+        Drain(registry, first); Drain(registry, second);
 
         registry.RequestPunch(first, second.DeviceId, Id(11)).ShouldBeFalse();
         registry.RequestPunch(first, second.DeviceId, folder).ShouldBeTrue();
-        ServerMessage toFirst = Read(first);
-        ServerMessage toSecond = Read(second);
+        ServerMessage toFirst = Read(registry, first);
+        ServerMessage toSecond = Read(registry, second);
         toFirst.PunchNow.StartUtcTicks.ShouldBe(clock.GetUtcNow().AddMilliseconds(500).UtcTicks);
         toFirst.PunchNow.DeviceId.Span.SequenceEqual(second.DeviceId).ShouldBeTrue();
         toSecond.PunchNow.DeviceId.Span.SequenceEqual(first.DeviceId).ShouldBeTrue();
@@ -184,6 +239,14 @@ public sealed class PresenceRegistryTests
         return id;
     }
 
+    private static byte[] FolderId(int index)
+    {
+        byte[] id = new byte[32];
+        id[0] = (byte)index;
+        id[1] = (byte)(index >> 8);
+        return id;
+    }
+
     private static IPEndPoint Remote(string address) => new(IPAddress.Parse(address), 52000);
 
     private static Announce Announcement(byte[] folder, uint port)
@@ -193,22 +256,22 @@ public sealed class PresenceRegistryTests
         return announce;
     }
 
-    private static ServerMessage Read(PresenceSession session)
+    private static ServerMessage Read(PresenceRegistry registry, PresenceSession session)
     {
-        session.Outgoing.Reader.TryRead(out ServerMessage? message).ShouldBeTrue();
+        registry.TryReadOutgoing(session, out ServerMessage? message).ShouldBeTrue();
         return message!;
     }
 
-    private static void Drain(PresenceSession session)
+    private static void Drain(PresenceRegistry registry, PresenceSession session)
     {
-        while (session.Outgoing.Reader.TryRead(out _)) { }
+        while (registry.TryReadOutgoing(session, out _)) { }
     }
 
-    private static PeerList LastList(PresenceSession session)
+    private static PeerList LastList(PresenceRegistry registry, PresenceSession session)
     {
         PeerList? latest = null;
-        while (session.Outgoing.Reader.TryRead(out ServerMessage? message))
-            if (message.PeerList is { } list) latest = list;
+        while (registry.TryReadOutgoing(session, out ServerMessage? message))
+            if (message!.PeerList is { } list) latest = list;
         return latest ?? throw new InvalidOperationException("No peer list was pushed.");
     }
 
