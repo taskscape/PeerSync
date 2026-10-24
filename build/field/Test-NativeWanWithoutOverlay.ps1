@@ -6,6 +6,8 @@ param(
     [int]$DurationSeconds = 300,
     [string]$ExpectedUplinkAlias = 'Wi-Fi',
     [string]$OverlayAlias = 'Tailscale',
+    [ValidatePattern('^[a-z0-9-]{1,16}$')]
+    [string]$TestLabel = 'third',
     [switch]$PreflightOnly
 )
 
@@ -92,10 +94,43 @@ $report = [ordered]@{
 $taskRegistered = $false
 $serviceTouched = $false
 
+function Restart-PeerSyncAfterProcessExit {
+    $current = Get-CimInstance Win32_Service -Filter "Name='PeerSync'" -ErrorAction Stop
+    $oldProcess = $null
+    try {
+        if ($current.ProcessId -gt 0) {
+            $oldProcess = Get-Process -Id $current.ProcessId -ErrorAction SilentlyContinue
+        }
+        if ($current.State -eq 'Running') {
+            Stop-Service -Name PeerSync -ErrorAction Stop
+        }
+        (Get-Service -Name PeerSync).WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+            [TimeSpan]::FromSeconds(45))
+        if ($oldProcess -and -not $oldProcess.WaitForExit(45000)) {
+            throw "The previous PeerSync process $($oldProcess.Id) did not exit within 45 seconds."
+        }
+        Start-Service -Name PeerSync -ErrorAction Stop
+        (Get-Service -Name PeerSync).WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Running,
+            [TimeSpan]::FromSeconds(45))
+    } finally {
+        if ($oldProcess) { $oldProcess.Dispose() }
+    }
+}
+
 try {
     # A SYSTEM task removes the two test rules if the shell is killed. It
     # does not disable Tailscale itself or touch any other firewall rule.
-    $recoverySource = "Remove-NetFirewallRule -Name '$inRule','$outRule' -ErrorAction SilentlyContinue; Restart-Service -Name PeerSync -ErrorAction SilentlyContinue"
+    $recoverySource = @'
+Remove-NetFirewallRule -Name '__IN_RULE__','__OUT_RULE__' -ErrorAction SilentlyContinue
+$service = Get-CimInstance Win32_Service -Filter "Name='PeerSync'" -ErrorAction SilentlyContinue
+$old = if ($service -and $service.ProcessId -gt 0) { Get-Process -Id $service.ProcessId -ErrorAction SilentlyContinue }
+if ($service -and $service.State -eq 'Running') { Stop-Service -Name PeerSync -ErrorAction SilentlyContinue }
+if ($old) { [void]$old.WaitForExit(45000); $old.Dispose() }
+Start-Service -Name PeerSync -ErrorAction SilentlyContinue
+'@
+    $recoverySource = $recoverySource.Replace('__IN_RULE__', $inRule).Replace('__OUT_RULE__', $outRule)
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($recoverySource))
     $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
         -Argument "-NoProfile -NonInteractive -EncodedCommand $encoded"
@@ -126,13 +161,10 @@ try {
 
     # Existing overlay sockets must close before the measurement begins.
     $serviceTouched = $true
-    Restart-Service -Name PeerSync -ErrorAction Stop
-    (Get-Service -Name PeerSync).WaitForStatus(
-        [System.ServiceProcess.ServiceControllerStatus]::Running,
-        [TimeSpan]::FromSeconds(45))
+    Restart-PeerSyncAfterProcessExit
 
     $started = (Get-Date).ToUniversalTime()
-    $name = 'native-wan-third-{0}-{1}.txt' -f $started.ToString('yyyyMMddTHHmmssZ'), $token
+    $name = 'native-wan-{0}-{1}-{2}.txt' -f $TestLabel, $started.ToString('yyyyMMddTHHmmssZ'), $token
     $testFile = Join-Path $folderPath $name
     if (Test-Path -LiteralPath $testFile) { throw "Test file already exists: $testFile" }
     $content = "PeerSync native WAN check`nCreated UTC: $($started.ToString('o'))`nNonce: $token`n"
@@ -165,11 +197,7 @@ try {
     $report.recoveryTaskRemoved = -not (Get-ScheduledTask -TaskName $recoveryTask -ErrorAction SilentlyContinue)
     if ($serviceTouched) {
         try {
-            if ((Get-Service -Name PeerSync).Status -eq 'Running') {
-                Restart-Service -Name PeerSync -ErrorAction Stop
-            } else {
-                Start-Service -Name PeerSync -ErrorAction Stop
-            }
+            Restart-PeerSyncAfterProcessExit
         } catch {
             if ($null -eq $report.failure) { $report.failure = "Post-test restart: $($_.Exception.Message)" }
         }
