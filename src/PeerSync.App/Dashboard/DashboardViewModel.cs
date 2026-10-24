@@ -8,6 +8,7 @@ namespace PeerSync.App.Dashboard;
 
 internal sealed partial class DashboardViewModel : ObservableObject
 {
+    private static readonly TimeSpan ErrorNotificationInterval = TimeSpan.FromMinutes(30);
     [ObservableProperty] private string banner = "Connecting to PeerSync service…";
     [ObservableProperty] private string activity = "Waiting for the service.";
     [ObservableProperty] private string folderActivity = "Select a folder to see its activity.";
@@ -25,10 +26,15 @@ internal sealed partial class DashboardViewModel : ObservableObject
     private readonly HashSet<string> seenOverwrites = new(StringComparer.Ordinal);
     private readonly HashSet<string> seenPending = new(StringComparer.Ordinal);
     private readonly HashSet<string> seenErrors = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Code, string Source), DateTimeOffset> lastErrorNotice = [];
+    private readonly TimeProvider time;
     private readonly Dictionary<string, (ulong Uploaded, ulong Downloaded)> progressByFolder =
         new(StringComparer.Ordinal);
     private bool hasSnapshot;
     public event Action<string>? Notification;
+
+    public DashboardViewModel() : this(TimeProvider.System) { }
+    internal DashboardViewModel(TimeProvider time) => this.time = time;
 
     internal void Connecting() { Banner = "Connecting to PeerSync service…"; ServiceAvailable = false; NeedsAuthorization = false; }
     internal void Disconnected(bool unauthorized)
@@ -94,12 +100,27 @@ internal sealed partial class DashboardViewModel : ObservableObject
         {
             string key = error.Code + ':' + error.Source + ':' + error.OccurredUtcTicks;
             currentErrors.Add(key);
-            if (hasSnapshot && seenErrors.Add(key)) Notification?.Invoke($"PeerSync error: {error.Code}");
-            else seenErrors.Add(key);
+            bool newEvent = seenErrors.Add(key);
+            if (hasSnapshot && newEvent && ShouldNotifyError(error.Code, error.Source))
+                Notification?.Invoke($"PeerSync error: {error.Code}");
         }
         seenErrors.IntersectWith(currentErrors);
         UpdateFolderActivity();
         hasSnapshot = true;
+    }
+
+    private bool ShouldNotifyError(string code, string source)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        var kind = (code, source);
+        if (lastErrorNotice.TryGetValue(kind, out DateTimeOffset previous)
+            && now - previous < ErrorNotificationInterval) return false;
+        foreach (var expired in lastErrorNotice.Where(item => now - item.Value >= ErrorNotificationInterval)
+            .Select(item => item.Key).ToArray()) lastErrorNotice.Remove(expired);
+        if (lastErrorNotice.Count >= 128)
+            lastErrorNotice.Remove(lastErrorNotice.MinBy(item => item.Value).Key);
+        lastErrorNotice[kind] = now;
+        return true;
     }
 
     partial void OnSelectedFolderIdChanged(string value)

@@ -62,6 +62,42 @@ public sealed class DashboardViewModelTests
     }
 
     [Fact]
+    public void RepeatedFailuresNotifyOncePerKindUntilCooldownExpires()
+    {
+        var clock = new AdjustableClock();
+        var model = new DashboardViewModel(clock);
+        var notices = new List<string>();
+        model.Notification += notices.Add;
+        model.Apply(Snapshot());
+
+        ControlEvent first = Snapshot();
+        first.Errors.Add(new ControlError { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 1 });
+        model.Apply(first);
+        notices.Count.ShouldBe(1);
+
+        ControlEvent retry = Snapshot();
+        retry.Errors.Add(new ControlError { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 2 });
+        retry.Errors.Add(new ControlError { Code = "write_failed", Source = "folder_apply", OccurredUtcTicks = 3 });
+        model.Apply(retry);
+        notices.Count.ShouldBe(2);
+        notices.Last().ShouldContain("write_failed");
+
+        model.Disconnected(unauthorized: false);
+        model.Apply(retry);
+        ControlEvent afterReconnect = Snapshot();
+        afterReconnect.Errors.Add(new ControlError
+        { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 4 });
+        model.Apply(afterReconnect);
+        notices.Count.ShouldBe(2);
+
+        clock.Advance(TimeSpan.FromMinutes(30));
+        ControlEvent later = Snapshot();
+        later.Errors.Add(new ControlError { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 5 });
+        model.Apply(later);
+        notices.Count.ShouldBe(3);
+    }
+
+    [Fact]
     public void MetricsDoNotInventTransferRates()
     {
         var model = new DashboardViewModel();
@@ -135,4 +171,11 @@ public sealed class DashboardViewModelTests
 
     private static ControlEvent Snapshot() => new()
     { FullSnapshot = true, Status = new ServiceStatus { InstanceId = Guid.NewGuid().ToString("N"), Sequence = 1 } };
+
+    private sealed class AdjustableClock : TimeProvider
+    {
+        private DateTimeOffset now = new(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => now;
+        internal void Advance(TimeSpan duration) => now += duration;
+    }
 }

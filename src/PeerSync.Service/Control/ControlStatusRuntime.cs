@@ -69,7 +69,11 @@ public sealed class ControlStatusRuntime
 
     private void OnDiagnosticWritten(DiagnosticEvent entry, DateTime occurredUtc)
     {
-        if (entry.Level is not (DiagnosticLevel.Warning or DiagnosticLevel.Error)) return;
+        // A failed connection candidate is a diagnostic warning, not a user-facing
+        // failure: another candidate may already have authenticated. Keep every
+        // warning in the journal, but reserve control error notifications for
+        // operations the service classified as errors.
+        if (entry.Level != DiagnosticLevel.Error) return;
         lock (gate)
         {
             recentErrors.Enqueue(new(entry.ErrorCode ?? entry.Event, entry.Operation, occurredUtc.Ticks));
