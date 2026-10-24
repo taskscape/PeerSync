@@ -28,6 +28,11 @@ Focused validation on current source:
 - `PeerSync.Service` Release build: zero warnings and zero errors.
 - `DiagnosticBundleCollectorTests`: 3/3 passed, including default address
   omission and explicit opt-in inclusion.
+- The source `psp peers <folder> --json` CLI was built in Release with zero
+  warnings/errors and queried the installed first-PC service. It reported
+  `transport: Quic` for the enrolled second-PC peer. This wire field was
+  already supplied by the service; the CLI now exposes it in JSON and text.
+- `PeerSync.Cli.Tests`: 6/6 passed, zero skipped.
 
 This change is local source only. The installed first and second PCs have not
 been upgraded to a build containing these events, so their existing two-way

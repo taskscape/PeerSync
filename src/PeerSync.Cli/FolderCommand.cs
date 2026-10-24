@@ -80,7 +80,7 @@ public static class FolderCommand
                     {
                         await output.WriteLineAsync($"Peers for {peers.FolderId}:").ConfigureAwait(false);
                         foreach (Wire.PeerInfo peer in peers.Peers)
-                            await output.WriteLineAsync($"{peer.DeviceId}  {peer.Approval} pinned={peer.Pinned}  {peer.Name}").ConfigureAwait(false);
+                            await output.WriteLineAsync($"{peer.DeviceId}  {peer.Approval} pinned={peer.Pinned} transport={peer.Transport}  {peer.Name}").ConfigureAwait(false);
                     }
                     break;
                 }
@@ -122,5 +122,5 @@ public static class FolderCommand
     { folderId = folder.FolderId, path = folder.Path, access = folder.Access, paused = folder.Paused };
     private static object PeerDto(Wire.PeerInfo peer) => new
     { deviceId = peer.DeviceId, name = peer.Name, approval = peer.Approval, pinned = peer.Pinned,
-        lastSeenUtcTicks = peer.HasLastSeenUtcTicks ? peer.LastSeenUtcTicks : (long?)null };
+        transport = peer.Transport, lastSeenUtcTicks = peer.HasLastSeenUtcTicks ? peer.LastSeenUtcTicks : (long?)null };
 }

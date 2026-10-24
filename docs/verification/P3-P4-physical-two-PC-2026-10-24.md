@@ -1,9 +1,10 @@
 # Two-PC client field check, 2026-10-24
 
-This is partial physical two-PC evidence. It does not close the LAN, native NAT,
-relay, long-soak, or release gates in `plan.md`. The network route used by the
-peer sessions has not yet been identified, and the second PC's OS build and
-sanitized deployment bundle have not been collected.
+This is partial physical two-PC evidence. It does not close the 1 GiB LAN,
+native NAT, relay, long-soak, or release gates in `plan.md`. A live direct LAN
+QUIC folder session is identified below, but the exact route of the earlier
+file transfers is not. The second PC's OS build and sanitized deployment
+bundle have not been collected.
 
 The first PC reports Windows 11 Pro build 26300 on an ASUS system with a
 1 Gbps Realtek Ethernet adapter. Its route to the second PC's supplied
@@ -75,8 +76,10 @@ version's sanitized status output. New `connection.candidate_selected` and
 `connection.incoming_selected` diagnostic events will identify the winning
 outgoing or incoming session, transport and actual remote endpoint after a
 build containing them is deployed. Those events have not been observed on
-either installed 1.0.16 client, so the current file-transfer route remains
-unverified.
+either installed 1.0.16 client, so the exact route of the earlier two-way file
+transfer remains unverified. The newly built source CLI queried the installed
+service and reported `transport: Quic` for the enrolled second-PC peer; the
+installed 1.0.16 CLI omitted this already available wire field.
 
 A later first-PC LAN preflight at 2026-10-24 09:36:28 UTC found a direct
 on-link Ethernet route from `192.168.0.176` to the second PC's
@@ -86,3 +89,13 @@ These observations establish that a physical LAN candidate is available;
 they do not identify the selected path of either active PeerSync session or
 measure the required 1 GiB throughput. The bounded raw preflight is retained
 at `artifacts/field/p0-quic-lan-20261024/first-pc-preflight.json`.
+
+The first-PC raw service journal also records an authenticated QUIC folder
+session `4d2ef52b-0bb0-1871-7546-0e6e55f29519` with actual remote socket
+address `192.168.0.183` at 08:50:12 UTC. That same session opened the folder
+stream, became peer-ready and ran folder sync passes. Combined with the
+on-link Ethernet route, it confirms a live native LAN QUIC session between
+the physical PCs. This was observed before the source selected-route events
+were deployed, and the journal does not correlate the previously reported
+file's blocks to this specific session. The separate 1 GiB mutual-certificate
+QUIC throughput run remains pending.
