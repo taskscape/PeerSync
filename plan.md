@@ -2287,39 +2287,42 @@ Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
 
 ### P3.1 Control API completion
 
-- [ ] **P3.1.1 Remaining RPCs** (`control.proto`) [WIP @Codex 2026-10-22]
+- [x] **P3.1.1 Remaining RPCs** (`control.proto`) [implemented, reconciled 2026-10-24]
   - Done when: every RPC in the design doc's control API table exists, including `ListOverwritten`, `RestoreOverwritten`, `GetFolderKeys` (audited), `ApproveDevice`, `DenyDevice`, `BlockDevice`, `UpdateFolderSettings`, `Get/SetIgnoreRules`, `PauseAll` and `AuthorizeUser`. Every sensitive RPC is covered by the identity interceptor.
-  - Branch progress: all listed RPCs and the per-request identity check are implemented; `GetFolderKeys` and authorization decisions have durable actor-SID audit records. They remain unchecked until merged code and CI pass.
-- [ ] **P3.1.2 Event and metrics streams** [WIP @Codex 2026-10-22]
+  - All listed RPCs and the per-request identity check are implemented; `GetFolderKeys` and authorization decisions have durable actor-SID audit records. The P3 code merged in PR #47 and its main CI passed. The [source/verification reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md) records the narrow code evidence; physical standard-user acceptance stays in Gate P3.
+- [x] **P3.1.2 Event and metrics streams** [implemented, reconciled 2026-10-24]
   - Done when: `WatchEvents` delivers folder state, progress, peers, overwrites and errors. `WatchMetrics` sends a snapshot every second. A client that reconnects gets a full snapshot first.
+  - The service stream code and control-pipe tests cover full snapshots, reconnect and one-second metrics; see the [P3 reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md). Deployed standard-user behavior remains a Gate P3 check.
 
 ### P3.2 WPF app
 
-- [ ] **P3.2.1 App skeleton** (`PeerSync.App/`) [WIP @Codex 2026-10-22]
+- [x] **P3.2.1 App skeleton** (`PeerSync.App/`) [implemented, reconciled 2026-10-24]
   - Done when: it uses the generic host, `CommunityToolkit.Mvvm` and the Fluent theme. A single instance is enforced (a named mutex, and a second launch activates the first). `--tray` starts minimized to the tray. The pipe client reconnects with backoff and shows the "Service not running" banner.
-- [ ] **P3.2.2 Folders screen and Add / Join / Share** [WIP @Codex 2026-10-22]
+- [x] **P3.2.2 Folders screen and Add / Join / Share** [implemented, reconciled 2026-10-24]
   - Done when: Add runs the folder-access grant (5.3) with progress and the elevation fallback, then `AddFolder`. Join validates the key checksum live. Share shows the keys with copy buttons and a QR code (`QRCoder`), with the RW key hidden until clicked.
-- [ ] **P3.2.3 Folder details** [WIP @Codex 2026-10-22]
+- [x] **P3.2.3 Folder details** [implemented, reconciled 2026-10-24]
   - Done when: the Peers, Activity, Overwritten (restore my version) and Settings tabs work, including the ignore-rule editor.
-- [ ] **P3.2.4 Pending devices and preferences** [WIP @Codex 2026-10-22]
+- [x] **P3.2.4 Pending devices and preferences** [implemented, reconciled 2026-10-24]
   - Done when: approve, deny and block show the DeviceId fingerprint. Preferences edit `DeviceSettings` through `UpdateSettings`.
 - [ ] **P3.2.5 Tray and toasts** [WIP @Codex 2026-10-22]
   - Done when: the icon reflects the overall state, the menu offers Pause for 30 min, 1 h or until resumed, and toasts appear for overwritten edits, errors and pending devices.
+  - Tray state, pause menu and event notifications are implemented with `NotifyIcon.ShowBalloonTip`. A rendered Windows notification check is still needed before treating the specified toast behavior as complete; see the [P3 reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md).
 - [ ] **P3.2.6 "Authorize this account"** [WIP @Codex 2026-10-22]
   - Done when: a user outside `PeerSync Users` is offered elevation. Afterwards the app connects without signing out (5, rule 7).
 
 ### P3.3 Installer (Inno Setup)
 
-- [ ] **P3.3.1 `installer/PeerSync.iss`** [WIP @Codex 2026-10-22]
+- [x] **P3.3.1 `installer/PeerSync.iss`** [implemented, reconciled 2026-10-24]
   - Done when: it implements the design doc's script outline (service creation, `--init`, firewall, local group, autostart task, uninstall entries), and `ISCC /DArch=arm64` builds the Arm64 variant.
-- [ ] **P3.3.2 Upgrade path** [WIP @Codex 2026-10-22]
+- [x] **P3.3.2 Upgrade path** [implemented, reconciled 2026-10-24]
   - Done when: installing v(n+1) over v(n) stops the service in `PrepareToInstall`, replaces files, re-runs `--init` (a no-op), restarts the service, and keeps all folders and settings. A downgrade is refused in `InitializeSetup`.
 - [ ] **P3.3.3 Uninstall with data prompt** [WIP @Codex 2026-10-22]
   - Done when: an interactive uninstall asks whether to remove data (default: keep). Yes runs `--remove-data`. A silent uninstall keeps data.
   - Code: 9.1.
   - A [Server 2022 repeated-install/uninstall cycle](docs/verification/P3-server2022-uninstall-cycle-2026-10-23.md) found that the second silent uninstall skipped conditional service/group cleanup after `--remove-data`; the service pointed at deleted files. Both installers now delete the service in the checked uninstall procedure, and the client removes its group there. A rebuilt signed development client passed keep-data, reinstall, remove-data and second silent uninstall on the guest, preserving the synced-file sentinel and removing the service, group, task, WER entries and ProgramData as appropriate. The interactive prompt and clean Windows 11 path remain unverified.
-- [ ] **P3.3.4 Signing and silent install** [WIP @Codex 2026-10-22]
+- [x] **P3.3.4 Signing and silent install** [development-signed, reconciled 2026-10-24]
   - Done when: the setup, uninstaller and EXEs are signed (or BLOCKED on the certificate). `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="autostart"` installs unattended and leaves a log with `/LOG`.
+  - Development-signed x64 and Arm64 packages, signed uninstallers and silent installed-guest cycles pass the [local installer run](docs/verification/P5-local-installer-ci-2026-10-23.md) and [P3 installed checks](docs/verification/P3-server2022-uninstall-cycle-2026-10-23.md). A publicly trusted release signer remains required at Gate P5; see the [P3 reconciliation](docs/verification/P3-implementation-reconciliation-2026-10-24.md).
 
 ### 9.1 Code: uninstall data prompt (P3.3.3)
 
@@ -2575,27 +2578,32 @@ public sealed class PortMapper(int port, ILogger<PortMapper> log) : IAsyncDispos
 
 ### 10.4 Server commands (P4.3)
 
-Run in an elevated PowerShell on the taskscape.com server.
+Use [the Rendezvous operations guide](docs/rendezvous-operations.md) as the
+deployment procedure. Run these checks in an elevated PowerShell on the server;
+the installer owns the firewall rules and the post-renewal script.
 
 ```powershell
-# 1. Port 99 must be free (no output expected), and HTTP.sys must have no reservation on it.
+# Before first installation, port 99 must be free (no output expected).
 Get-NetTCPConnection -LocalPort 99 -ErrorAction SilentlyContinue
 Get-NetUDPEndpoint  -LocalPort 99 -ErrorAction SilentlyContinue
 netsh http show urlacl | Select-String ':99/'
 
-# 2. Firewall (the rendezvous installer also adds these).
-New-NetFirewallRule -DisplayName 'PeerSync Rendezvous TCP 99' -Direction Inbound -Protocol TCP -LocalPort 99 -Action Allow
-New-NetFirewallRule -DisplayName 'PeerSync Rendezvous UDP 99' -Direction Inbound -Protocol UDP -LocalPort 99 -Action Allow
-
-# 3. Post-renewal script for win-acme.
-New-Item -ItemType Directory -Force 'C:\ProgramData\PeerSync.Rendezvous' | Out-Null
-Set-Content 'C:\ProgramData\PeerSync.Rendezvous\after-renewal.ps1' 'Restart-Service PeerSyncRendezvous -Force'
+# After installation, the packaged local preflight checks service, certificate,
+# TCP/UDP listener ownership, firewall, DNS and loopback TLS health.
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File 'C:\Program Files\PeerSync Rendezvous\Test-RendezvousDeployment.ps1'
 ```
 
-win-acme, interactive (`wacs.exe`): create a certificate with full options, manual input, host `sync.taskscape.com`. For validation, use HTTP through IIS on port 80 (add `sync.taskscape.com` as a binding on the taskscape.com site) or DNS validation. Store the certificate in the Windows Certificate Store (`My`, local machine), and as the installation step, run the script `C:\ProgramData\PeerSync.Rendezvous\after-renewal.ps1`.
+Configure the `sync.taskscape.com` win-acme renewal to store each new
+certificate in `LocalMachine\My` and run the installer-managed
+`C:\ProgramData\PeerSync.Rendezvous\After-RendezvousRenewal.ps1` after issuance.
+That script regrants the service's private-key access before restarting it.
+Copying a current certificate from `WebHosting` to `My` is only a one-time
+repair; it does not configure later renewals. Do not replace the installed
+script with a restart-only command.
 
 ```powershell
-# 4. From a PC outside that network, after installing the rendezvous service:
+# From a PC on a genuinely different network, after installing the service:
 Test-NetConnection sync.taskscape.com -Port 99      # TCP only
 psp probe sync.taskscape.com:99                     # TCP and UDP, plus the observed address
 ```
