@@ -189,6 +189,15 @@ the exact `LOGS` directory printed by the service or probe, including any
 process-ID child directory. Collect after the failed run, not before it.
 Check both PCs' clocks if every event is filtered as expired.
 
+For a joined physical PC whose operator is not working in a terminal,
+`build/field/Collect-PeerSync-Diagnostics.cmd` runs the installed `psp
+diagnostics` command from its own folder. Copy it into the joined test folder
+and double-click it there; the sanitized `PeerSync-diagnostics-*.zip` is
+created beside it and can sync to the other PC. The helper does not request
+elevation, change configuration, include network addresses, or install an
+update. Its window stays open to show a collection error. Review the ZIP
+before sharing it outside the test group.
+
 `build/Collect-Diagnostics.ps1` remains a legacy development-probe collector.
 It copies source event lines and does not apply the CLI's strict field
 allowlist; do not share its archive when logs may contain untrusted or
