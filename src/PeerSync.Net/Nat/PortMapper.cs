@@ -110,6 +110,11 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
         await state.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            DateTimeOffset now = clock.GetUtcNow();
+            bool refreshExternal = state.ExternalNeedsRefresh(now);
+            bool renewUdp = state.ProtocolNeedsRenew(NatTransport.Udp, now);
+            bool renewTcp = state.ProtocolNeedsRenew(NatTransport.Tcp, now);
+            if (!refreshExternal && !renewUdp && !renewTcp) return;
             IPAddress? external = null;
             try { external = await state.Device.GetExternalIPAsync()
                 .WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false); }
@@ -119,11 +124,12 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
                 diagnostics?.TryWrite(new("nat.external_address_unavailable", "port_mapping")
                 { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name });
             }
-            if (state.SetExternal(external))
+            if (state.SetExternal(external, clock.GetUtcNow()))
                 try { MappingsChanged?.Invoke(); } catch { }
             foreach (NatTransport protocol in new[] { NatTransport.Udp, NatTransport.Tcp })
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (protocol == NatTransport.Udp ? !renewUdp : !renewTcp) continue;
                 try
                 {
                     Mapping actual = await state.Device.CreatePortMapAsync(
@@ -147,6 +153,8 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception error) when (IsGatewayError(error))
                 {
+                    if (state.RecordFailure(protocol, clock.GetUtcNow()))
+                        try { MappingsChanged?.Invoke(); } catch { }
                     diagnostics?.TryWrite(new("nat.mapping_refused", "port_mapping")
                     { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name,
                         Transport = protocol == NatTransport.Udp ? DiagnosticTransport.Quic : DiagnosticTransport.Tcp });
@@ -190,6 +198,8 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
 
     private sealed class DeviceState(INatDevice device)
     {
+        private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan ExternalRefreshInterval = TimeSpan.FromMinutes(30);
         private readonly object gate = new();
         private Mapping? udp;
         private Mapping? tcp;
@@ -198,6 +208,9 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
         private DateTimeOffset tcpExpires;
         private DateTimeOffset udpRenewAt;
         private DateTimeOffset tcpRenewAt;
+        private DateTimeOffset externalRefreshAt;
+        private bool udpExpiryReported;
+        private bool tcpExpiryReported;
         private Task? discoveryMap;
         internal INatDevice Device { get; } = device;
         internal SemaphoreSlim Gate { get; } = new(1, 1);
@@ -210,12 +223,22 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
                 return discoveryMap = start();
             }
         }
-        internal bool SetExternal(IPAddress? address)
+        internal bool ExternalNeedsRefresh(DateTimeOffset now)
+        {
+            lock (gate) return now >= externalRefreshAt;
+        }
+        internal bool ProtocolNeedsRenew(NatTransport protocol, DateTimeOffset now)
+        {
+            lock (gate) return now >= (protocol == NatTransport.Udp ? udpRenewAt : tcpRenewAt);
+        }
+        internal bool SetExternal(IPAddress? address, DateTimeOffset now)
         {
             lock (gate)
             {
+                externalRefreshAt = now.Add(address is null ? RetryInterval : ExternalRefreshInterval);
                 if (Equals(external, address)) return false;
-                external = address; return true;
+                external = address;
+                return true;
             }
         }
         internal Mapping? Set(NatTransport protocol, Mapping actual, DateTimeOffset now, int leaseSeconds)
@@ -225,15 +248,35 @@ internal sealed class PortMapper(int port, DiagnosticJournal? diagnostics = null
                 Mapping? previous = protocol == NatTransport.Udp ? udp : tcp;
                 DateTimeOffset expires = now.AddSeconds(leaseSeconds);
                 DateTimeOffset renewAt = now.AddSeconds(Math.Max(1, leaseSeconds / 2));
-                if (protocol == NatTransport.Udp) { udp = actual; udpExpires = expires; udpRenewAt = renewAt; }
-                else { tcp = actual; tcpExpires = expires; tcpRenewAt = renewAt; }
+                if (protocol == NatTransport.Udp)
+                { udp = actual; udpExpires = expires; udpRenewAt = renewAt; udpExpiryReported = false; }
+                else
+                { tcp = actual; tcpExpires = expires; tcpRenewAt = renewAt; tcpExpiryReported = false; }
                 return previous;
+            }
+        }
+        internal bool RecordFailure(NatTransport protocol, DateTimeOffset now)
+        {
+            lock (gate)
+            {
+                if (protocol == NatTransport.Udp)
+                {
+                    udpRenewAt = now.Add(RetryInterval);
+                    if (udp is null || now < udpExpires || udpExpiryReported) return false;
+                    udpExpiryReported = true;
+                }
+                else
+                {
+                    tcpRenewAt = now.Add(RetryInterval);
+                    if (tcp is null || now < tcpExpires || tcpExpiryReported) return false;
+                    tcpExpiryReported = true;
+                }
+                return true;
             }
         }
         internal bool NeedsRenew(DateTimeOffset now)
         {
-            lock (gate) return external is null || udp is null || tcp is null
-                || now >= udpRenewAt || now >= tcpRenewAt;
+            lock (gate) return now >= externalRefreshAt || now >= udpRenewAt || now >= tcpRenewAt;
         }
         internal Mapping[] Mappings()
         {
