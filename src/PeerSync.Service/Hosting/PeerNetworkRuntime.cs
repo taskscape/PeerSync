@@ -306,9 +306,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
                 .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
                 .Select(unicast => unicast.Address)
-                .Where(address => !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.Any)
-                    && !address.Equals(IPAddress.IPv6Any) && !address.IsIPv6LinkLocal
-                    && !address.IsIPv6SiteLocal && !address.IsIPv6Multicast)
+                .Where(IsDialableUnicast)
                 .DistinctBy(address => address.ToString()).Take(4))
                 announce.LocalEndpoints.Add(new RendezvousEndpoint { Address = address.ToString(), Port = (uint)port });
         }
@@ -318,7 +316,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
         }
         if (portMapper is not null)
-            foreach (IPEndPoint endpoint in portMapper.PublicEndpoints.Take(4))
+            foreach (IPEndPoint endpoint in portMapper.PublicEndpoints.Where(endpoint =>
+                IsDialableUnicast(endpoint.Address)).Take(4))
                 announce.LocalEndpoints.Add(new RendezvousEndpoint
                 { Address = endpoint.Address.ToString(), Port = (uint)endpoint.Port });
         return announce;
@@ -360,9 +359,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     foreach (RendezvousEndpoint endpoint in peer.Endpoints.Take(16))
                     {
                         if (!IPAddress.TryParse(endpoint.Address, out IPAddress? address)
-                            || endpoint.Port is < 1 or > 65535 || address.Equals(IPAddress.Any)
-                            || address.Equals(IPAddress.IPv6Any) || IPAddress.IsLoopback(address)
-                            || address.IsIPv6Multicast) continue;
+                            || endpoint.Port is < 1 or > 65535 || !IsDialableUnicast(address)) continue;
+                        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
                         RememberEndpoint(key, new IPEndPoint(address, (int)endpoint.Port), ConnectionSource.Public);
                         accepted++;
                     }
@@ -387,6 +385,16 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 break;
         }
         return ValueTask.CompletedTask;
+    }
+
+    internal static bool IsDialableUnicast(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)) return false;
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+            return address.GetAddressBytes()[0] is > 0 and < 224;
+        return !address.IsIPv6Multicast && !address.IsIPv6LinkLocal && !address.IsIPv6SiteLocal;
     }
 
     private ValueTask OnTrackerMessageFromServerAsync(Uri server, ServerMessage message,

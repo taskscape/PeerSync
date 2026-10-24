@@ -50,9 +50,9 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
         foreach (Endpoint endpoint in announcement.LocalEndpoints)
         {
             if (!IPAddress.TryParse(endpoint.Address, out IPAddress? address)
-                || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)
-                || IPAddress.IsLoopback(address) || endpoint.Port is < 1 or > 65535)
+                || !IsDialableUnicast(address) || endpoint.Port is < 1 or > 65535)
                 throw new ArgumentException("Announcement contains an invalid local endpoint.", nameof(announcement));
+            if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
             endpoints.Add(new Endpoint { Address = address.ToString(), Port = endpoint.Port });
         }
         var observed = new Endpoint
@@ -74,6 +74,16 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
             session.LastAnnouncedUtc = time.GetUtcNow();
             BroadcastLocked(affected);
         }
+    }
+
+    private static bool IsDialableUnicast(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)) return false;
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return address.GetAddressBytes()[0] is > 0 and < 224;
+        return !address.IsIPv6Multicast && !address.IsIPv6LinkLocal && !address.IsIPv6SiteLocal;
     }
 
     internal bool TryGetShared(PresenceSession source, ReadOnlySpan<byte> remoteDeviceId,

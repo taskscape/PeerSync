@@ -126,9 +126,34 @@ public sealed class PresenceRegistryTests
         Announce invalidEndpoint = Announcement(Id(10), 41001);
         invalidEndpoint.LocalEndpoints.Add(new Endpoint { Address = "0.0.0.0", Port = 41001 });
         Should.Throw<ArgumentException>(() => registry.Announce(session, invalidEndpoint));
+        foreach (string invalidAddress in new[]
+            { "0.0.0.1", "239.1.2.3", "255.255.255.255", "::ffff:239.1.2.3", "ff02::1", "fe80::1" })
+        {
+            Announce invalidUnicast = Announcement(Id(10), 41001);
+            invalidUnicast.LocalEndpoints.Add(new Endpoint { Address = invalidAddress, Port = 41001 });
+            Should.Throw<ArgumentException>(() => registry.Announce(session, invalidUnicast));
+        }
         Announce tooMany = Announcement(Id(10), 41001);
         for (int i = 0; i < 500; i++) tooMany.FolderIds.Add(ByteString.CopyFrom(Id((byte)(i + 20))));
         Should.Throw<ArgumentException>(() => registry.Announce(session, tooMany));
+    }
+
+    [Fact]
+    public void MappedIpv4EndpointIsPublishedAsCanonicalUnicast()
+    {
+        var registry = new PresenceRegistry();
+        byte[] folder = Id(10);
+        PresenceSession reader = registry.Open(Id(1), Remote("203.0.113.1"));
+        PresenceSession sender = registry.Open(Id(2), Remote("203.0.113.2"));
+        registry.Announce(reader, Announcement(folder, 41001));
+        Announce announce = Announcement(folder, 41002);
+        announce.LocalEndpoints.Add(new Endpoint { Address = "::ffff:100.72.94.33", Port = 47821 });
+
+        registry.Announce(sender, announce);
+
+        PeerList list = LastList(reader);
+        list.Peers.Single().Endpoints.Select(endpoint => endpoint.Address)
+            .ShouldContain("100.72.94.33");
     }
 
     [Fact]
