@@ -43,6 +43,10 @@ executables had Valid Authenticode signatures, and `psp status --json`
 reported authenticated, clock-accepted sessions with both existing remote
 devices after the restart. The bounded before/after JSON snapshots and setup
 log are in `artifacts/field/client-force-close-upgrade-20261024/`.
+The first PC then created `first-pc-1.0.23-check.txt` in its joined test
+folder; it reached the second physical PC within six seconds with matching
+native SHA-256
+`49B51B62C763DF9FD6E52B9D80981725B475C7E848055CF325041427F92C4FE2`.
 
 This verifies the forced-close upgrade path on this physical Windows client.
 It does not establish standard-user UI behavior, other OS builds, third-PC
