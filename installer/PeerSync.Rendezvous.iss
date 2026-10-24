@@ -121,7 +121,8 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var Tries, Code: Integer;
+var Tries, Code, I: Integer;
+    Output: TExecOutput;
 begin
   Result := '';
   ExtractTemporaryFile('vc_redist.exe');
@@ -138,11 +139,23 @@ begin
     Exit;
   end;
   ExtractTemporaryFile('Grant-RendezvousCertificate.ps1');
-  Code := RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\Grant-RendezvousCertificate.ps1') + '" -CheckOnly');
+  if not ExecAndCaptureOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Grant-RendezvousCertificate.ps1') + '" -CheckOnly',
+    '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then
+  begin
+    Result := 'Could not run the Rendezvous certificate check. See setup log.';
+    Exit;
+  end;
   if Code <> 0 then
   begin
-    Result := 'A current sync.taskscape.com certificate with a machine private key is required. See setup log.';
+    for I := 0 to GetArrayLength(Output.StdErr) - 1 do
+      Log('Rendezvous certificate check: ' + Output.StdErr[I]);
+    Result := 'The sync.taskscape.com certificate check failed.';
+    if GetArrayLength(Output.StdErr) > 0 then
+      Result := Result + #13#10 + Output.StdErr[0]
+    else
+      Result := Result + ' See setup log.';
     Exit;
   end;
   if not ServiceExists or IsServiceStopped then Exit;

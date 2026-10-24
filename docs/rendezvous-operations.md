@@ -21,6 +21,10 @@ netsh http show urlacl | Select-String ':99/'
 Obtain a Server Authentication TLS certificate for `sync.taskscape.com` in
 `Cert:\LocalMachine\My`, with a private key. For a public deployment, configure
 win-acme with DNS or HTTP validation and Windows certificate-store installation.
+On an IIS server, win-acme otherwise defaults to `LocalMachine\WebHosting`;
+set this renewal's certificate-store destination to `My` (the
+`--certificatestore My` option in unattended setup). Copying a certificate
+between stores once does not configure future renewals.
 Set its post-renewal command to
 `C:\ProgramData\PeerSync.Rendezvous\After-RendezvousRenewal.ps1`; the script
 regrants the private-key ACL and restarts `PeerSyncRendezvous`. A self-signed

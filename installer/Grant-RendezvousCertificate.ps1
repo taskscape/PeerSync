@@ -26,20 +26,26 @@ try {
     $key = if ($rsa) { $rsa } else { $ecdsa }
     if (-not $key) { throw 'The server certificate must use RSA or ECDSA.' }
     if ($key -is [Security.Cryptography.RSACng] -or $key -is [Security.Cryptography.ECDsaCng]) {
+        if (-not $key.Key.IsMachineKey) { throw 'The certificate key is not in the machine store.' }
         $name = $key.Key.UniqueName
-        $base = Join-Path $env:ProgramData 'Microsoft\Crypto\Keys'
+        $bases = @(Join-Path $env:ProgramData 'Microsoft\Crypto\Keys')
+        if ($key -is [Security.Cryptography.RSACng]) {
+            # Windows PowerShell 5.1 can expose a legacy CSP RSA key as RSACng.
+            # Its file still lives in RSA\MachineKeys, not Crypto\Keys.
+            $bases += Join-Path $env:ProgramData 'Microsoft\Crypto\RSA\MachineKeys'
+        }
     } elseif ($key -is [Security.Cryptography.RSACryptoServiceProvider]) {
         if (-not $key.CspKeyContainerInfo.MachineKeyStore) { throw 'The certificate key is not in the machine store.' }
         $name = $key.CspKeyContainerInfo.UniqueKeyContainerName
-        $base = Join-Path $env:ProgramData 'Microsoft\Crypto\RSA\MachineKeys'
+        $bases = @(Join-Path $env:ProgramData 'Microsoft\Crypto\RSA\MachineKeys')
     } else { throw "Unsupported private-key provider: $($key.GetType().Name)" }
     if ([string]::IsNullOrWhiteSpace($name) -or $name -match '[\\/:]') {
         throw 'The certificate key container name is invalid.'
     }
-    $keyPath = Join-Path $base $name
-    if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
-        throw 'The certificate private-key file was not found in the machine key store.'
-    }
+    $keyPaths = @($bases | ForEach-Object { Join-Path $_ $name } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    if ($keyPaths.Count -ne 1) { throw 'The certificate private-key file was not uniquely found in the machine key store.' }
+    $keyPath = $keyPaths[0]
     if (-not $CheckOnly) {
         & icacls.exe $keyPath /grant 'NT SERVICE\PeerSyncRendezvous:R' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Granting the service access to the certificate private key failed.' }
