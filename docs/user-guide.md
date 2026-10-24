@@ -9,12 +9,18 @@ traffic when a direct route is unavailable.
 ## Add or join a folder
 
 Install PeerSync on both PCs. Open the dashboard and use **Add** on the
-first PC. Use **Share** to obtain the folder key, then **Join** with
-that key and an empty destination on the second PC. A key grants access to
-the folder; transmit it only through a trusted channel and do not include it
-in diagnostics or screenshots. Each PC must retain its own device
-certificate; copying an installation's private identity to a second PC is
-unsupported.
+first PC. To share an existing folder for two-way sync, select that folder,
+choose **Share → Reveal read-write key → Yes → Copy visible key**, and
+transfer the key to the other PC through a trusted channel. Share initially
+shows a read-only key; use that instead when the other PC should receive
+changes without editing the shared folder. On the other PC, create a new empty
+destination folder, choose **Join**, paste the key into **Paste the PeerSync
+key**, and select that destination when **Choose where to sync the joined
+folder** appears. Allow the folder-access prompt if Windows shows one.
+
+A key grants access to the folder; do not include it in diagnostics or
+screenshots. Each PC must retain its own device certificate; copying an
+installation's private identity to a second PC is unsupported.
 
 The CLI offers the same enrollment operations:
 
