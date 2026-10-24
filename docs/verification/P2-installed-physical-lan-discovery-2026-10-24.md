@@ -1,0 +1,5 @@
+# Installed physical LAN discovery — 2026-10-24
+
+The first physical PC's installed PeerSync 1.0.18.0 service started a fresh journal run at 2026-10-24 10:53:49.5293449 UTC. The journal recorded `discovery.lan_started` at +0.179 s, `discovery.lan_peer_found` for the second PC's previously confirmed same-LAN address at +1.025 s, and `connection.candidate_selected` with operation `candidate.lan.quic` to that same address at +1.577 s. The selected candidate identifies actual direct LAN QUIC, not merely a received discovery packet. The source is the live installed service journal under `C:\ProgramData\PeerSync\logs\service\`; raw network addresses remain subject to its 24-hour retention policy. The second PC's LAN address was independently reported in the [physical QUIC check](P0-physical-lan-quic-2026-10-24.md).
+
+This establishes first-PC detection and selected direct transport within the plan's five-second threshold on the two physical Ethernet PCs. It does not show the second PC's reciprocal discovery timestamp, each required multicast/broadcast path on every active adapter, or the Server adapter behavior. P2.3.1 stays unchecked until that evidence is collected.
