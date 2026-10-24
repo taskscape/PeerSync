@@ -29,6 +29,13 @@ networking, rendezvous and documentation edits do not change the seven fuzz
 targets being exercised by this fixed binary. This is input-path provenance,
 not a claim that the binary contains every later repository edit.
 
+At later head `c4437d0`, the only diff within those input directories is
+`Core/Diagnostics/DiagnosticBundleCollector.cs`. Its callers are the CLI and
+rendezvous diagnostics commands; the seven fuzz targets do not invoke it.
+The newer tracker changes are outside the fuzz dependency path. This remains
+a fixed-binary campaign; accepting its eventual result still requires the
+terminal and crash-file checks below.
+
 `PeerSync-P5-Fuzz-20261024` started the exact binary with `--seconds 86400` at
 2026-10-24 09:05:58 UTC as a hidden SYSTEM scheduled task with a 26-hour
 execution limit. Its child PID was 52808. The companion

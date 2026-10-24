@@ -20,6 +20,14 @@ paths used by this scenario. Later ConnectionManager and PortMapper changes
 are outside the in-memory scale transport. This establishes unchanged relevant
 inputs for the queued fixed binary, not a whole-repository current-head build.
 
+At later head `c4437d0`, the only diff within those input directories is
+`Core/Diagnostics/DiagnosticBundleCollector.cs`. Only the CLI and rendezvous
+diagnostics commands call it; the benchmark and in-memory scan/peer paths do
+not. New tracker diagnostics likewise do not change this benchmark. The
+queued binary remains a scoped measurement of the current scale execution
+path, subject to its terminal and native-byte checks; it is not a build of
+every current repository file.
+
 The retained fixture is
 `artifacts/scale/p5-20261022T223804-81cef95f6d244dc09c796b053430f8be-fixture`.
 It contains the million-file native source tree and canonical `index.db`.
