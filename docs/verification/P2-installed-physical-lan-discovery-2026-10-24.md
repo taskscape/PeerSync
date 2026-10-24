@@ -15,3 +15,15 @@ in the tracker catalog; its actual destination was the verified LAN address.
 This adds the reciprocal physical-PC timing. The logs do not prove that every
 active interface's multicast and broadcast path worked, nor the separate
 Server adapter behavior, so P2.3.1 remains unchecked.
+
+After both physical PCs upgraded to development-signed 1.0.23.0, the first
+PC's installed service selected an authenticated QUIC session to the second
+PC's `192.168.0.183` address at 13:18:55 UTC. `Find-NetRoute` selected source
+`192.168.0.176` on the Ethernet adapter with no next hop. That session's
+correlated service journal later recorded a successful folder sync pass with
+one applied item and zero deferred items. The [two-PC field check](P4-two-PC-cross-version-field-2026-10-24.md)
+also verified one new text file in each direction with matching native
+SHA-256. These observations establish a current-build physical LAN QUIC
+session and native byte convergence; they do not prove every adapter's
+multicast/broadcast path, the planned 50 GB three-PC corpus, or native WAN
+NAT traversal.
