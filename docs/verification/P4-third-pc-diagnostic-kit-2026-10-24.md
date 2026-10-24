@@ -18,3 +18,16 @@ was previously exercised by a local double-click-equivalent smoke; the 1.0.19.0
 installed CLI separately collected a 100,000-event live bundle from the first
 PC. The third PC has not yet run this kit or supplied its bundle. Its earlier
 `SocketException` cannot be assigned a cause from the notification alone.
+
+An updated direct-transfer kit is now available as
+`artifacts/deploy/PeerSync-OutsidePC-1.0.21.0-x64-upgrade.zip` (166,890,230
+bytes, SHA-256 `F038F63660A5AF1422409D48305B7A45F39531A36E099124221348EA78C32A3A`).
+It contains the 1.0.21.0 development-signed client setup, matching public
+signing certificate and manifest, the same diagnostic collector, the probe
+and an updated README. The ZIP has six entries; the embedded setup's SHA-256
+matches the signed standalone installer. It contains no private key or folder
+capability. The [first-PC 1.0.21.0 field check](P4-tracker-session-correlation-2026-10-24.md)
+observed one tracker stream through two refreshes and 11 minutes without the
+old 319-second reset. That is reason to use this newer kit for the next third-PC
+upgrade; it does not prove the third PC's socket failure is resolved. The third
+PC has not yet installed 1.0.21.0 or returned its sanitized bundle.
