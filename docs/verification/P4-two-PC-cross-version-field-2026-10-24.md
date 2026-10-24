@@ -1,7 +1,8 @@
 # Physical two-PC cross-version sync, 2026-10-24
 
-The first PC runs installed PeerSync 1.0.21.0 after its keepalive upgrade. The
-known second PC at `100.88.55.83` is still running 1.0.16.0; its already
+At the initial cross-version check, the first PC ran installed PeerSync
+1.0.21.0 after its keepalive upgrade. The known second PC at `100.88.55.83`
+still ran 1.0.16.0; its already
 authorized administrative share permitted direct file and journal checks
 without changing Windows remoting configuration. Its joined folder is native
 storage on the second PC, accessed through `C$` for this field check.
@@ -58,3 +59,25 @@ server-issued session ID. These observations verify post-upgrade two-way
 sync, but a controlled long-session reset has not yet exercised the new
 retry-accounting branch. The third-PC socket error and file convergence
 remain open.
+
+The second PC was then upgraded from 1.0.22.0 to the same development-signed
+1.0.23.0 client now on the first PC. The remote copy of the installer matched
+the signed source SHA-256
+`A3CAF857296B42175A455ADB46F51651B8CFF9C6DB738BD318C6E32FFCA1CCC0`.
+The one-time SYSTEM upgrade task ran setup with exit 0 and was removed. The
+PeerSync service is Running, installed app/service/CLI signatures are Valid,
+the settings SHA-256 is unchanged, and all eight pre-upgrade native text-file
+hashes match the saved snapshot. The setup log reports no Windows restart
+required. The before/after snapshots and copied setup log are under
+`artifacts/field/second-pc-1.0.23-upgrade-20261024/`.
+
+After both physical clients reached 1.0.23.0, a fresh text file from each
+PC arrived on the other with matching native SHA-256. First to second:
+`9670D8EF668AB3F2CAE1CEB591E26ADBC1C520C4CEBFA72F189E6FFCF929E53A`;
+second to first:
+`0D237B39F82D9250F22B3389EB6BD6C978F482B34D9688099BD27FF3BF426335`.
+The first PC's CLI reported authenticated `Quic` transport for the second
+device, but this file check did not capture the exact routed interface or
+qualify the separate native NAT gate. The server remains on its older build,
+the third PC has not returned diagnostics, and a controlled tracker reset has
+still not field-tested the new backoff branch.
