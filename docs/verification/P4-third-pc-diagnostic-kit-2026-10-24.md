@@ -44,3 +44,10 @@ second-PC upgrade. This kit also includes the new long-session retry-accounting
 fix. It remains a development-signed test package. The third PC has not yet
 installed it, supplied a diagnostic bundle, or demonstrated joined-file
 convergence.
+
+The third PC's Tailscale node was online and offered as a Taildrop target.
+`tailscale file cp` sent the exact 1.0.22.0 upgrade ZIP above to that node and
+exited 0 on 2026-10-24. This is an independent package-delivery path, not a
+PeerSync file-convergence result. The sender cannot read the third PC's
+Downloads folder with its current Windows credentials, so recipient-side hash,
+installation and diagnostic collection still require field confirmation.
