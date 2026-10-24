@@ -2372,11 +2372,13 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
 
 ### P4.1 Rendezvous server
 
-- [ ] **P4.1.1 Host and Kestrel on port 99** (`PeerSync.Rendezvous/Program.cs`)
+- [x] **P4.1.1 Host and Kestrel on port 99** (`PeerSync.Rendezvous/Program.cs`)
   - Done when: it runs as the Windows service `PeerSyncRendezvous` with HTTP/1, HTTP/2 and HTTP/3 on port 99, TLS 1.3 only, the certificate from `LocalMachine\My`, and client certificates (or the fallback logged in P0.2.6).
   - Code: 10.1.
-- [ ] **P4.1.2 Session stream and presence** (`Rendezvous/Tracker/`)
+  - The [central implementation audit](docs/verification/P4-central-implementation-reconciliation-2026-10-24.md) ties the TLS/HTTP and RPC certificate requirements to current source, 17 passing focused tests, installed Server 2025 health and the independent HTTP/2+HTTP/3 probe. Public health/bootstrap routes allow certificate-free access; tracker and relay RPCs require a device certificate.
+- [x] **P4.1.2 Session stream and presence** (`Rendezvous/Tracker/`)
   - Done when: `Announce`, `PeerList` push, `ObservedAddress` and the 15-minute TTL work. Every DeviceId is taken from the client certificate. A device sees only peers sharing a FolderId.
+  - The [central implementation audit](docs/verification/P4-central-implementation-reconciliation-2026-10-24.md) records current-source certificate-derived identity, observed-address and presence tests, including folder isolation and clock-driven TTL. Installed two-guest tracker exchange is retained separately; mobile-hotspot folder sync remains a Gate P4 check.
 - [ ] **P4.1.3 Hole-punch coordination** (`Rendezvous/Tracker/Punch.cs`)
   - Done when: `PunchRequest` leads to `PunchNow` sent to both peers with a start time 500 ms ahead, as decided in P0.2.2.
 - [ ] **P4.1.4 Relay** (`Rendezvous/Relay/`)
@@ -2385,9 +2387,10 @@ Goal: sync between different networks through `sync.taskscape.com:99`, with rela
 - [ ] **P4.1.5 Abuse controls, bootstrap file and observability**
   - Done when: ASP.NET Core rate limiting is partitioned by IP and DeviceId, with at most 500 folders per device. `/.well-known/peersync.json` is served. `/healthz` responds. OpenTelemetry metrics and the Event Log work. Logs hold no FolderIds.
   - Local [central diagnostic verification](docs/verification/P4-probe-correlation-2026-10-23.md) now exercises the real HTTP limiter's 120-token burst, 429 responses, a bounded warning and a sanitized ZIP. Required hosted/deployed observability and Gate P4 evidence remain open.
-- [ ] **P4.1.6 `installer/PeerSync.Rendezvous.iss`**
+- [x] **P4.1.6 `installer/PeerSync.Rendezvous.iss`**
   - Done when: it installs the service under `NT SERVICE\PeerSyncRendezvous`, adds firewall rules for TCP and UDP 99, and upgrades in place.
   - A signed development 1.0.14.0 upgrade on a Server 2025 VM preserved the Running virtual-account service and its TCP/UDP 99 listeners. The 1.0.13.0 package also passed two silent uninstall/reinstall cycles, removing the service, firewall rules, install directory and owned WER entry while retaining ProgramData. See [installed cycle evidence](docs/verification/P3-server2022-uninstall-cycle-2026-10-23.md) and [packaged preflight evidence](docs/verification/P4-central-deployment-preflight-2026-10-23.md). Physical network and release-signer checks remain open.
+  - The [physical Server 2025 deployment](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) installed 1.0.17.0 with exit 0; the configured virtual-account service owns both port-99 listeners, both inbound firewall rules exist, and local TLS health passes. This closes installer behavior while public code signing remains a separate release gate.
 
 - [ ] **P4.1.7 Central deployment diagnostics** (`PeerSync.Rendezvous/Diagnostics/`, `docs/diagnostics.md`)
   - The packaged `Test-RendezvousDeployment.ps1` now reports local configuration, SCM state, matching server certificate, TCP/UDP listener ownership, inbound allow rules, DNS and TLS-validated loopback health in a single sanitized JSON result. It preserves service configuration; its health request emits one diagnostic event. A development-host negative-path check and installed Server 2025 package pass, including the no-argument Windows PowerShell 5.1 command after fixing its default directory. Outside-network checks remain open. See [preflight evidence](docs/verification/P4-central-deployment-preflight-2026-10-23.md) and [rendezvous operations](docs/rendezvous-operations.md).
