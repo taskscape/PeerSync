@@ -2579,6 +2579,7 @@ public sealed class PortMapper(int port, ILogger<PortMapper> log) : IAsyncDispos
 - [ ] **P4.3.4 Install and verify**
   - Done when: the rendezvous installer has run, `/healthz` answers, and `psp probe sync.taskscape.com:99` passes from an outside network for both TCP and UDP. If UDP fails, ask the provider to open UDP 99 and record the outcome in section 2.
   - Installer 1.0.17.0 completed on the server, local `/healthz` passed, and both PCs' installed CLIs reached the public DNS name over HTTP/2 and HTTP/3; see [deployment evidence](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) and [route evidence](docs/verification/P4-public-probe-route-2026-10-24.md). Those private-source routes may be hairpinned and do not close the required independent outside-network check. The 2026-10-23 pre-install failure remains historical evidence.
+  - A [single-file x64 client kit for a third PC](docs/verification/P4-third-pc-outside-network-kit-2026-10-24.md) is packaged and hash-verified for a mobile-hotspot probe. The outside-network result is pending; packaging does not close this item.
 
 ### 10.4 Server commands (P4.3)
 
