@@ -26,3 +26,30 @@ passed 22/22. The first PC's installed 1.0.19.0 package predates this
 correlation change, and the deployed server and third PC have not been
 upgraded for it. A same-session client/server field capture is still needed to
 attribute the reset and close P2.5.6 or physical WAN operation.
+
+The first PC then repeated the same failure at 12:00:02, 12:05:23 and
+12:10:46 UTC, each about 319 seconds after its preceding connection and about
+19 seconds after its completed refresh write. A narrowly filtered Packet
+Monitor capture covered the last reset and a separate HTTP/2 probe, but
+recorded no packet events, so it cannot attribute the reset. The capture was
+stopped and its filter removed. The third PC's `SocketException` remains a
+separate, undiagnosed field report.
+
+The current source now enables HTTP/2 keepalive PINGs after 60 seconds without
+received frames, with a 30-second response deadline, for active tracker calls.
+The rendezvous Kestrel host also pings idle HTTP/2 connections on that schedule.
+This is a bounded mitigation for possible idle NAT/firewall expiry, not proof
+that such an intermediary caused the 319-second reset. Reconnect remains the
+fallback if a stream ends. Microsoft's [gRPC guidance](https://learn.microsoft.com/en-us/aspnet/core/grpc/performance)
+describes the required server cooperation and notes that pings do not prevent
+all long-running-call termination; its [Kestrel guidance](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/options)
+documents the server-side PING settings. A deployed stream surviving multiple
+former failure intervals and a correlated server journal are still required
+before the field issue is considered resolved.
+
+The Release `PeerSync.Net.Tests` suite passed 59/59 and the Release
+`PeerSync.Rendezvous.Tests` suite passed 22/22 with the keepalive configuration;
+the TRX reports are in `artifacts/tests/http2-keepalive/`. These short local
+tests establish that the mTLS tracker/relay flow still works. They do not
+exercise a 319-second network path or prove that the deployed server responds
+to PINGs, so the field check remains open.

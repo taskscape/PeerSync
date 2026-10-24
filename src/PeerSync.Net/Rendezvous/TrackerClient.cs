@@ -107,7 +107,15 @@ internal sealed class TrackerClient : IAsyncDisposable
     private async Task RunSessionAsync(CancellationToken cancellationToken)
     {
         observedSessionId = null;
-        using var handler = new SocketsHttpHandler();
+        using var handler = new SocketsHttpHandler
+        {
+            // The tracker stream is otherwise quiet for five minutes between
+            // announcements. Keep the HTTP/2 connection active across shorter
+            // NAT and firewall idle windows, and detect a dead path promptly.
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+        };
         handler.SslOptions.EnabledSslProtocols = SslProtocols.Tls13;
         handler.SslOptions.ClientCertificates = new X509CertificateCollection { certificate };
         LoopbackCertificatePin.Apply(handler, server, loopbackServerCertificate);

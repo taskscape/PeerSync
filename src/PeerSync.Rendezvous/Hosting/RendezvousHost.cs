@@ -112,6 +112,10 @@ internal static class RendezvousHost
         });
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
+            // Long-lived tracker and relay streams can be silent between peer
+            // events. Ping idle HTTP/2 connections before typical NAT expiry.
+            kestrel.Limits.Http2.KeepAlivePingDelay = TimeSpan.FromSeconds(60);
+            kestrel.Limits.Http2.KeepAlivePingTimeout = TimeSpan.FromSeconds(30);
             if (testListenAddress is null) kestrel.ListenAnyIP(options.Port, ConfigureListener);
             else kestrel.Listen(testListenAddress, options.Port, ConfigureListener);
         });
