@@ -67,8 +67,9 @@ Current source now records the gRPC status, elapsed session time and nested
 native socket error on a tracker failure, plus a sanitized event after each
 initial or periodic announcement write succeeds. This permits a later client
 and server journal comparison without logging folder IDs or paths. The Release
-Net suite passes 59/59 locally. The installed first and third PCs predate
-these additional tracker fields; the exact cause remains open.
+Net suite passes 59/59 locally. At the time of that inspection, both installed
+clients predated these tracker fields; the third PC still does. The exact cause
+remains open.
 
 The current-source connection diagnostics now record the Windows native socket
 error number on failed candidate and reconnect events, including a socket
@@ -77,7 +78,33 @@ cannot recover the code from the third PC's earlier installed build. The full
 Release Net suite passed locally (59/59) with a regression for the wrapped
 socket case.
 
-The third PC still runs the earlier package and needs this upgrade before the
-notification fix can be observed there. Its rendered Windows notification
+The development-signed x64 1.0.19.0 installer was built from commit `ebe9546`
+with the existing development signer. Authenticode verification returned Valid;
+the installer SHA-256 is
+`B1E174B81D606A68403BC82085B0125B1E1AA30E051ABD3AC7D0444D584DFDDF`.
+It packages the notification repair, more precise tracker/socket diagnostics,
+and the bounded high-volume diagnostic collector. The package is staged in the
+first PC's joined folder as `PeerSync-Setup-1.0.19.0-x64.exe` with the same
+hash. Sync of this installer to the third PC is not yet verified, so a direct
+transfer may be necessary if folder sync itself is failing.
+
+The first PC upgraded from 1.0.18.0 to 1.0.19.0 with setup exit 0. Its
+service is Running; `psp status --json` reports production sync available and
+two connected remote device IDs with accepted clocks. Its settings hash and
+the three existing text-file hashes were identical before and after setup.
+The installed 1.0.19.0 CLI collected a sanitized ZIP from five live journal
+files despite high volume: 100,000 events retained and 4,189 explicitly
+omitted, with zero expired or invalid. The ZIP is 2,055,435 bytes; its SHA-256
+is `F1E71C24318C4C7CBF1B8F8B04E34567E6700090F486678D456EE051B576C23F`.
+Setup log, before/after snapshots and bundle are under
+`artifacts/field/client-diagnostic-upgrade-20261024/`. These checks validate
+the package and collector on the first PC; they do not identify the third PC's
+socket error.
+
+The third PC still needs the 1.0.19.0 upgrade and a fresh local diagnostic
+bundle before the cause and notification behavior can be verified there. If
+its joined folder is stalled, collect to `%TEMP%` with the installed CLI and
+transfer the ZIP independently of PeerSync, as described in
+[the diagnostics guide](../diagnostics.md). Its rendered Windows notification
 behavior and `third-pc-check.txt` file convergence remain open. This does not
 close P3.2.5 or physical WAN/NAT/file-convergence gates.
