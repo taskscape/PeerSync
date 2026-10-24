@@ -56,6 +56,16 @@ For scripted installs, use `Start-Process -Wait -PassThru -WindowStyle Hidden`
 to capture Setup's exit code. A bare PowerShell invocation of a GUI setup can
 return before installation finishes in remote sessions.
 
+Before an attended upgrade, choose **Exit app** from the PeerSync tray menu;
+closing the dashboard window alone leaves its tray process running. The
+service continues independently until Setup stops it. Current Setup asks
+Windows Restart Manager to force-close an app still using files it must
+replace, including for silent upgrades, and does not automatically reopen
+the dashboard afterward. Check the exit code and service state before
+reopening the app. An earlier physical silent upgrade failed to replace the
+open dashboard executable; the [installer repair record](verification/P3-open-dashboard-upgrade-repair-2026-10-24.md)
+retains that failure and the pending field verification of the new setting.
+
 The default service account is `NT SERVICE\PeerSync`. The installer switch
 `/SERVICEACCOUNT=LocalSystem` is a fallback when a folder's ACL cannot be
 granted to the virtual account. The app offers an inheritable Modify grant

@@ -28,7 +28,10 @@ ArchitecturesInstallIn64BitMode=arm64
 ArchitecturesAllowed=x64compatible and not arm64
 ArchitecturesInstallIn64BitMode=x64compatible and not arm64
 #endif
-CloseApplications=yes
+; The tray dashboard may retain PeerSync.exe across user sessions. A silent
+; upgrade must close it before replacing the executable; a graceful Restart
+; Manager close was insufficient on the physical second-PC field upgrade.
+CloseApplications=force
 RestartApplications=no
 UsePreviousTasks=yes
 DisableProgramGroupPage=yes

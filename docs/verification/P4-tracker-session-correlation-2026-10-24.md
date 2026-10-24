@@ -109,3 +109,10 @@ been observed on this installed build, the reset/backoff behavior itself is
 not claimed as field-verified. The first failed setup attempt, recovery and
 successful retry are detailed in the
 [physical two-PC record](P4-two-PC-cross-version-field-2026-10-24.md).
+
+At 12:50:36 UTC, the second-PC 1.0.22.0 journal still showed its original
+12:42:31 UTC server-issued tracker session ID, a completed 12:47:31 UTC
+announcement refresh and no session failure or disconnect. The service was
+Running. This eight-minute observation passes the older 319-second reset
+window on that physical PC, but remains too short to establish long-term
+stability or exercise the new backoff-reset branch.
