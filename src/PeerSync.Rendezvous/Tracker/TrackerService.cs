@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using Google.Protobuf;
 using Grpc.Core;
 using PeerSync.Core.Diagnostics;
@@ -27,6 +29,7 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         IPEndPoint observed = new(context.GetHttpContext().Connection.RemoteIpAddress ?? IPAddress.None,
             context.GetHttpContext().Connection.RemotePort);
         PresenceSession session = presence.Open(deviceId, observed);
+        var elapsed = Stopwatch.StartNew();
         RendezvousMetrics.TrackerSessions.Add(1);
         RendezvousMetrics.ActiveTrackerSessions.Add(1);
         diagnostics.TryWrite(new("rendezvous.session_opened", "tracker")
@@ -117,14 +120,16 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         {
             diagnostics.TryWrite(new("rendezvous.session_failed", "tracker")
             { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
-                ErrorCode = error.StatusCode.ToString(), HResult = error.HResult });
+                ErrorCode = error.StatusCode.ToString(), HResult = error.HResult,
+                NativeError = NativeSocketError(error), ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
             throw;
         }
         catch (Exception error) when (error is IOException or InvalidOperationException)
         {
             diagnostics.TryWrite(new("rendezvous.transport_failed", "tracker")
             { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
-                ErrorCode = error.GetType().Name, HResult = error.HResult });
+                ErrorCode = error.GetType().Name, HResult = error.HResult,
+                NativeError = NativeSocketError(error), ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
             throw;
         }
         finally
@@ -139,10 +144,12 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                 diagnostics.TryWrite(new("rendezvous.transport_failed", "tracker")
                 { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
                     ErrorCode = error is RpcException rpc ? rpc.StatusCode.ToString() : error.GetType().Name,
-                    HResult = error.HResult });
+                    HResult = error.HResult, NativeError = NativeSocketError(error),
+                    ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
             }
             session.Lifetime.Dispose();
-            diagnostics.TryWrite(new("rendezvous.session_closed", "tracker") { SessionId = session.SessionId });
+            diagnostics.TryWrite(new("rendezvous.session_closed", "tracker")
+            { SessionId = session.SessionId, ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
         }
     }
 
@@ -156,4 +163,12 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
 
     private static DiagnosticTransport Transport(ServerCallContext context)
         => context.GetHttpContext().Request.Protocol == "HTTP/3" ? DiagnosticTransport.Http3 : DiagnosticTransport.Http2;
+
+    private static int? NativeSocketError(Exception error)
+    {
+        for (Exception? current = error is RpcException rpc ? rpc.Status.DebugException ?? error : error;
+             current is not null; current = current.InnerException)
+            if (current is SocketException socket) return socket.NativeErrorCode;
+        return null;
+    }
 }

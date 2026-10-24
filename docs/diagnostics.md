@@ -143,10 +143,14 @@ after the corresponding gRPC write completes. Their `itemsVisited` field is
 the announced folder count, not a folder identity. For a tracker disconnect,
 `tracker.session_failed` reports the gRPC status as `rpc_<status>`, session
 duration in `elapsedMs`, and a nested native socket error when one exists.
-Compare those client times with `rendezvous.announced` and
-`rendezvous.session_failed` in the server bundle to distinguish a missed
-refresh, server rejection and a transport interruption; the client status
-alone does not establish which one occurred.
+The server's observed-address reply supplies the `sessionId` logged as
+`tracker.session_identified`; later client failure and disconnect events use
+that same ID. Match it with `rendezvous.session_opened`,
+`rendezvous.announced`, failure and close events in the server bundle. Server
+failures include elapsed time and a nested native socket error when available;
+closure includes elapsed time. An intentional client stop logs a disconnect
+without a false failure. A client-side reset still cannot, by itself, identify
+whether the server or an intermediary closed the connection.
 The default bundles omit network addresses; add `--include-network-addresses`
 only when routing details are needed and review the ZIP before sharing it.
 Diagnostics expire IP-bearing journal files within 24 hours; the collector

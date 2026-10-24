@@ -27,6 +27,8 @@ internal sealed class TrackerClient : IAsyncDisposable
     private readonly CancellationTokenSource stopping = new();
     private Task? worker;
     private int connected;
+    // The response reader sets this; failure and disconnect read it after all session tasks end.
+    private Guid? observedSessionId;
 
     internal TrackerClient(Uri server, X509Certificate2 certificate, Func<Announce> announcement,
         Func<ServerMessage, CancellationToken, ValueTask> receive, DiagnosticJournal? diagnostics = null,
@@ -85,11 +87,12 @@ internal sealed class TrackerClient : IAsyncDisposable
                 await RunSessionAsync(stopping.Token).ConfigureAwait(false);
                 failures = 0;
             }
-            catch (OperationCanceledException) when (stopping.IsCancellationRequested) { break; }
+            catch (Exception) when (stopping.IsCancellationRequested) { break; }
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("tracker.session_failed", "rendezvous")
                 { Level = DiagnosticLevel.Warning, Transport = DiagnosticTransport.Http2,
+                    SessionId = observedSessionId,
                     ErrorCode = error is RpcException rpc ? $"rpc_{rpc.StatusCode}" : error.GetType().Name,
                     HResult = error.HResult, NativeError = NativeSocketError(error),
                     ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
@@ -103,6 +106,7 @@ internal sealed class TrackerClient : IAsyncDisposable
 
     private async Task RunSessionAsync(CancellationToken cancellationToken)
     {
+        observedSessionId = null;
         using var handler = new SocketsHttpHandler();
         handler.SslOptions.EnabledSslProtocols = SslProtocols.Tls13;
         handler.SslOptions.ClientCertificates = new X509CertificateCollection { certificate };
@@ -138,17 +142,33 @@ internal sealed class TrackerClient : IAsyncDisposable
         {
             Volatile.Write(ref connected, 0);
             await linked.CancelAsync().ConfigureAwait(false);
-            try { await Task.WhenAll(reader, writer, ticker).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-            diagnostics?.TryWrite(new("tracker.session_disconnected", "rendezvous")
-            { Transport = DiagnosticTransport.Http2 });
+            try
+            {
+                try { await Task.WhenAll(reader, writer, ticker).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            }
+            finally
+            {
+                diagnostics?.TryWrite(new("tracker.session_disconnected", "rendezvous")
+                { Transport = DiagnosticTransport.Http2, SessionId = observedSessionId });
+            }
         }
     }
 
     private async Task ReadLoopAsync(IAsyncStreamReader<ServerMessage> responses, CancellationToken cancellationToken)
     {
         while (await responses.MoveNext(cancellationToken).ConfigureAwait(false))
-            await receive(responses.Current, cancellationToken).ConfigureAwait(false);
+        {
+            ServerMessage message = responses.Current;
+            if (observedSessionId is null && message.ObservedAddress is { } observed
+                && observed.SessionId.Length == 16)
+            {
+                observedSessionId = new Guid(observed.SessionId.Span);
+                diagnostics?.TryWrite(new("tracker.session_identified", "rendezvous")
+                { Transport = DiagnosticTransport.Http2, SessionId = observedSessionId });
+            }
+            await receive(message, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task AnnounceTickerAsync(CancellationToken cancellationToken)
