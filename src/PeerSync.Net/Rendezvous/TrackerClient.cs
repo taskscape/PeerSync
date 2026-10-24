@@ -90,6 +90,11 @@ internal sealed class TrackerClient : IAsyncDisposable
             catch (Exception) when (stopping.IsCancellationRequested) { break; }
             catch (Exception error)
             {
+                // A long authenticated stream is a recovered connection, not
+                // another consecutive startup failure. Otherwise a transient
+                // reset every few minutes eventually incurs the full backoff.
+                if (observedSessionId is not null && elapsed.Elapsed >= TimeSpan.FromMinutes(1))
+                    failures = 0;
                 diagnostics?.TryWrite(new("tracker.session_failed", "rendezvous")
                 { Level = DiagnosticLevel.Warning, Transport = DiagnosticTransport.Http2,
                     SessionId = observedSessionId,

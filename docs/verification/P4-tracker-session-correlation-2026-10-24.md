@@ -82,3 +82,20 @@ its new keepalive setting and enhanced failure journal have not been deployed.
 The observation does not expose the PING frames or prove whether an idle
 middlebox, server behavior or another cause produced the earlier resets.
 Longer operation, same-session server logs and the third-PC bundle remain open.
+
+Read-only access to the known second PC's installed service journal showed a
+separate retry-accounting defect in its older 1.0.16.0 client. Its tracker
+stream repeatedly failed after about five minutes, but the wait between the
+12:28:26 UTC failure and 12:32:42 UTC reconnect was 256 seconds. The client
+counted each long authenticated stream's later reset as another consecutive
+startup failure, eventually reaching its maximum exponential delay. Current
+source now clears that failure streak when the server issued a session ID and
+the stream had been active for at least one minute. Short sessions that never
+reach that state continue to back off. This change has not yet been deployed
+to the second PC; the third PC's failure is still unclassified.
+
+After the retry-accounting change, Release `PeerSync.Net.Tests` passed 59/59
+and Release `PeerSync.Rendezvous.Tests` passed 22/22 without skips; TRX reports
+are under `artifacts/tests/tracker-reconnect/`. These checks cover current
+network and hosted tracker behavior, but do not induce a 256-second field
+backoff. Installed second-PC recovery remains the decisive check.
