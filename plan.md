@@ -2586,7 +2586,7 @@ public sealed class PortMapper(int port, ILogger<PortMapper> log) : IAsyncDispos
 
 - [ ] **P4.3.1 DNS** (done by whoever manages taskscape.com DNS)
   - Done when: `sync.taskscape.com` has an A record (and AAAA if the server has IPv6) pointing at the server.
-  - On 2026-10-24 the A record resolved to `45.11.63.194` and no AAAA was returned from the first PC. The server's IPv6 applicability and independent DNS vantage remain to be recorded.
+  - On 2026-10-24 the A record resolved to `45.11.63.194` and no AAAA was returned from the first PC. The [third-PC mobile-hotspot probe](docs/verification/P4-mobile-hotspot-probe-2026-10-24.md) independently resolved the same public IPv4 address and reached the server over both protocols. Whether the server has a usable public IPv6 address remains to be recorded before deciding if an AAAA record is required.
 - [x] **P4.3.2 Certificate with win-acme**
   - Done when: a Let's Encrypt certificate for `sync.taskscape.com` is in `LocalMachine\My`, renewal is scheduled, and the post-renewal script restarts `PeerSyncRendezvous`.
   - The [server deployment](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) verified the current Let's Encrypt certificate with a working machine key in `My`, the existing scheduled win-acme renewal configured for `My`, and a successful manual run of the renewal hook that regranted access and restarted the service. A future real issuance has not yet exercised that configuration.
