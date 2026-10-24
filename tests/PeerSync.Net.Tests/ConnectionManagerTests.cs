@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
@@ -251,7 +252,8 @@ public sealed class ConnectionManagerTests
         try
         {
             await manager.ConnectAsync(remote,
-            [new(ConnectionSource.Lan, DiagnosticTransport.Quic, endpoint, _ => throw new IOException("unavailable")),
+            [new(ConnectionSource.Lan, DiagnosticTransport.Quic, endpoint,
+                _ => throw new IOException("unavailable", new SocketException((int)SocketError.NetworkUnreachable))),
              new(ConnectionSource.Public, DiagnosticTransport.Tcp, endpoint, _ => ValueTask.FromResult(winner))],
                 TestContext.Current.CancellationToken);
 
@@ -265,6 +267,7 @@ public sealed class ConnectionManagerTests
             using JsonDocument failed = JsonDocument.Parse(records.Single(line => line.Contains("candidate_failed", StringComparison.Ordinal)));
             failed.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.lan.quic");
             failed.RootElement.GetProperty("errorCode").GetString().ShouldBe("IOException");
+            failed.RootElement.GetProperty("nativeError").GetInt32().ShouldBe((int)SocketError.NetworkUnreachable);
             records.ShouldContain(line => line.Contains("candidate.public.tcp", StringComparison.Ordinal)
                 && line.Contains("\"transport\":\"Tcp\"", StringComparison.Ordinal));
             foreach (string eventName in new[] { "connection.candidate_authenticated", "connection.candidate_selected" })

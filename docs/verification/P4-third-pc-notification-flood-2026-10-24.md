@@ -54,6 +54,13 @@ traversal or relay. The failed candidate is a normal retriable warning; it
 would have generated the old repeated toast. The third PC's exact
 `SocketException` and native error still require its own log output.
 
+The current-source connection diagnostics now record the Windows native socket
+error number on failed candidate and reconnect events, including a socket
+exception wrapped by `IOException`. This will improve future captures; it
+cannot recover the code from the third PC's earlier installed build. The full
+Release Net suite passed locally (59/59) with a regression for the wrapped
+socket case.
+
 The third PC still runs the earlier package and needs this upgrade before the
 notification fix can be observed there. Its rendered Windows notification
 behavior and `third-pc-check.txt` file convergence remain open. This does not

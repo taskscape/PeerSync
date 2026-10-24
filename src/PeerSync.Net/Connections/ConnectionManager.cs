@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using PeerSync.Core.Diagnostics;
@@ -202,7 +203,8 @@ public sealed class ConnectionManager : IAsyncDisposable
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("connection.reconnect_failed", "connection_manager")
-                { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), HResult = error.HResult,
+                    NativeError = SocketNativeError(error) });
             }
 
             TimeSpan backoff = BackoffForFailure(failures);
@@ -252,7 +254,8 @@ public sealed class ConnectionManager : IAsyncDisposable
             diagnostics?.TryWrite(new("connection.candidate_failed", CandidateOperation(candidate))
                 { Level = DiagnosticLevel.Warning, Transport = CandidateTransport(candidate),
                     RemoteAddress = candidate.RemoteAddress, RemotePort = candidate.RemotePort,
-                    ErrorCode = SafeError(error), HResult = error.HResult });
+                    ErrorCode = SafeError(error), HResult = error.HResult,
+                    NativeError = SocketNativeError(error) });
             return null;
         }
     }
@@ -400,6 +403,13 @@ public sealed class ConnectionManager : IAsyncDisposable
         OperationCanceledException => "cancelled",
         _ => error.GetType().Name,
     };
+
+    private static int? SocketNativeError(Exception error)
+    {
+        for (Exception? current = error; current is not null; current = current.InnerException)
+            if (current is SocketException socket) return socket.NativeErrorCode;
+        return null;
+    }
 
 
     public async ValueTask DisposeAsync()
