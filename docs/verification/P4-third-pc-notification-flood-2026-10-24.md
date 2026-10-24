@@ -54,6 +54,22 @@ traversal or relay. The failed candidate is a normal retriable warning; it
 would have generated the old repeated toast. The third PC's exact
 `SocketException` and native error still require its own log output.
 
+A later read of the first PC's installed 1.0.18.0 service journal found seven
+tracker stream failures between 10:59 and 11:32 UTC. Each arrived about
+319 seconds after a successful HTTP/2 tracker connection and each reconnected
+successfully after the configured backoff. Those records contain only generic
+`RpcException` and its HRESULT, so neither the server's reason nor its
+relationship to the third PC's socket notification can be established from
+them. No diagnostic ZIP from the third PC had arrived in the joined folder
+at the time of this inspection.
+
+Current source now records the gRPC status, elapsed session time and nested
+native socket error on a tracker failure, plus a sanitized event after each
+initial or periodic announcement write succeeds. This permits a later client
+and server journal comparison without logging folder IDs or paths. The Release
+Net suite passes 59/59 locally. The installed first and third PCs predate
+these additional tracker fields; the exact cause remains open.
+
 The current-source connection diagnostics now record the Windows native socket
 error number on failed candidate and reconnect events, including a socket
 exception wrapped by `IOException`. This will improve future captures; it

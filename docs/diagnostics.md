@@ -138,6 +138,15 @@ relay or punch request; its `errorCode` names only the request kind. The
 connection attempt fails promptly and the maintainer can retry. Folder and
 address changes are coalesced into the latest announcement once the writer
 can send again. A failed writer ends its tracker session and reconnects.
+`tracker.announced_initial` and `tracker.announced_refresh` are emitted only
+after the corresponding gRPC write completes. Their `itemsVisited` field is
+the announced folder count, not a folder identity. For a tracker disconnect,
+`tracker.session_failed` reports the gRPC status as `rpc_<status>`, session
+duration in `elapsedMs`, and a nested native socket error when one exists.
+Compare those client times with `rendezvous.announced` and
+`rendezvous.session_failed` in the server bundle to distinguish a missed
+refresh, server rejection and a transport interruption; the client status
+alone does not establish which one occurred.
 The default bundles omit network addresses; add `--include-network-addresses`
 only when routing details are needed and review the ZIP before sharing it.
 Diagnostics expire IP-bearing journal files within 24 hours; the collector

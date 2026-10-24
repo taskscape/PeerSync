@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Google.Protobuf;
@@ -77,6 +79,7 @@ internal sealed class TrackerClient : IAsyncDisposable
         int failures = 0;
         while (!stopping.IsCancellationRequested)
         {
+            var elapsed = Stopwatch.StartNew();
             try
             {
                 await RunSessionAsync(stopping.Token).ConfigureAwait(false);
@@ -87,7 +90,9 @@ internal sealed class TrackerClient : IAsyncDisposable
             {
                 diagnostics?.TryWrite(new("tracker.session_failed", "rendezvous")
                 { Level = DiagnosticLevel.Warning, Transport = DiagnosticTransport.Http2,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    ErrorCode = error is RpcException rpc ? $"rpc_{rpc.StatusCode}" : error.GetType().Name,
+                    HResult = error.HResult, NativeError = NativeSocketError(error),
+                    ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
             }
             Volatile.Write(ref connected, 0);
             if (stopping.IsCancellationRequested) break;
@@ -110,12 +115,15 @@ internal sealed class TrackerClient : IAsyncDisposable
         // The preceding stream's writer is finished before reconnect starts.
         // Its queued requests refer to an old presence snapshot or relay offer.
         outgoing.Reset();
-        await call.RequestStream.WriteAsync(new ClientMessage { Announce = announcement() }, linked.Token)
+        Announce firstAnnouncement = announcement();
+        await call.RequestStream.WriteAsync(new ClientMessage { Announce = firstAnnouncement }, linked.Token)
             .ConfigureAwait(false);
+        LogAnnounce("tracker.announced_initial", firstAnnouncement);
         Volatile.Write(ref connected, 1);
         diagnostics?.TryWrite(new("tracker.session_connected", "rendezvous")
         { Transport = DiagnosticTransport.Http2 });
-        Task writer = outgoing.WriteLoopAsync(call.RequestStream, announcement, linked.Token);
+        Task writer = outgoing.WriteLoopAsync(call.RequestStream, announcement, linked.Token,
+            sent => LogAnnounce("tracker.announced_refresh", sent));
         Task ticker = AnnounceTickerAsync(linked.Token);
         Task reader = ReadLoopAsync(call.ResponseStream, linked.Token);
         try
@@ -148,6 +156,18 @@ internal sealed class TrackerClient : IAsyncDisposable
         using var timer = new PeriodicTimer(AnnounceInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             Refresh();
+    }
+
+    private void LogAnnounce(string eventName, Announce sent) =>
+        diagnostics?.TryWrite(new(eventName, "rendezvous")
+        { Transport = DiagnosticTransport.Http2, ItemsVisited = sent.FolderIds.Count });
+
+    private static int? NativeSocketError(Exception error)
+    {
+        for (Exception? current = error is RpcException rpc ? rpc.Status.DebugException ?? error : error;
+             current is not null; current = current.InnerException)
+            if (current is SocketException socket) return socket.NativeErrorCode;
+        return null;
     }
 
     public async ValueTask DisposeAsync()

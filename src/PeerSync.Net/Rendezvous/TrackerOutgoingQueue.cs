@@ -40,12 +40,16 @@ internal sealed class TrackerOutgoingQueue
     }
 
     internal async Task WriteLoopAsync(IClientStreamWriter<ClientMessage> writer,
-        Func<Announce> snapshot, CancellationToken cancellationToken)
+        Func<Announce> snapshot, CancellationToken cancellationToken, Action<Announce>? onAnnounced = null)
     {
         await foreach (ClientMessage? message in messages.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             if (Interlocked.Exchange(ref refreshPending, 0) != 0)
-                await writer.WriteAsync(new ClientMessage { Announce = snapshot() }, cancellationToken).ConfigureAwait(false);
+            {
+                Announce sent = snapshot();
+                await writer.WriteAsync(new ClientMessage { Announce = sent }, cancellationToken).ConfigureAwait(false);
+                onAnnounced?.Invoke(sent);
+            }
             if (message is not null) await writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
         }
     }

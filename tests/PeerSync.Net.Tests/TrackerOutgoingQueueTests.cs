@@ -22,8 +22,10 @@ public sealed class TrackerOutgoingQueueTests
         queue.Refresh(); port = 3;
 
         var writer = new CaptureWriter(expected: 2);
+        var announced = new List<uint>();
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        Task run = queue.WriteLoopAsync(writer, () => new Announce { ListenPort = port }, stop.Token);
+        Task run = queue.WriteLoopAsync(writer, () => new Announce { ListenPort = port }, stop.Token,
+            sent => announced.Add(sent.ListenPort));
         await writer.Completed.WaitAsync(TimeSpan.FromSeconds(5), Token);
         await stop.CancelAsync();
         await Should.ThrowAsync<OperationCanceledException>(() => run);
@@ -31,6 +33,7 @@ public sealed class TrackerOutgoingQueueTests
         writer.Messages.Count.ShouldBe(2);
         writer.Messages[0].Announce.ListenPort.ShouldBe(3u);
         writer.Messages[1].RelayRequest.ShouldNotBeNull();
+        announced.ShouldBe([3u]);
     }
 
     [Fact]
