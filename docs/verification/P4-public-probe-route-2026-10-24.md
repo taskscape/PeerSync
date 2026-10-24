@@ -12,8 +12,19 @@ AAAA was returned. `Find-NetRoute -RemoteIPAddress 45.11.63.194` selected the
 first PC's Ethernet address `192.168.0.176` and default next hop
 `192.168.0.1`. The matching private observed address suggests local router
 hairpinning, though the exact server-side path was not independently traced.
-This check does **not** prove public provider admission from a separate
-network. It also does not validate native NAT traversal, direct/relay path
+The operator then probed from the second PC. Its reported Ethernet source for
+`45.11.63.194` was `192.168.0.183`, distinct from the first PC's current
+`192.168.0.176`; `Find-NetRoute` displayed no `NextHop` value. The new probe
+session `39cd7a4c-0aa9-4f98-939b-4130ec73b2e6` returned correlated HTTP/2
+and HTTP/3 success and an observed address of `192.168.0.1` with port 60551.
+This establishes that both installed PCs can probe the central name over both
+protocols. Both PCs' private source addresses and matching observed address
+are consistent with a shared local router, so this is not an independent
+outside-network admission check. The pasted `status --json` block and first
+probe match an earlier pre-join transcript; a fresh status is requested
+separately before drawing a current peer-connection conclusion from that block.
+
+These checks do **not** prove public provider admission from a separate
+network. They also do not validate native NAT traversal, direct/relay path
 selection, or the deferred mobile/CGNAT matrix. Keep P4.3.3/P4.3.4 and Gate
-P4 open until a second independent network's route and correlated probe are
-retained.
+P4 open until a probe from a genuinely independent network is retained.

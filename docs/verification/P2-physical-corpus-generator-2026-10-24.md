@@ -33,3 +33,7 @@ report and tree snapshot are under
 `artifacts/tests/gate-corpus-control-20261024/`. The full 50 GiB run was not
 started: this host does not have the required free space or three physical
 LAN PCs in the current setup.
+
+This kit includes the 1.0.16.0 test installers. The deployed Rendezvous server
+is already at 1.0.17.0; extract the `tools/` files for a corpus run and do not
+run the older server setup over that installation.
