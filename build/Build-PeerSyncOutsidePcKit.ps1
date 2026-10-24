@@ -96,7 +96,10 @@ step 6. Keep the existing joined folder; no new folder key is needed.
    Continue only if Status is Valid. This certificate is for development
    testing; remove its trust after the test. It is unrelated to the public
    sync.taskscape.com TLS certificate.
-4. From the same elevated PowerShell, run the client setup:
+4. In the PeerSync tray icon's menu, choose "Exit app" before upgrading.
+   Closing only its dashboard window leaves the tray process running and can
+   prevent setup from replacing PeerSync.exe. Then, from the same elevated
+   PowerShell, run the client setup:
 
    & '.\$setupName'
    Get-Service PeerSync

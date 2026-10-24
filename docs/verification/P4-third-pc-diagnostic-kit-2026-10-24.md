@@ -31,3 +31,16 @@ observed one tracker stream through two refreshes and 11 minutes without the
 old 319-second reset. That is reason to use this newer kit for the next third-PC
 upgrade; it does not prove the third PC's socket failure is resolved. The third
 PC has not yet installed 1.0.21.0 or returned its sanitized bundle.
+
+The latest direct-transfer kit is
+`artifacts/deploy/PeerSync-OutsidePC-1.0.22.0-x64-upgrade-exitapp.zip`
+(166,834,855 bytes, SHA-256
+`958664E87ABEA62F1C3B2B854C9BD1827252DB6EE143233186D6F13C6A2134B3`).
+Its embedded 1.0.22.0 installer matches the signed standalone setup's SHA-256
+`461489100474B6A58E1D6A3C0542CFBDC56A4B91217CB0460EA6CD14F24CC5F1`.
+The README now explicitly instructs the operator to choose `Exit app` from
+PeerSync's tray menu before setup: an open dashboard process blocked the
+second-PC upgrade. This kit also includes the new long-session retry-accounting
+fix. It remains a development-signed test package. The third PC has not yet
+installed it, supplied a diagnostic bundle, or demonstrated joined-file
+convergence.

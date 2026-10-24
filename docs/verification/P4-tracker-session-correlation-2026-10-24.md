@@ -99,3 +99,13 @@ and Release `PeerSync.Rendezvous.Tests` passed 22/22 without skips; TRX reports
 are under `artifacts/tests/tracker-reconnect/`. These checks cover current
 network and hosted tracker behavior, but do not induce a 256-second field
 backoff. Installed second-PC recovery remains the decisive check.
+
+The second PC later installed the development-signed 1.0.22.0 client built
+from `c74a5d5`, including the retry-accounting change. Its service is Running,
+its settings and pre-upgrade files are unchanged, and post-upgrade files
+converged in both directions with matching hashes. A new tracker connection
+and server-issued session ID appear in its journal. Because no reset has yet
+been observed on this installed build, the reset/backoff behavior itself is
+not claimed as field-verified. The first failed setup attempt, recovery and
+successful retry are detailed in the
+[physical two-PC record](P4-two-PC-cross-version-field-2026-10-24.md).

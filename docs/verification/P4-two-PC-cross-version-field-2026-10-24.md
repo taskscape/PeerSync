@@ -26,3 +26,35 @@ and a 256-second reconnection wait at its saturated backoff. The
 source-level retry-accounting repair. This cross-version file result does not
 mean the older tracker client is healthy or that the third-PC hotspot route
 has converged.
+
+The second PC was subsequently upgraded to development-signed client 1.0.22.0
+from source `c74a5d5`. Its installer SHA-256 is
+`461489100474B6A58E1D6A3C0542CFBDC56A4B91217CB0460EA6CD14F24CC5F1`,
+and its Authenticode signature was Valid. The first silent setup attempt
+stopped the service but could not replace the open interactive `PeerSync.exe`
+dashboard (`DeleteFile` access denied, setup exit 5). The service was
+immediately restarted. After closing only that dashboard process, the same
+signed setup completed with exit 0. The one-time upgrade task was removed.
+The dashboard can be reopened in the interactive user session; background
+sync does not require it.
+
+The second-PC service is Running with installed version 1.0.22.0. All four
+checked installed binaries have Valid signatures and match their published
+payload hashes. The settings SHA-256 remained
+`0C973DEA01A96A6BAC1447152C853983A0A3B7B9020742A3B0D60640D57E921D`,
+and all five pre-upgrade test-file hashes were unchanged. The before/after
+snapshots are retained under
+`artifacts/field/second-pc-retry-upgrade-20261024/`; the setup log remains on
+the test PC at `C:\Temp\PeerSync-Field-c74a5d5\setup.log`.
+
+After that upgrade, `second-pc-1.0.22-check.txt` arrived on the first PC in
+about five seconds with matching SHA-256
+`1559C52C55A61125E04965E723DCBA67D02A9AD7E5ABC9C313067E658EACF349`.
+The first PC's `first-pc-to-1.0.22-check.txt` arrived on the second PC in
+about three seconds with matching SHA-256
+`037A460E4DE184B3872421C5DC9EBA3E07FE16BDF9D6EF70A881394A60ED4CB9`.
+The updated second-PC journal contains a new tracker connection and
+server-issued session ID. These observations verify post-upgrade two-way
+sync, but a controlled long-session reset has not yet exercised the new
+retry-accounting branch. The third-PC socket error and file convergence
+remain open.
