@@ -20,11 +20,13 @@ three minutes after the planned test end if the shell is killed. No Tailscale
 service or adapter setting is changed. The operator should leave the third
 PC on its mobile hotspot throughout the interval.
 
-The expected command on the third PC, after transferring the script, is:
-
-```powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Test-NativeWanWithoutOverlay.ps1" -Folder 'C:\Users\offic\Documents\PeerSync-WAN-Test'
-```
+On the third PC, keep `Run-NativeWanWithoutOverlay.cmd` beside
+`Test-NativeWanWithoutOverlay.ps1` in Downloads, then right-click the CMD
+file and choose **Run as administrator**. The launcher supplies the joined
+folder path and keeps the window open for the result. The initial pasted
+PowerShell command on the third PC had an unclosed quote: the `>>` prompt
+was PowerShell waiting for more input, so the test did not start and no
+firewall rules were installed.
 
 The script prints `READY` with the generated file name and hash as soon as
 the isolation window begins, then `CLEANED` and `REPORT` after cleanup.
