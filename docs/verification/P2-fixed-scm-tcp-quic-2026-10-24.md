@@ -52,7 +52,7 @@ the probe accepts only the named file's native hash and removes its own
 temporary share after exit.
 
 This closes the missing fixed-SCM **TCP transport observation** alongside the
-existing QUIC check. P2.5.7 and Gate P2 remain open for the full native
-negative/lifecycle matrix and their other stated acceptance conditions. The
-three-PC corpus, 72-hour physical soak and independent WAN/NAT gates also
+existing QUIC check. The subsequent [native control lifecycle matrix](P2-native-control-lifecycle-2026-10-24.md)
+closed the remaining P2.5.7 control evidence. Gate P2 still requires the
+three-PC corpus and 72-hour physical soak. Independent WAN/NAT gates also
 remain open.
