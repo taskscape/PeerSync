@@ -23,6 +23,47 @@ field-kit README. If local execution policy blocks it, open a new PowerShell
 process with `powershell.exe -NoProfile -ExecutionPolicy Bypass` for this test
 session; do not change machine-wide execution policy.
 
+## Create the mixed LAN corpus
+
+On the first physical PC, use a test folder with at least 105 GiB free on its
+volume; the script checks room for both native content and PeerSync's local
+blocks, plus a 5 GiB reserve. The other two PCs also need room for native and
+block copies. The generator creates 50 GiB of random file content: 100,000
+small files, 24 nested levels with a file at each level, and eight large
+files. Its small local JSON report counts content bytes and files; the
+run-specific `owner.json` marker adds a little metadata outside that total.
+The random content is intentionally hard to compress. The generation script
+never removes an existing tree and refuses a reused run ID, reparse paths,
+an output inside the synchronized folder, and insufficient free space.
+
+Pause this test folder in the app on the first PC before generation so peers
+do not consume partially written large files. Create the report directory
+outside the synchronized root, then run the verified field-kit script in
+Windows PowerShell 5.1:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$run = [guid]::NewGuid()
+$root = 'D:\PeerSync-Test\Share' # replace with the actual joined folder
+$reports = 'C:\Temp\PeerSync-corpus'
+New-Item -ItemType Directory -Force -Path $reports | Out-Null
+$report = Join-Path $reports "corpus-$($run.ToString('N')).json"
+& .\tools\New-PeerSyncGateCorpus.ps1 -Root $root -RunId $run `
+  -OutputFile $report
+if ((Get-Content $report -Raw | ConvertFrom-Json).status -ne 'complete') {
+  throw 'Corpus generation did not complete; keep the folder paused and inspect the partial run.'
+}
+```
+
+Require `status: complete`, `createdFiles: 100032`, and
+`createdContentBytes: 53687091200` in that report. Preserve the command,
+report, run ID and script SHA-256. Resume the folder, wait for all three peers
+to settle, then use the tree measurement tool below on all PCs with the same
+run ID and UTC hour. If generation stops partway through, leave the partial
+subtree for inspection; start a new run ID only after deliberately resolving
+the old one. The small-fixture control for this tool is recorded in the
+[generator verification](verification/P2-physical-corpus-generator-2026-10-24.md).
+
 ## Run random operations
 
 The kit's `tools/Invoke-PeerSyncSoakOperations.ps1` creates and changes files
