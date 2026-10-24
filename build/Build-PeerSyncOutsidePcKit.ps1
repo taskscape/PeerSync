@@ -13,11 +13,12 @@ $installerDir = Join-Path $root 'artifacts\installer'
 $setup = Join-Path $installerDir $setupName
 $certificate = "$setup.cer"
 $manifestPath = "$setup.manifest.json"
+$collector = Join-Path $root 'build\field\Collect-PeerSync-Diagnostics.cmd'
 $output = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else {
     Join-Path $root "artifacts\deploy\PeerSync-OutsidePC-$Version-x64.zip"
 }
 
-foreach ($path in @($setup, $certificate, $manifestPath)) {
+foreach ($path in @($setup, $certificate, $manifestPath, $collector)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing package input: $path" }
 }
 if (Test-Path -LiteralPath $output) { throw "Package already exists: $output" }
@@ -65,12 +66,16 @@ $readme = @"
 
 This is a development test package for a third Windows x64 PC. It contains
 only the PeerSync client setup, the public development signing certificate,
-their manifest, and a read-only network probe. It contains no private key,
-folder key, or server setup.
+their manifest, a diagnostic collector, and a read-only network probe. It
+contains no private key, folder key, or server setup.
 
 Source revision: $($manifest.sourceRevision)
 Setup SHA-256: $setupHash
 Public certificate SHA-256: $certificateHash
+
+If this PC is already joined and its outside-network probe passed earlier,
+verify the setup in steps 2-3, upgrade in step 4, and collect diagnostics in
+step 6. Keep the existing joined folder; no new folder key is needed.
 
 1. Extract the entire ZIP to a local folder on the third PC. Connect that PC
    through the mobile hotspot or a genuinely separate internet connection.
@@ -107,7 +112,15 @@ Public certificate SHA-256: $certificateHash
    network. Do not share a folder key. Both tcp.reachable and udp.reachable
    must be true and correlated, and PROBE_EXIT must be 0.
 
-Once that passes, Join the existing test folder on this PC using the dashboard
+6. After reproducing a connection problem, double-click
+   Collect-PeerSync-Diagnostics.cmd in this extracted folder. It uses the
+   installed CLI to create a sanitized PeerSync-diagnostics-*.zip beside the
+   helper. The window remains open and reports any collection failure. Copy
+   that ZIP to the first PC by a trusted transfer method even if folder sync
+   is stalled. Review the ZIP before sharing it outside the test group. This
+   helper needs no folder key or elevated shell.
+
+If this PC has not yet joined, join the existing test folder using the dashboard
 and the folder key through your trusted private channel. Each PC creates its
 own device identity. A probe pass alone does not prove WAN synchronization.
 "@
@@ -123,7 +136,8 @@ try {
         foreach ($item in @(
             @{ Name = $setupName; Path = $setup },
             @{ Name = "$setupName.cer"; Path = $certificate },
-            @{ Name = "$setupName.manifest.json"; Path = $manifestPath }
+            @{ Name = "$setupName.manifest.json"; Path = $manifestPath },
+            @{ Name = 'Collect-PeerSync-Diagnostics.cmd'; Path = $collector }
         )) {
             $entry = $zip.CreateEntry($item.Name, [IO.Compression.CompressionLevel]::NoCompression)
             $inputStream = [IO.File]::OpenRead($item.Path)

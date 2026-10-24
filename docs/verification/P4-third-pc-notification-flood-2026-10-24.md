@@ -86,7 +86,10 @@ It packages the notification repair, more precise tracker/socket diagnostics,
 and the bounded high-volume diagnostic collector. The package is staged in the
 first PC's joined folder as `PeerSync-Setup-1.0.19.0-x64.exe` with the same
 hash. Sync of this installer to the third PC is not yet verified, so a direct
-transfer may be necessary if folder sync itself is failing.
+transfer may be necessary if folder sync itself is failing. A
+[single-file direct-transfer kit](P4-third-pc-diagnostic-kit-2026-10-24.md)
+also contains this installer, its public certificate and a double-click
+diagnostic collector.
 
 The first PC upgraded from 1.0.18.0 to 1.0.19.0 with setup exit 0. Its
 service is Running; `psp status --json` reports production sync available and
