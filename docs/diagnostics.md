@@ -191,6 +191,12 @@ allowlist of structured fields, filters events to the last 24 hours, excludes
 network addresses and ports by default, and includes environment metadata. It excludes
 settings, databases, certificates, keys, arbitrary logs, crash dumps, unknown
 JSON fields, FolderIds and file contents. Review the bundle before sharing it.
+When a busy host produces more than the 100,000-event bundle ceiling, the
+collector keeps the newest events and reserves up to 20,000 places for recent
+warnings/errors. It writes one chronological sanitized `debug-000.jsonl` and
+reports both fields in `environment.json` and prints the omitted count in the
+command output. An omitted count means the archive is a sample; collect closer to the
+failure or inspect the raw local journal before drawing a negative conclusion.
 Add `--include-network-addresses` only when routing details are needed. The
 collector prints included, expired and invalid event counts and refuses to
 create an archive with no recent valid events. If it reports no events, use
@@ -208,6 +214,17 @@ update. Its window stays open to show a collection error. Review the ZIP
 before sharing it outside the test group. A local double-click-equivalent
 smoke of the `.cmd` returned exit 0 and created a sanitized ZIP under
 `artifacts/field/diagnostic-collector-batch-smoke-20261024/`.
+
+If the joined folder is not syncing, run the already installed CLI from any
+PowerShell directory and transfer the printed ZIP by another private channel:
+
+```powershell
+$out=Join-Path $env:TEMP ('PeerSync-diagnostics-{0:yyyyMMdd-HHmmss}.zip' -f (Get-Date)); & "$env:ProgramFiles\PeerSync\cli\psp.exe" diagnostics --output $out
+```
+
+This path does not rely on the collector `.cmd` arriving through PeerSync.
+The bundle remains sanitized by default. The version installed on the machine
+must include the bounded-sample collector for a high-volume journal.
 
 `build/Collect-Diagnostics.ps1` remains a legacy development-probe collector.
 It copies source event lines and does not apply the CLI's strict field

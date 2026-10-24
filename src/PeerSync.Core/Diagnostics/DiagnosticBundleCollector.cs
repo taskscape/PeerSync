@@ -8,7 +8,10 @@ using System.Text.Json;
 namespace PeerSync.Core.Diagnostics;
 
 public sealed record DiagnosticBundleResult(string Destination, int FilesFound, int FilesIncluded,
-    int EventsIncluded, int ExpiredEvents, int InvalidEvents, long BytesIncluded);
+    int EventsIncluded, int ExpiredEvents, int InvalidEvents, long BytesIncluded)
+{
+    public long EventsOmitted { get; init; }
+}
 
 /// <summary>Creates a sanitized, recent-only archive from structured diagnostic JSONL.</summary>
 public static class DiagnosticBundleCollector
@@ -16,10 +19,16 @@ public static class DiagnosticBundleCollector
     private const int MaximumDirectories = 2048;
     private const int MaximumFiles = 512;
     private const int MaximumEvents = 100_000;
+    private const int MaximumPriorityEvents = 20_000;
     private const int MaximumLineCharacters = 16_384;
+    private const int MaximumSanitizedEventBytes = 4095;
     private const long MaximumInputFileBytes = 20_000_000;
     private const long MaximumBundleBytes = 100_000_000;
     private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
+    private sealed record SelectedEvent(byte[] Data, string Source, DateTimeOffset Timestamp, long Sequence)
+    {
+        internal long Bytes => Data.LongLength + 1;
+    }
 
     public static DiagnosticBundleResult Collect(string logRoot, string destination,
         bool includeNetworkAddresses = false, DateTimeOffset? nowUtc = null)
@@ -39,54 +48,74 @@ public static class DiagnosticBundleCollector
 
         DateTimeOffset cutoff = (nowUtc ?? DateTimeOffset.UtcNow).ToUniversalTime() - Retention;
         List<string> files = FindLogFiles(root);
-        int filesIncluded = 0, eventsIncluded = 0, expired = 0, invalid = 0;
-        long bytesIncluded = 0;
+        int expired = 0, invalid = 0;
+        long validEvents = 0;
+        var priority = new PriorityQueue<SelectedEvent, (long Ticks, long Sequence)>();
+        var ordinary = new PriorityQueue<SelectedEvent, (long Ticks, long Sequence)>();
         string temporary = Path.Combine(parent, $".peersync-diagnostics-{Guid.NewGuid():N}.tmp");
         try
         {
+            foreach (string file in files)
+            {
+                if (new FileInfo(file).Length > MaximumInputFileBytes) { invalid++; continue; }
+                try
+                {
+                    using var input = new FileStream(file, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete, bufferSize: 16 * 1024, FileOptions.SequentialScan);
+                    using var reader = new StreamReader(input, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false,
+                        bufferSize: 16 * 1024, leaveOpen: false);
+                    string? line;
+                    while ((line = reader.ReadLine()) is not null)
+                    {
+                        if (line.Length > MaximumLineCharacters) { invalid++; continue; }
+                        byte[] clean; bool wasExpired, important; DateTimeOffset timestamp;
+                        try
+                        {
+                            if (!TrySanitize(line, cutoff, includeNetworkAddresses, out clean, out wasExpired,
+                                out timestamp, out important))
+                            { if (wasExpired) expired++; else invalid++; continue; }
+                        }
+                        catch (JsonException) { invalid++; continue; }
+                        if (clean.Length > MaximumSanitizedEventBytes) { invalid++; continue; }
+                        var selected = new SelectedEvent(clean, file, timestamp, ++validEvents);
+                        Retain(important ? priority : ordinary,
+                            important ? MaximumPriorityEvents : MaximumEvents, selected);
+                    }
+                }
+                catch (DecoderFallbackException) { invalid++; }
+                catch (FileNotFoundException) { invalid++; }
+                catch (DirectoryNotFoundException) { invalid++; }
+            }
+
+            List<SelectedEvent> importantEvents = priority.UnorderedItems.Select(item => item.Element)
+                .OrderBy(item => item.Timestamp).ThenBy(item => item.Sequence).ToList();
+            List<SelectedEvent> ordinaryEvents = ordinary.UnorderedItems.Select(item => item.Element)
+                .OrderBy(item => item.Timestamp).ThenBy(item => item.Sequence).ToList();
+            int importantStart = 0;
+            int ordinaryStart = Math.Max(0, ordinaryEvents.Count - (MaximumEvents - importantEvents.Count));
+            long bytesIncluded = importantEvents.Sum(item => item.Bytes)
+                + ordinaryEvents.Skip(ordinaryStart).Sum(item => item.Bytes);
+            while (bytesIncluded > MaximumBundleBytes)
+            {
+                if (ordinaryStart < ordinaryEvents.Count) bytesIncluded -= ordinaryEvents[ordinaryStart++].Bytes;
+                else bytesIncluded -= importantEvents[importantStart++].Bytes;
+            }
+            SelectedEvent[] kept = importantEvents.Skip(importantStart)
+                .Concat(ordinaryEvents.Skip(ordinaryStart))
+                .OrderBy(item => item.Timestamp).ThenBy(item => item.Sequence).ToArray();
+            if (kept.Length == 0)
+                throw new InvalidDataException("No recent valid diagnostic events were found. Reproduce the issue and collect the LOGS directory printed by the service or probe.");
+            int filesIncluded = kept.Select(item => item.Source).Distinct(StringComparer.Ordinal).Count();
+            long omitted = validEvents - kept.Length;
+
             using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
             {
-                int fileNumber = 0;
-                foreach (string file in files)
-                {
-                    if (new FileInfo(file).Length > MaximumInputFileBytes) { invalid++; continue; }
-                    using var sanitized = new MemoryStream();
-                    int thisFileEvents = 0;
-                    try
-                    {
-                        using var input = new FileStream(file, FileMode.Open, FileAccess.Read,
-                            FileShare.ReadWrite | FileShare.Delete, bufferSize: 16 * 1024, FileOptions.SequentialScan);
-                        using var reader = new StreamReader(input, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false,
-                            bufferSize: 16 * 1024, leaveOpen: false);
-                        string? line;
-                        while ((line = reader.ReadLine()) is not null)
-                        {
-                            if (line.Length > MaximumLineCharacters) { invalid++; continue; }
-                            byte[] clean; bool wasExpired;
-                            try
-                            {
-                                if (!TrySanitize(line, cutoff, includeNetworkAddresses, out clean, out wasExpired))
-                                { if (wasExpired) expired++; else invalid++; continue; }
-                            }
-                            catch (JsonException) { invalid++; continue; }
-                            if (eventsIncluded + thisFileEvents >= MaximumEvents) throw new IOException("The diagnostic bundle event limit was exceeded.");
-                            sanitized.Write(clean); sanitized.WriteByte((byte)'\n'); thisFileEvents++;
-                            if (sanitized.Length > MaximumBundleBytes) throw new IOException("The diagnostic bundle size limit was exceeded.");
-                        }
-                    }
-                    catch (DecoderFallbackException) { invalid++; continue; }
-                    if (thisFileEvents == 0) continue;
-                    long newTotal = checked(bytesIncluded + sanitized.Length);
-                    if (newTotal > MaximumBundleBytes) throw new IOException("The diagnostic bundle size limit was exceeded.");
-                    ZipArchiveEntry entry = archive.CreateEntry($"debug-{fileNumber++:D3}.jsonl", CompressionLevel.Optimal);
-                    using (Stream entryStream = entry.Open())
-                    { sanitized.Position = 0; sanitized.CopyTo(entryStream); }
-                    filesIncluded++; eventsIncluded += thisFileEvents; bytesIncluded = newTotal;
-                }
+                ZipArchiveEntry entry = archive.CreateEntry("debug-000.jsonl", CompressionLevel.Optimal);
+                using (Stream entryStream = entry.Open())
+                    foreach (SelectedEvent item in kept)
+                    { entryStream.Write(item.Data); entryStream.WriteByte((byte)'\n'); }
 
-                if (eventsIncluded == 0)
-                    throw new InvalidDataException("No recent valid diagnostic events were found. Reproduce the issue and collect the LOGS directory printed by the service or probe.");
                 ZipArchiveEntry environment = archive.CreateEntry("environment.json", CompressionLevel.Optimal);
                 using (Stream stream = environment.Open())
                 using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -98,18 +127,30 @@ public static class DiagnosticBundleCollector
                     writer.WriteString("processArchitecture", RuntimeInformation.ProcessArchitecture.ToString());
                     writer.WriteString("framework", RuntimeInformation.FrameworkDescription);
                     writer.WriteNumber("filesFound", files.Count); writer.WriteNumber("filesIncluded", filesIncluded);
-                    writer.WriteNumber("eventsIncluded", eventsIncluded); writer.WriteNumber("expiredEvents", expired);
+                    writer.WriteNumber("eventsIncluded", kept.Length); writer.WriteNumber("eventsOmitted", omitted);
+                    writer.WriteBoolean("truncated", omitted != 0); writer.WriteNumber("expiredEvents", expired);
                     writer.WriteNumber("invalidEvents", invalid); writer.WriteBoolean("networkAddressesIncluded", includeNetworkAddresses);
                     writer.WriteEndObject(); writer.Flush();
                 }
             }
             File.Move(temporary, target);
-            return new(target, files.Count, filesIncluded, eventsIncluded, expired, invalid, bytesIncluded);
+            return new(target, files.Count, filesIncluded, kept.Length, expired, invalid, bytesIncluded)
+            { EventsOmitted = omitted };
         }
         finally
         {
             if (File.Exists(temporary)) File.Delete(temporary);
         }
+    }
+
+    private static void Retain(PriorityQueue<SelectedEvent, (long Ticks, long Sequence)> queue,
+        int capacity, SelectedEvent item)
+    {
+        var key = (item.Timestamp.UtcTicks, item.Sequence);
+        if (queue.Count < capacity) { queue.Enqueue(item, key); return; }
+        queue.TryPeek(out _, out var oldest);
+        if (key.CompareTo(oldest) <= 0) return;
+        queue.Dequeue(); queue.Enqueue(item, key);
     }
 
     private static List<string> FindLogFiles(string root)
@@ -135,6 +176,7 @@ public static class DiagnosticBundleCollector
                 files.Add(entry);
             }
         }
+        files.Sort(StringComparer.Ordinal);
         return files;
     }
 
@@ -148,19 +190,20 @@ public static class DiagnosticBundleCollector
     }
 
     private static bool TrySanitize(string line, DateTimeOffset cutoff, bool includeAddresses,
-        out byte[] clean, out bool expired)
+        out byte[] clean, out bool expired, out DateTimeOffset timestamp, out bool important)
     {
-        clean = []; expired = false;
+        clean = []; expired = false; timestamp = default; important = false;
         using JsonDocument document = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 8 });
         JsonElement root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !TryString(root, "timestampUtc", out string timestampText)
-            || !DateTimeOffset.TryParse(timestampText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset timestamp)) return false;
+            || !DateTimeOffset.TryParse(timestampText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out timestamp)) return false;
         if (timestamp < cutoff) { expired = true; return false; }
         if (!TryCode(root, "component", required: true, out _)
             || !TryCode(root, "eventName", required: true, out _)
             || !TryCode(root, "operation", required: true, out _)
             || !TryCode(root, "level", required: true, out string level)
             || level is not ("Debug" or "Information" or "Warning" or "Error")) return false;
+        important = level is "Warning" or "Error";
 
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))

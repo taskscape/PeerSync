@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using Shouldly;
@@ -78,6 +79,37 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
         string existing = Path.Combine(directory, "existing.zip"); File.WriteAllText(existing, "keep");
         Should.Throw<IOException>(() => DiagnosticBundleCollector.Collect(logs, existing));
         File.ReadAllText(existing).ShouldBe("keep");
+    }
+
+    [Fact]
+    public void BusyJournalKeepsRecentEventsAndOlderFailuresWithExplicitOmissionCount()
+    {
+        string logs = Path.Combine(directory, "busy"); Directory.CreateDirectory(logs);
+        string source = Path.Combine(logs, "debug.jsonl");
+        string when = DateTimeOffset.UtcNow.AddHours(-1).ToString("O");
+        using (var writer = new StreamWriter(source, append: false, new UTF8Encoding(false)))
+        {
+            writer.WriteLine("{\"timestampUtc\":\"" + when
+                + "\",\"component\":\"service\",\"level\":\"Warning\",\"eventName\":\"network.failure\",\"operation\":\"connect\",\"errorCode\":\"SocketException\"}");
+            string prefix = "{\"timestampUtc\":\"" + when
+                + "\",\"component\":\"service\",\"level\":\"Information\",\"eventName\":\"scan.pass\",\"operation\":\"scan\",\"itemsVisited\":";
+            for (int i = 0; i <= 100_000; i++) writer.WriteLine(prefix + i + "}");
+        }
+
+        string destination = Path.Combine(directory, "busy.zip");
+        DiagnosticBundleResult result = DiagnosticBundleCollector.Collect(logs, destination);
+        result.EventsIncluded.ShouldBe(100_000);
+        result.EventsOmitted.ShouldBe(2);
+        result.FilesIncluded.ShouldBe(1);
+        using ZipArchive archive = ZipFile.OpenRead(destination);
+        using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
+        string events = reader.ReadToEnd();
+        events.ShouldContain("\"eventName\":\"network.failure\"");
+        events.ShouldNotContain("\"itemsVisited\":0}");
+        events.ShouldContain("\"itemsVisited\":100000}");
+        using var environment = JsonDocument.Parse(archive.GetEntry("environment.json")!.Open());
+        environment.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        environment.RootElement.GetProperty("eventsOmitted").GetInt64().ShouldBe(2);
     }
 
     public void Dispose()
