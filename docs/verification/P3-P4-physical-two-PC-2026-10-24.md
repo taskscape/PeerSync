@@ -71,9 +71,12 @@ was a pre-join snapshot. The first PC also reported connected, accepted rows
 in a separate local check. Those snapshots were taken at different times and
 their session IDs differ, so they are not a correlated same-session capture.
 The selected LAN/public/relay candidate is not recorded in the installed
-version's sanitized status output; the new `connection.candidate_selected`
-diagnostic event will make that path directly identifiable after deployment
-of a build containing it.
+version's sanitized status output. New `connection.candidate_selected` and
+`connection.incoming_selected` diagnostic events will identify the winning
+outgoing or incoming session, transport and actual remote endpoint after a
+build containing them is deployed. Those events have not been observed on
+either installed 1.0.16 client, so the current file-transfer route remains
+unverified.
 
 A later first-PC LAN preflight at 2026-10-24 09:36:28 UTC found a direct
 on-link Ethernet route from `192.168.0.176` to the second PC's

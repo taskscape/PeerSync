@@ -273,8 +273,43 @@ public sealed class ConnectionManagerTests
                 path.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.public.tcp");
                 path.RootElement.GetProperty("sessionId").GetGuid().ShouldBe(winner.SessionId);
                 path.RootElement.GetProperty("transport").GetString().ShouldBe("Tcp");
-                path.RootElement.TryGetProperty("remoteAddress", out _).ShouldBeFalse();
+                if (eventName == "connection.candidate_selected")
+                {
+                    path.RootElement.GetProperty("remoteAddress").GetString().ShouldBe("203.0.113.42");
+                    path.RootElement.GetProperty("remotePort").GetInt32().ShouldBe(47821);
+                }
+                else path.RootElement.TryGetProperty("remoteAddress", out _).ShouldBeFalse();
             }
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task IncomingSelectionDiagnosticExcludesRejectedDuplicate()
+    {
+        byte[] local = Id(2), remote = Id(1);
+        string directory = Path.Combine(Path.GetTempPath(), "PeerSync-IncomingDiagnostics-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        using var journal = new DiagnosticJournal(directory, "net", debugEnabled: true);
+        await using var manager = new ConnectionManager(local, journal);
+        var selected = Session(local, remote, initiator: false,
+            sessionId: Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var rejected = Session(local, remote, initiator: false,
+            sessionId: Guid.Parse("00000000-0000-0000-0000-000000000002"));
+        try
+        {
+            (await manager.RegisterIncomingAsync(selected, TestContext.Current.CancellationToken)).ShouldBe(selected);
+            (await manager.RegisterIncomingAsync(rejected, TestContext.Current.CancellationToken)).ShouldBe(selected);
+            rejected.Closed.IsCompleted.ShouldBeTrue();
+
+            string[] records = File.ReadAllLines(Path.Combine(directory, "debug.jsonl"));
+            using JsonDocument path = JsonDocument.Parse(records.Single(line => line.Contains("connection.incoming_selected", StringComparison.Ordinal)));
+            path.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.incoming");
+            path.RootElement.GetProperty("sessionId").GetGuid().ShouldBe(selected.SessionId);
+            path.RootElement.TryGetProperty("remoteAddress", out _).ShouldBeFalse();
         }
         finally
         {
