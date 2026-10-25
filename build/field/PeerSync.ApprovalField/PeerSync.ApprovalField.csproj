@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>PeerSync.ApprovalField</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
+    <ProjectReference Include="../../../src/PeerSync.Core/PeerSync.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -639,6 +639,12 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         RequestNetworkRecovery("folder_membership_change");
     }
 
+    internal void NotifyFolderMembershipExpanded()
+    {
+        foreach (TrackerClient tracker in trackers) tracker.Refresh();
+        RequestNetworkRecovery("folder_membership_change");
+    }
+
     private async Task RecoverNetworkLoopAsync()
     {
         while (true)

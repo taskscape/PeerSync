@@ -329,7 +329,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     diagnostics, cancellationToken, timeProvider).ConfigureAwait(false);
                 _ = ObserveComponentAsync(network.Completion, "service.peer_accept_failed");
             }
-            else network?.RequestNetworkRecovery("folder_resumed");
+            else network?.NotifyFolderMembershipExpanded();
             diagnostics?.TryWrite(new("service.folder_resumed", "folder_host") { ItemsChanged = 1 });
             folder = null;
             return descriptor with { Paused = false };
@@ -672,6 +672,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     diagnostics, cancellationToken, timeProvider).ConfigureAwait(false);
                 _ = ObserveComponentAsync(network.Completion, "service.peer_accept_failed");
             }
+            else network?.NotifyFolderMembershipExpanded();
             StartFolderScheduler(runtime);
             diagnostics?.TryWrite(new("service.folder_added", "folder_host") { ItemsChanged = 1 });
             runtime = null;
