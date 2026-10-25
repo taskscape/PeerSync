@@ -25,7 +25,28 @@ socket and required `service.listener_bind_recovered` and a live runtime.
 The focused `PeerNetworkEndpointTests` run passed all 13 cases, and the full
 Release `PeerSync.Service.Tests` project passed all 72 cases with zero skips
 on 2026-10-25. This validates the source-level retry and listener cleanup.
-It has not yet been packaged, installed or repeated through the SCM on the
-three physical PCs. Those installed binaries remain at 1.0.23.0 until a
-subsequent signed upgrade; do not credit this source repair as a deployed
-restart result.
+At this initial source-check point, it had not yet been packaged, installed
+or repeated through the SCM on the physical PCs. Their binaries were still
+1.0.23.0; that source-only result did not count as a deployed restart check.
+
+## Installed first-PC collision, 2026-10-25
+
+The signed 1.0.25.0 client was installed on both physical LAN PCs; see the
+[upgrade record](P3-installer-service-exit-local-2026-10-25.md). On the first
+PC, the installed stop/process-exit helper stopped service PID 67108. A
+temporary exclusive TCP listener then occupied its configured port 45973
+while SCM started the new service. The new PID 10944 journal recorded
+`service.listener_bind_retry` with `address_in_use`, native error 10048 and
+250 ms delay. After the temporary listener was released, the same run
+recorded `service.listener_bind_recovered` after 281.1427 ms and one retry,
+then opened its control pipe and authenticated TCP/QUIC peer sessions. The
+service ended Running, and the installed CLI reported production sync
+available with four connected clock-session rows. The bounded script and
+sanitized event excerpt are under
+`artifacts/field/first-pc-1.0.25-upgrade-20261025/`.
+
+Two earlier attempts by the field script stopped before the collision check:
+the first selected a UDP-only port, and the second misread a multi-line stop
+marker in PowerShell. Both restored or retained a Running service. The
+corrected attempt above proves the installed retry path. The other physical
+PC, Server builds, long-running stability and release candidate remain open.
