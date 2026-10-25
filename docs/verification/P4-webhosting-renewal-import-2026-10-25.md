@@ -61,3 +61,17 @@ this repair. This build is available at
 `artifacts/installer/PeerSync-Rendezvous-Setup-1.0.27.0-x64.exe`; it has not
 been installed on the physical server, and its signature is not a public
 release signature.
+
+The signed installer, its public-only development signing certificate and
+manifest were packaged with the existing elevated setup/preflight launcher
+and server instructions in
+`artifacts/deploy/PeerSync-Rendezvous-1.0.27.0-x64-field.zip`. The three
+installer artifacts in the ZIP are byte-for-byte identical to those under
+`artifacts/installer`. The 65,765,650-byte ZIP has SHA-256
+`C8EA8471A8B4A7428357928D21BC29FB1489A9C6846C281FA0E79FEC34DE467B`.
+Tailscale reported the physical `i9-win-iis` server online, and Taildrop
+returned exit code 0 for this exact ZIP. The launcher writes `setup.log`,
+prints `SETUP_EXIT`, and runs the installed deployment preflight on successful
+setup, printing `PREFLIGHT_EXIT`. The 1.0.27.0 package supersedes the delivered
+1.0.25.0 field kit. Recipient extraction, installation, preflight, service
+restart and actual win-acme renewal remain unverified.
