@@ -1,7 +1,7 @@
 # P5 24-hour fuzz campaign restart, 2026-10-24
 
-This is launch and liveness evidence, **not a P5.1 pass**. The required 24-hour
-terminal result remains pending. It uses seven deterministic fuzz targets:
+The restarted campaign completed the required 24 hours and **passes P5.1**.
+It uses seven deterministic fuzz targets:
 `FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText`.
 The plan's required frame decoder, message validation, path rules, ignore
 parser and key text parser are included.
@@ -47,11 +47,17 @@ does not change the saved power plan. The campaign's `run.ps1`,
 `keep-awake.ps1`, `running.json`, `awake.json`, stdout, stderr and eventual
 `terminal.json` are retained in the ignored artifact directory.
 
-Acceptance requires the terminal JSON to report exit code zero, elapsed fuzz
-seconds at least 86,400, all seven targets, positive seed count, zero crashes,
-empty stderr and no crash files. Confirm task result and binary hash, then
-remove the two temporary scheduled tasks. A missing terminal file or a stopped
-task is incomplete or failed evidence, never a pass.
+The retained `terminal.json` reports start `2026-10-24T09:05:58.0245472Z`,
+end `2026-10-25T09:05:58.3807220Z`, 86,400.0013553 fuzz seconds,
+31,235,254 seeds and all seven targets. Exit code, crash count, crash-file
+count and stderr length are all zero. The on-disk executable SHA-256 still
+matches both launch and terminal records. Both scheduled tasks reported result
+zero and were removed after completion. The retained `corpus-manifest.json`
+identifies the deterministic seeds 0 through 31,235,253, the fixed generator
+binary and replay method. This compact seed corpus is reproducible without
+saving terabytes of generated input bytes. The crash directory is absent
+because no input crashed the harness; its runner would save the offending bytes
+and seed record on failure.
 
 The host's C: drive had about 1.6 GiB free before launch preparation. Fifteen
 obsolete uniquely named SQLite snapshots in the retained million-file fixture

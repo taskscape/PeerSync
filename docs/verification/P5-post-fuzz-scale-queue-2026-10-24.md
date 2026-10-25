@@ -90,3 +90,14 @@ At 2026-10-25 08:04 UTC, C: had 80.32 GiB free. Both original fuzz PID
 current disk-space concern without restarting either run; the watcher must
 still observe a passing fuzz terminal before it can launch, and no scale
 success is claimed from free space alone.
+
+## Fixed-binary run started, 2026-10-25
+
+The fuzz terminal passed at 09:05:58 UTC. The watcher then verified its fixed
+benchmark executable hash and retained fixture, observed 85,746,462,720 free
+bytes on C: (well above the 6 GiB start threshold), and launched benchmark
+PID 36684 at 09:06:39 UTC. Its `running.json` records the expected SHA-256
+`5FAB8864FFC04D24ED7767F4594C7F450AE70D66DE8F8ADDAD6E923E8FCD714A`
+and the unchanged 1.5 GiB continue threshold. The benchmark is still running;
+no scanner, peak-memory or fresh-peer result is claimed until `terminal.json`
+and the native-byte report are inspected.
