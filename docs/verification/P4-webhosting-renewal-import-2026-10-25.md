@@ -28,14 +28,24 @@ including the new helper in both installed and renewal-hook locations, to an
 staged 1.0.25.0 service and must not be deployed. The existing signed
 installer outputs were not overwritten.
 
-The development host has no `LocalMachine\WebHosting` store. A native control
-created a unique one-day self-signed certificate in `My` but could not move it
-to the absent store; its `finally` cleanup removed the test certificate, and
-a follow-up store inspection found zero matching test certificates. The
-native import/renewal path therefore remains **unverified**. Run
-`build/Test-RendezvousWebHostingImport.ps1` on a disposable Windows Server
-with an existing `WebHosting` store, then test a current-source signed setup
-and the configured win-acme post-renewal hook on the physical server before
-claiming this repair deployed. The test script uses a unique `.invalid` name,
-checks import and idempotence, and removes only its exact test certificate and
-key. Do not substitute this local compile for a real renewal.
+The development host initially had no `LocalMachine\WebHosting` store. The
+first native control correctly failed at the missing store and cleaned up its
+unique test certificate. An empty standard `WebHosting` store was then created
+through `X509Store.Open(ReadWrite)`. The Windows PowerShell 5.1 native control
+passed: it moved a unique one-day, nonexportable server-authentication
+certificate into `WebHosting`, imported its context into `My`, verified the
+matching machine key through the grant preflight, and confirmed that a second
+import was idempotent. `WEBHOSTING_IMPORT_PASSED` was printed. Follow-up reads
+found zero test certificates in either store and zero certificates in the
+`WebHosting` store. The test's exact certificate and key were removed.
+
+An attempt to remove the now-empty test-created `WebHosting` store was rejected
+by automatic approval review (`blocked by policy`). Its root and empty
+`Certificates`, `CRLs` and `CTLs` subkeys remain on the development host; no
+alternate deletion path was attempted. This native check covers Windows store
+copy and key association, not the physical server's win-acme renewal. The
+current-source signed setup and the configured post-renewal hook still need
+installed validation on a Windows Server before claiming this repair deployed.
+The native control remains in `build/Test-RendezvousWebHostingImport.ps1` for
+reproduction with a unique `.invalid` certificate. Do not substitute the
+local compile or synthetic certificate for a real renewal.
