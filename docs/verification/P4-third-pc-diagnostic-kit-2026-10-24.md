@@ -105,7 +105,29 @@ ran this installed-file and SCM check on that PC on 2026-10-25:
 ```
 
 This verifies the installed service executable's reported version and Running
-state on the third PC. The recipient ZIP hash, installed Authenticode status,
-rendered notification behavior, fresh three-PC convergence and native WAN
-retest on 1.0.26.0 remain unverified. The earlier overlay-isolated mobile-WAN
-transfer used installed 1.0.23.0.
+state on the third PC. The recipient ZIP hash and installed Authenticode status
+remain unverified.
+
+After the upgrade, the first PC's running 1.0.26.0 service indexed a new
+4,096-byte file at
+`C:\PeerSync-Test\Physical-Two-PC-20261024\third-pc-upgrade-check-20261025.bin`.
+Its native SHA-256 was
+`484EFAD9B414E477326C20FDC36D9792B29A26A206683B13D2C6863D0C6C9DA1`.
+The operator then ran `Get-FileHash -Algorithm SHA256` on
+`C:\Users\offic\Documents\PeerSync-WAN-Test\third-pc-upgrade-check-20261025.bin`
+on the third PC and reported the identical value. This verifies fresh
+first-to-third native bytes after the upgrade, with Tailscale available. It
+does not identify the selected route or prove a Tailscale-isolated WAN path.
+For the reverse direction, the operator created
+`C:\Users\offic\Documents\PeerSync-WAN-Test\third-to-first-upgrade-check-20261025.txt`
+with the text `third-to-first 1.0.26 check 2026-10-25` and reported SHA-256
+`B612F43D5226DF86F6E0473FB07ECA3F8D408C830C681A61AD9B79F0BD09261A`.
+The first PC's native folder received the 38-byte file at
+`C:\PeerSync-Test\Physical-Two-PC-20261024\third-to-first-upgrade-check-20261025.txt`;
+an independent local `Get-FileHash` returned the same SHA-256. Both directions
+therefore delivered new native bytes after the third-PC upgrade. The selected
+path and any intermediary peer are not established by these hash checks.
+
+A simultaneous three-PC tree comparison, rendered notification behavior and a
+Tailscale-isolated native WAN retest on 1.0.26.0 remain open. The earlier
+overlay-isolated mobile-WAN transfer used installed 1.0.23.0.
