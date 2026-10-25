@@ -30,3 +30,19 @@ outside this change. The signed setup was sent to the server node `i9-win-iis`
 through Tailscale Taildrop, which exited 0. The recipient's installation and
 post-upgrade local preflight remain unverified. This development signature is
 not a public release signature.
+
+## Current field package, 2026-10-25
+
+The signed 1.0.25.0 Rendezvous installer was built from `d68f909` with the
+legacy service-image-path guard and quoted SCM path fix. Its SHA-256 is
+`4223294293B554AB86DEA8FCE7DDC49C4BE9E4759F86CCE49134E29F2D1DC324`;
+Authenticode was Valid with a timestamp and the development signer. The field
+ZIP `artifacts/deploy/PeerSync-Rendezvous-1.0.25.0-x64-field.zip` is
+65,760,411 bytes, SHA-256
+`3D201EE8EDB3B41AB15DFE4917DE47F0219786916871D12339066311299CDF18`.
+It contains the installer, manifest, public-only code-signing certificate,
+instructions and an elevated launcher that captures the setup log and runs
+the installed local deployment preflight. The TLS private key is not in the
+ZIP. Tailscale Taildrop sent this exact package to the physical server and
+exited 0. Recipient installation, current `sync.taskscape.com` key usability,
+service restart and post-upgrade preflight still require server-side evidence.

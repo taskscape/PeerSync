@@ -67,3 +67,16 @@ used Tailscale Taildrop to send this exact new kit to the third PC; the command
 exited 0. Recipient-side hash, installation, actual socket diagnosis and file
 convergence are still unverified. Tailscale remains an overlay path; a native
 NAT result requires disabling its peer route during that separate test.
+
+The third PC later installed 1.0.23.0, submitted a sanitized diagnostic
+bundle and participated in the [five-minute native mobile-hotspot relay
+check](P4-native-wan-overlay-isolation-2026-10-24.md). For the next field
+upgrade, `artifacts/deploy/PeerSync-OutsidePC-1.0.25.0-x64-upgrade.zip`
+(166,373,276 bytes, SHA-256
+`3E2A40ADA8E2BB8D343F9C01FCBC3AD5785EB3D06129161FA69480D91438DA52`)
+contains the signed 1.0.25.0 client installer, its public code-signing
+certificate and manifest, the collector, probe and README. The builder
+verified the installer hash and Valid development signature. Tailscale
+Taildrop sent this ZIP to the third PC and exited 0 on 2026-10-25. The
+recipient's 1.0.25.0 installation and fresh three-PC convergence remain
+unverified; the earlier native WAN result used installed 1.0.23.0.
