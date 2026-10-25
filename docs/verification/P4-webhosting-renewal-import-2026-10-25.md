@@ -58,9 +58,8 @@ The computed installer hash matches; Windows reports a valid Authenticode
 signature by `CN=PeerSync Development`. The manifest's `workingTreeDirty=true`
 reflects the pre-existing untracked `Sync.zip.tmp`, which was not changed by
 this repair. This build is available at
-`artifacts/installer/PeerSync-Rendezvous-Setup-1.0.27.0-x64.exe`; it has not
-been installed on the physical server, and its signature is not a public
-release signature.
+`artifacts/installer/PeerSync-Rendezvous-Setup-1.0.27.0-x64.exe`. Its
+signature is not a public release signature.
 
 The signed installer, its public-only development signing certificate and
 manifest were packaged with the existing elevated setup/preflight launcher
@@ -74,4 +73,43 @@ returned exit code 0 for this exact ZIP. The launcher writes `setup.log`,
 prints `SETUP_EXIT`, and runs the installed deployment preflight on successful
 setup, printing `PREFLIGHT_EXIT`. The 1.0.27.0 package supersedes the delivered
 1.0.25.0 field kit. Recipient extraction, installation, preflight, service
-restart and actual win-acme renewal remain unverified.
+restart and actual win-acme renewal were still unverified at delivery time.
+
+## Physical Server 2025 upgrade
+
+On 2026-10-25, an elevated WinRM session authenticated as the server's
+built-in Administrator connected to `WIN-8UU4IA5PEQV` at `100.95.151.81`.
+Before replacement, `PeerSyncRendezvous` was running version 1.0.17.0. The
+current `sync.taskscape.com` certificate was present in both
+`LocalMachine\WebHosting` and `LocalMachine\My`, with `HasPrivateKey=True`.
+This inventory alone did not establish key usability; the installed preflight
+checked it after setup.
+
+The signed installer was transferred to
+`C:\Temp\PeerSync-Rendezvous-1.0.27.0`. Its server-side SHA-256 was exactly
+`7F71A0D5E1848760C1CD351F16341F462275098B1E199D3C961EA271FDB81CC0`,
+matching the locally authenticated installer. The server reported
+`Get-AuthenticodeSignature` status `UnknownError` for the development signer;
+the matching hash of the locally Valid package was the integrity check used
+for deployment. No private key or signing credential was transferred.
+
+Unattended setup exited 0 and retained
+`C:\Temp\PeerSync-Rendezvous-1.0.27.0\setup.log`. The installed executable
+reports 1.0.27.0; `PeerSyncRendezvous` restarted and is Running under a new
+process ID. The installed `Test-RendezvousDeployment.ps1` exited 0 with
+`issues=[]` and `localReady=true`. It verified a usable machine private key
+for its caller, service-owned TCP and UDP 99 listeners, both inbound rules,
+and TLS-validated local health. A fresh first-PC
+`psp probe sync.taskscape.com:99` returned exit 0 with correlated HTTP/2/TCP
+and HTTP/3/UDP sessions. The local WinRM service was returned to Stopped and
+the temporary TrustedHosts value was restored. The sanitized local operator
+record is
+`artifacts/field/remote-rendezvous-upgrade-20261025-run-7429/upgrade-transcript.txt`;
+the package log remains on the server.
+
+This establishes the physical installed upgrade and startup/preflight path.
+The new copy-on-renewal behavior has not been exercised by a real win-acme
+issuance because the current certificate was already in `My`. The fresh
+post-upgrade public probe used the first PC's existing LAN path; an
+independent outside-network post-upgrade probe remains to be recorded. The
+development signature is not release signing.
