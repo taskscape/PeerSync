@@ -92,6 +92,20 @@ the builder verified its manifest, public certificate and Valid development
 signature. It contains no folder key or private key. Tailscale identified the
 online third-PC target by the same observed mobile public address used in the
 hotspot probe; `tailscale file cp` to that target exited 0. This is sender-side
-delivery only. Third-PC recipient hash, installation, rendered notifications,
-fresh three-PC convergence and native WAN retest remain open. The two LAN PCs
-already run this version and passed [fresh Add/Join in both directions](P3-fresh-add-join-physical-2026-10-25.md).
+delivery only. The two LAN PCs already run this version and passed
+[fresh Add/Join in both directions](P3-fresh-add-join-physical-2026-10-25.md).
+
+The third-PC operator reported running the extracted 1.0.26.0 setup and then
+ran this installed-file and SCM check on that PC on 2026-10-25:
+
+```powershell
+(Get-Item 'C:\Program Files\PeerSync\service\PeerSync.Service.exe').VersionInfo.FileVersion; (Get-Service PeerSync).Status
+# 1.0.26.0
+# Running
+```
+
+This verifies the installed service executable's reported version and Running
+state on the third PC. The recipient ZIP hash, installed Authenticode status,
+rendered notification behavior, fresh three-PC convergence and native WAN
+retest on 1.0.26.0 remain unverified. The earlier overlay-isolated mobile-WAN
+transfer used installed 1.0.23.0.
