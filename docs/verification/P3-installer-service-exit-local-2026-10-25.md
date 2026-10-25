@@ -21,8 +21,15 @@ client. Read-only WMI inspection confirmed that the running local
 `PeerSync` service exposes both its PID and quoted configured image path,
 and the corresponding process exposes its executable path. Both Inno Setup
 7.1 unsigned-development scripts compiled from the staged x64 payloads.
-This checks the packaging and script syntax; it does not prove a signed
-upgrade or interactive uninstall on a physical PC. The installed three-PC
-1.0.23.0 deployment still lacks the source listener-bind retry and this
-installer guard. Repeat native signed upgrade, SCM restart and uninstall
-checks on target Windows builds before closing P2.5.1 or P3.3.3.
+
+The helper then ran against the first physical PC's installed 1.0.23.0
+service. It captured old PID 24640, requested stop, printed
+`STOPPED_AND_EXITED`, and returned 0. An independent process query confirmed
+the old PID was gone. The service restarted as PID 20680, and the installed
+CLI returned `productionSyncAvailable: true` with connected peers. This
+checks the actual stop/process-exit guard and recovery on one PC. It does
+not prove that a newly signed installer uses the guard during upgrade or
+interactive uninstall. The installed three-PC 1.0.23.0 deployment still
+lacks the source listener-bind retry and this packaged installer guard.
+Repeat signed upgrade, SCM restart and uninstall checks on target Windows
+builds before closing P2.5.1 or P3.3.3.
