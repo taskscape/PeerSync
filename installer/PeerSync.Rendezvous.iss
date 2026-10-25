@@ -44,11 +44,14 @@ Source: "Stop-ServiceAndWait.ps1"; Flags: dontcopy noencryption
 Source: "Stop-ServiceAndWait.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; Flags: dontcopy noencryption
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Import-RendezvousWebHostingCertificate.ps1"; Flags: dontcopy noencryption
+Source: "Import-RendezvousWebHostingCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Set-WerPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Audit-CrashPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Test-RendezvousDeployment.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Collect-DeploymentEvidence.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
+Source: "Import-RendezvousWebHostingCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 Source: "After-RendezvousRenewal.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\*.exe"; DestDir: "{app}"; Flags: ignoreversion signonce
@@ -136,6 +139,14 @@ begin
     Exit;
   end;
   ExtractTemporaryFile('Grant-RendezvousCertificate.ps1');
+  ExtractTemporaryFile('Import-RendezvousWebHostingCertificate.ps1');
+  if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Import-RendezvousWebHostingCertificate.ps1') + '"') <> 0 then
+  begin
+    Result := 'The win-acme WebHosting certificate import failed. See setup log.';
+    Exit;
+  end;
   if not ExecAndCaptureOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{tmp}\Grant-RendezvousCertificate.ps1') + '" -CheckOnly',

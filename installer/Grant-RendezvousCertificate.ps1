@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$DnsName = 'sync.taskscape.com',
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [ValidateSet('My', 'WebHosting')][string]$Store = 'My'
 )
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($DnsName) -or $DnsName.Contains('*')) {
@@ -9,7 +10,7 @@ if ([string]::IsNullOrWhiteSpace($DnsName) -or $DnsName.Contains('*')) {
 }
 $now = [DateTime]::UtcNow
 $serverAuth = '1.3.6.1.5.5.7.3.1'
-$candidates = @(Get-ChildItem Cert:\LocalMachine\My |
+$candidates = @(Get-ChildItem "Cert:\LocalMachine\$Store" |
     Where-Object {
         $_.HasPrivateKey -and $_.NotBefore.ToUniversalTime() -le $now -and
         $_.NotAfter.ToUniversalTime() -gt $now -and
@@ -77,7 +78,7 @@ foreach ($candidate in $candidates) {
     }
 }
 if (-not $selected) {
-    throw "No current LocalMachine\My Server Authentication certificate for $DnsName has a usable machine private key. Checked $($candidates.Count) matching certificate(s)."
+    throw "No current LocalMachine\$Store Server Authentication certificate for $DnsName has a usable machine private key. Checked $($candidates.Count) matching certificate(s)."
 }
 
 if (-not $CheckOnly) {

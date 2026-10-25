@@ -2620,6 +2620,7 @@ public sealed class PortMapper(int port, ILogger<PortMapper> log) : IAsyncDispos
   - Done when: a Let's Encrypt certificate for `sync.taskscape.com` is in `LocalMachine\My`, renewal is scheduled, and the post-renewal script restarts `PeerSyncRendezvous`.
   - The [server deployment](docs/verification/P5-rendezvous-server-deployment-2026-10-24.md) verified the current Let's Encrypt certificate with a working machine key in `My`, the existing scheduled win-acme renewal configured for `My`, and a successful manual run of the renewal hook that regranted access and restarted the service. A future real issuance has not yet exercised that configuration.
   - The current-source installer and runtime now reject a matching certificate whose private key cannot actually sign, and the packaged preflight distinguishes an unusable key from an absent certificate. This guards the stale `HasPrivateKey=True` case observed during server setup. Signed development installers 1.0.24.0 and [1.0.25.0](docs/verification/P4-rendezvous-private-key-selection-2026-10-24.md) were sent to the physical server; recipient installation and preflight remain unverified.
+  - A [post-1.0.25 installer/renewal repair](docs/verification/P4-webhosting-renewal-import-2026-10-25.md) copies a newer usable machine-key certificate context from win-acme's `LocalMachine\WebHosting` store into the required `LocalMachine\My` store before preflight and on renewal, without exporting the private key. PowerShell parsing, the absent-store fallback and an Inno 7 package compile pass; a native WebHosting import, installed upgrade and physical renewal remain open. The currently installed server does not yet contain this repair.
 - [x] **P4.3.3 Port 99 free and open**
   - Done when: nothing else listens on 99, the Windows Firewall rules exist, and the provider allows TCP 99 (confirmed) and UDP 99 (to verify).
   - Run the packaged deployment preflight on the server to identify local listener/rule/certificate blockers. Its local result cannot prove provider admission; retain the outside-network probe as the acceptance check.
@@ -2652,9 +2653,10 @@ netsh http show urlacl | Select-String ':99/'
 Configure the `sync.taskscape.com` win-acme renewal to store each new
 certificate in `LocalMachine\My` and run the installer-managed
 `C:\ProgramData\PeerSync.Rendezvous\After-RendezvousRenewal.ps1` after issuance.
-That script regrants the service's private-key access before restarting it.
-Copying a current certificate from `WebHosting` to `My` is only a one-time
-repair; it does not configure later renewals. Do not replace the installed
+That script copies a newer usable `WebHosting` certificate context into `My`
+when needed, regrants the service's private-key access, then restarts it.
+The service continues to load only from `My`; the automatic copy applies only
+when the updated hook is installed and configured. Do not replace the installed
 script with a restart-only command.
 
 ```powershell

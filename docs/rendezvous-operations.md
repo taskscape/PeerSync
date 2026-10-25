@@ -22,12 +22,17 @@ Obtain a Server Authentication TLS certificate for `sync.taskscape.com` in
 `Cert:\LocalMachine\My`, with a private key. For a public deployment, configure
 win-acme with DNS or HTTP validation and Windows certificate-store installation.
 On an IIS server, win-acme otherwise defaults to `LocalMachine\WebHosting`;
-set this renewal's certificate-store destination to `My` (the
-`--certificatestore My` option in unattended setup). Copying a certificate
-between stores once does not configure future renewals.
+prefer setting this renewal's certificate-store destination to `My` (the
+`--certificatestore My` option in unattended setup). Setup also checks for a
+newer, usable machine-key certificate in `WebHosting` and copies its Windows
+certificate context into `My` before preflight. It does not export the private
+key or import a public-only `.cer`. The post-renewal hook repeats this fallback
+for future win-acme renewals. The service itself still loads from
+`LocalMachine\My`.
 Set its post-renewal command to
 `C:\ProgramData\PeerSync.Rendezvous\After-RendezvousRenewal.ps1`; the script
-regrants the private-key ACL and restarts `PeerSyncRendezvous`. A self-signed
+copies a newer usable `WebHosting` certificate when present, regrants the
+private-key ACL and restarts `PeerSyncRendezvous`. A self-signed
 server certificate is suitable only for an isolated test where each client
 explicitly trusts it. It is separate from the P-256 device certificates and
 the code-signing certificate.
@@ -114,8 +119,10 @@ service-level `PEERSYNC_` overrides. For `server-certificate-unavailable`,
 install or renew the Server Authentication certificate for the configured
 host in `LocalMachine\My`. For `server-certificate-key-unusable`, the certificate
 metadata matches but its machine private key cannot sign or its public key
-cannot verify the signature. Check the win-acme renewal's `My` store target and
-key availability; copying a public `.cer` cannot restore a missing private key.
+cannot verify the signature. Check the win-acme renewal's `My` or `WebHosting`
+entry and key availability; copying a public `.cer` cannot restore a missing
+private key. The installed import helper copies the existing machine-key
+association only when that key proves usable.
 If the service remains stopped with a usable certificate, inspect its
 Application Event Log entries and rerun the packaged certificate-grant helper.
 For `service-not-running`, inspect those events and
