@@ -35,6 +35,18 @@ HTTP/3/UDP 99. The allowlisted summary and local test reports are retained
 under `artifacts/field/forced-relay-physical-20261025/` (ignored by Git);
 the raw journals remain on each client.
 
+After the run, each installed client produced a sanitized diagnostic bundle.
+The first and second bundles contain the shared Relay session ID 78 and 86
+times respectively, so an operator can correlate the two client accounts
+without their raw journals. A targeted screen of both ZIP entries found no
+occurrence of the current folder share key, folder ID encodings, native test
+paths or names, or the known LAN, overlay and public addresses. The screen
+result and bundle SHA-256 hashes are retained in
+`artifacts/field/forced-relay-physical-20261025/diagnostic-bundle-screen.json`.
+This checks those known values in these two bundles; it is not a general
+secret-leak audit. A matching central-server bundle is still needed for the
+three-way diagnostic gate.
+
 The first attempt at starting the second-PC field tool failed **before** its
 measurement window: the new harness read undefined `$LASTEXITCODE` after
 the installed PowerShell stop helper. It removed the test rules but left
