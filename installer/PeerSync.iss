@@ -58,6 +58,8 @@ Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 ; NSec's libsodium DLL needs the Microsoft Visual C++ v14 runtime on clean PCs.
 ; Extract before installation so a reboot requirement leaves the old service intact.
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Update-Helper.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Assert-UpdateSetupSignature.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
@@ -139,14 +141,6 @@ begin
   Result := RunCommand(ExpandConstant('{sys}\net.exe'), 'localgroup "PeerSync Users"') = 0;
 end;
 
-function IsServiceStopped: Boolean;
-var
-  Code: Integer;
-begin
-  Code := RunCommand(ExpandConstant('{cmd}'), '/c sc query PeerSync | find "STOPPED"');
-  Result := Code = 0;
-end;
-
 function InitializeSetup: Boolean;
 var
   InstalledVersion, NewVersion: Int64;
@@ -183,7 +177,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Tries, RedistCode: Integer;
+  RedistCode: Integer;
 begin
   Result := '';
   ExtractTemporaryFile('vc_redist.exe');
@@ -201,14 +195,11 @@ begin
     Exit;
   end;
   if not ServiceExists then Exit;
-  if IsServiceStopped then Exit;
-  RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSync');
-  for Tries := 1 to 30 do
-  begin
-    if IsServiceStopped then Exit;
-    Sleep(1000);
-  end;
-  Result := 'The PeerSync service did not stop within 30 seconds. Stop it in Services and run Setup again.';
+  ExtractTemporaryFile('Stop-ServiceAndWait.ps1');
+  if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSync') <> 0 then
+    Result := 'The PeerSync service or its old process did not exit. See setup log.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -249,21 +240,12 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  Tries: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
-  if ServiceExists and not IsServiceStopped then
-  begin
-    RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSync');
-    for Tries := 1 to 30 do
-    begin
-      if IsServiceStopped then Break;
-      Sleep(1000);
-    end;
-    if not IsServiceStopped then
-      RaiseException('The PeerSync service did not stop. Stop it in Services and run Uninstall again.');
-  end;
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\tools\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSync');
   if not UninstallSilent then
     if MsgBox('Also remove PeerSync settings, databases, logs and the device certificate?' + #13#10 +
       'Your synced folders and their files are not touched.',

@@ -40,6 +40,8 @@ Name: "{commonappdata}\PeerSync.Rendezvous\logs"; Flags: uninsneveruninstall
 
 [Files]
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; Flags: dontcopy noencryption
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Set-WerPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -90,11 +92,6 @@ begin
   if Code <> 0 then RaiseException(ExtractFileName(FileName) + ' failed with exit code ' + IntToStr(Code) + '. See setup log.');
 end;
 
-function IsServiceStopped: Boolean;
-begin
-  Result := RunCommand(ExpandConstant('{cmd}'), '/c sc query PeerSyncRendezvous | find "STOPPED"') = 0;
-end;
-
 function InitializeSetup: Boolean;
 var PreviousDir: String;
     InstalledVersion, NewVersion: Int64;
@@ -121,7 +118,7 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var Tries, Code, I: Integer;
+var Code, I: Integer;
     Output: TExecOutput;
 begin
   Result := '';
@@ -158,14 +155,12 @@ begin
       Result := Result + ' See setup log.';
     Exit;
   end;
-  if not ServiceExists or IsServiceStopped then Exit;
-  RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSyncRendezvous');
-  for Tries := 1 to 30 do
-  begin
-    if IsServiceStopped then Exit;
-    Sleep(1000);
-  end;
-  Result := 'The PeerSyncRendezvous service did not stop within 30 seconds.';
+  if not ServiceExists then Exit;
+  ExtractTemporaryFile('Stop-ServiceAndWait.ps1');
+  if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSyncRendezvous') <> 0 then
+    Result := 'The PeerSyncRendezvous service or its old process did not exit. See setup log.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -203,19 +198,12 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var Tries: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
-  if ServiceExists and not IsServiceStopped then
-  begin
-    RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSyncRendezvous');
-    for Tries := 1 to 30 do
-    begin
-      if IsServiceStopped then Break;
-      Sleep(1000);
-    end;
-    if not IsServiceStopped then RaiseException('PeerSyncRendezvous did not stop before uninstall.');
-  end;
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSyncRendezvous');
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\Set-WerPolicy.ps1') + '" -ExecutableNames PeerSync.Rendezvous.exe -Remove');
