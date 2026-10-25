@@ -84,3 +84,9 @@ scheduled-task state `Running` were observed while the original fuzz PID
 52808 remained live. Neither task has a terminal result yet. The observed
 Windows shadow-copy allocation was growing as C: space fell; its cause is
 not established here, and no restore snapshot was changed.
+
+At 2026-10-25 08:04 UTC, C: had 80.32 GiB free. Both original fuzz PID
+52808 and the waiting scale-watcher PID 84052 remained live. This clears the
+current disk-space concern without restarting either run; the watcher must
+still observe a passing fuzz terminal before it can launch, and no scale
+success is claimed from free space alone.
