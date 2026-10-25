@@ -73,3 +73,38 @@ under a SYSTEM scheduled task (task exit 0); both services remained Running.
 A separate temporary stopped-service probe confirmed `sc.exe config` changes
 an unquoted `ImagePath` to the intended quoted value. These checks validate
 the parser and command form without claiming a completed second-PC upgrade.
+
+## Corrected 1.0.25.0 physical upgrade
+
+Signed client 1.0.25.0 was built from `ae09b39`. Its installer SHA-256 is
+`9A9968C9AE8CBEE3A23909677D50BC2467C39A03CF7F596CB7DFE0F2834D1445`;
+Authenticode was Valid with a timestamp and the same development signer as
+1.0.24.0. The copied second-PC installer had that exact hash. The SYSTEM
+upgrade task verified the signature and completed setup with exit 0. Its log
+records `STOPPED_AND_EXITED` for the old PID before replacement, successful
+`sc.exe config` and no Windows restart. The task was removed afterward.
+
+The second PC now has a Running 1.0.25.0 service, a quoted SCM image path,
+Valid signatures on the service, app and CLI, an installed helper matching
+source SHA-256, and unchanged settings plus three sampled native-file hashes.
+The first PC upgraded from 1.0.24.0 to the same package with setup exit 0,
+the stop/process-exit marker, quoted path, Running service, Valid signatures,
+unchanged settings/files and `productionSyncAvailable=true`. Its installed
+CLI also renders `Peer clock sessions shown` instead of the misleading peer
+folder count. Both setup logs report no reboot required. Retained before/after
+JSON, setup logs and remote SYSTEM result are under
+`artifacts/field/{first,second}-pc-1.0.25-upgrade-20261025/`.
+
+Fresh text written on the first PC arrived on the second in 5.109 seconds with
+matching native SHA-256
+`DEB4129BB04F34B3159530DD931F44AAEB86C7DED73608D3DCA9E5D0D2919AFE`.
+Fresh text written to the second PC's native joined folder arrived on the
+first in 6.138 seconds with matching SHA-256
+`71143C961BBFADA5A6629E1409BB207464682EA4B431BD28646C6F9DB6F5BECA`.
+These are installed physical LAN checks, not an interactive uninstall, an
+address-in-use restart, a three-PC corpus or a 72-hour soak.
+
+The second PC retains the exact public PeerSync Development certificate
+in LocalMachine Root for development-signed package verification; no private
+key was copied. Replace that test trust with a publicly trusted release
+signer before the release gate.
