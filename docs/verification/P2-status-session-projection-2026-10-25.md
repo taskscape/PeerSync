@@ -22,3 +22,11 @@ now state that distinction and direct operators to `psp peers <folder>
 --json` for the device roster. This is a source-and-field-output diagnosis,
 not a new physical duplicate-resolution stress test. Gate P2's connection
 manager and physical timing checks remain open.
+
+The human `psp status` heading now says `Peer clock sessions shown` instead
+of `Authenticated peer folders`. It counts the rows actually displayed and
+remains accurate when the clock snapshot is truncated. The JSON `peers`
+field and its session IDs are unchanged for existing scripts.
+The focused Release CLI test
+`HumanStatusNamesUnavailableServiceAndClockSkew` passed locally (1/1,
+2026-10-25); this does not verify the wording on installed 1.0.23.0 clients.
