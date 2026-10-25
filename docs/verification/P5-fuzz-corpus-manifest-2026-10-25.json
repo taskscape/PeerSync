@@ -1,0 +1,13 @@
+{
+  "format": "PeerSync deterministic seed corpus v1",
+  "generator": "tests/PeerSync.Fuzz/Program.cs",
+  "sourceRevision": "30bf923efc91cd3881c765311e369172ccc3c40a",
+  "binarySha256": "E69FD6DFECDA3DB9E891B4EEE8D3A275BA2D9CF36D30C019977973F870D333BD",
+  "runtime": "Microsoft.NETCore.App 10.0.13",
+  "seedStartInclusive": 0,
+  "seedEndExclusive": 31235254,
+  "targets": "FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText",
+  "replay": "For each integer seed, construct System.Random(seed), draw byte length Random.Next(1, 1048576), fill via Random.NextBytes, then run the fixed harness iteration.",
+  "crashFiles": 0,
+  "terminal": "terminal.json"
+}

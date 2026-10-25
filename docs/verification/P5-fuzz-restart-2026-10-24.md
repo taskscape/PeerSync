@@ -47,12 +47,12 @@ does not change the saved power plan. The campaign's `run.ps1`,
 `keep-awake.ps1`, `running.json`, `awake.json`, stdout, stderr and eventual
 `terminal.json` are retained in the ignored artifact directory.
 
-The retained `terminal.json` reports start `2026-10-24T09:05:58.0245472Z`,
+The retained [terminal result](P5-fuzz-terminal-2026-10-25.json) reports start `2026-10-24T09:05:58.0245472Z`,
 end `2026-10-25T09:05:58.3807220Z`, 86,400.0013553 fuzz seconds,
 31,235,254 seeds and all seven targets. Exit code, crash count, crash-file
 count and stderr length are all zero. The on-disk executable SHA-256 still
 matches both launch and terminal records. Both scheduled tasks reported result
-zero and were removed after completion. The retained `corpus-manifest.json`
+zero and were removed after completion. The retained [seed corpus manifest](P5-fuzz-corpus-manifest-2026-10-25.json)
 identifies the deterministic seeds 0 through 31,235,253, the fixed generator
 binary and replay method. This compact seed corpus is reproducible without
 saving terabytes of generated input bytes. The crash directory is absent
