@@ -45,3 +45,14 @@ results are retained under
 policy evidence for those two clients at that time. The third PC and physical
 Rendezvous server still require their own installed audits, and an independent
 reviewer must still verify the approved crash-dump boundary.
+
+On 2026-10-25, the same read-only installed audit ran again on both physical
+Windows clients after the signed 1.0.26.0 upgrade. The first PC ran its
+packaged script directly; the second PC ran its packaged script through the
+existing remote management session. Both results report all three client
+executables excluded from automatic WER reports and owned by the installer,
+with no configured global or per-executable LocalDumps values. The two JSON
+results are retained under
+`artifacts/field/client-1.0.26-crash-policy-20261025/`. The audit does not
+inspect privileged full/live dumps, OS process telemetry, the third PC or the
+physical Rendezvous server. Independent review remains open.
