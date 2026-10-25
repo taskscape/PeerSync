@@ -98,6 +98,15 @@ benchmark executable hash and retained fixture, observed 85,746,462,720 free
 bytes on C: (well above the 6 GiB start threshold), and launched benchmark
 PID 36684 at 09:06:39 UTC. Its `running.json` records the expected SHA-256
 `5FAB8864FFC04D24ED7767F4594C7F450AE70D66DE8F8ADDAD6E923E8FCD714A`
-and the unchanged 1.5 GiB continue threshold. The benchmark is still running;
-no scanner, peak-memory or fresh-peer result is claimed until `terminal.json`
-and the native-byte report are inspected.
+and the unchanged 1.5 GiB continue threshold. At launch, no scanner or peer
+result was claimed from the process state alone.
+
+The scanner row subsequently completed before the fresh-peer stage. For its
+1,000,000 real one-byte files in 1,000 directories, first index took
+229.955197 seconds, the unchanged rescan took 61.7057197 seconds with zero
+rehashes and updates, idle CPU was 0.0086803%, and 1,167 samples recorded a
+134,856,704-byte peak working set and 86,011,904-byte sampled peak private
+memory. Its 1,001,000 rows, sequence preservation, bounded changed paths,
+`correct=true` and `targetMet=true` pass the scanner targets. The peer stage
+and overall terminal remain pending. The scanner result names an additional
+run-specific database and diagnostic directory inside the retained fixture.
