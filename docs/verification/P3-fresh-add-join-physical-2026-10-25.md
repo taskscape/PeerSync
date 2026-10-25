@@ -28,6 +28,14 @@ using authenticated QUIC. Both services remained Running. The bounded local
 retains versions, service states, transport and all four native hashes without
 the capability key or full FolderId.
 
+After both transfers, a read-only scan of the installed PeerSync raw JSONL
+journals on both PCs covered 21 files and 220,461 lines (about 66.8 MiB). It
+found zero occurrences of this disposable capability, the FolderId in hex or
+base64, or either native test-folder path in literal or JSON-escaped form.
+The [bounded audit record](../../artifacts/field/fresh-add-join-20261025/raw-log-audit.json)
+contains counts and match categories only. This is a current two-PC spot check,
+not a review of third-PC, central-server, OS process-creation or crash logs.
+
 This closes the installed-service follow-up for adding and joining a fresh
 folder while an older folder is already connected. It is a CLI-assisted two-PC
 LAN check. It does not prove the app's unassisted ten-minute flow, approval UI,
