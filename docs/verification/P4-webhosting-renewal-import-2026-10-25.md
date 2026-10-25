@@ -49,3 +49,15 @@ installed validation on a Windows Server before claiming this repair deployed.
 The native control remains in `build/Test-RendezvousWebHostingImport.ps1` for
 reproduction with a unique `.invalid` certificate. Do not substitute the
 local compile or synthetic certificate for a real renewal.
+
+The current-source development-signed Rendezvous 1.0.27.0 installer was then
+built from revision `fa88cc88415003c023a77fe8de8897094114b27f`. Its
+manifest records a self-contained x64 package, development-only signing, and
+SHA-256 `7F71A0D5E1848760C1CD351F16341F462275098B1E199D3C961EA271FDB81CC0`.
+The computed installer hash matches; Windows reports a valid Authenticode
+signature by `CN=PeerSync Development`. The manifest's `workingTreeDirty=true`
+reflects the pre-existing untracked `Sync.zip.tmp`, which was not changed by
+this repair. This build is available at
+`artifacts/installer/PeerSync-Rendezvous-Setup-1.0.27.0-x64.exe`; it has not
+been installed on the physical server, and its signature is not a public
+release signature.
