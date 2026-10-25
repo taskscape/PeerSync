@@ -51,6 +51,8 @@ correct. The service scans on startup and follows local file changes, while
 periodic rescans cover missed watcher events.
 
 For a terminal check, use `psp status --json` and `psp peers <folder> --json`.
+The status output lists clock sessions, so it can show two connected rows for
+one device and folder; `psp peers` is the device roster.
 To provide a known peer address directly, use
 `psp hosts <folder> <host:port>`; `psp hosts <folder> --clear` removes the
 configured list. The default rendezvous address is
