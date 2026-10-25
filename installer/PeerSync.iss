@@ -217,9 +217,13 @@ begin
   begin
     Account := ExpandConstant('{param:SERVICEACCOUNT|NT SERVICE\PeerSync}');
     RequireSuccess(ExpandConstant('{sys}\sc.exe'),
-      'create PeerSync binPath= "' + ExpandConstant('{app}\service\PeerSync.Service.exe') +
-      '" start= auto obj= "' + Account + '"');
-  end;
+      'create PeerSync binPath= "\"' + ExpandConstant('{app}\service\PeerSync.Service.exe') +
+      '\"" start= auto obj= "' + Account + '"');
+  end
+  else
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'),
+      'config PeerSync binPath= "\"' + ExpandConstant('{app}\service\PeerSync.Service.exe') +
+      '\"" start= auto');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSync reset= 86400 actions= restart/60000/restart/60000/restart/300000');
   RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--init');

@@ -4,7 +4,8 @@ param(
     [ValidateSet('PeerSync', 'PeerSyncRendezvous')]
     [string]$ServiceName,
     [ValidateRange(1, 120)]
-    [int]$TimeoutSeconds = 30
+    [int]$TimeoutSeconds = 30,
+    [switch]$InspectOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,16 +16,32 @@ if ($null -eq $serviceInfo) {
     exit 0
 }
 
+$expectedImageName = if ($ServiceName -eq 'PeerSync') {
+    'PeerSync.Service.exe'
+} else {
+    'PeerSync.Rendezvous.exe'
+}
 $imagePath = [string]$serviceInfo.PathName
-if ($imagePath -match '^\s*"([^"]+\.exe)"') {
+if ($imagePath -match '^\s*"([^"]+\.exe)"(?:\s|$)') {
     $imagePath = $Matches[1]
-} elseif ($imagePath -match '^\s*(\S+\.exe)(?:\s|$)') {
+} elseif ($imagePath -match ('^\s*(.+?' + [regex]::Escape($expectedImageName) + ')(?:\s|$)')) {
+    # Older sc.exe create commands quoted the argument passed to sc.exe but
+    # persisted an unquoted ImagePath. Match only this service's known image
+    # name; splitting at the first space would misidentify C:\Program.
     $imagePath = $Matches[1]
 } else {
     throw "Cannot identify the $ServiceName service image. Refusing to replace files."
 }
 $imagePath = [IO.Path]::GetFullPath($imagePath)
 $imageName = [IO.Path]::GetFileName($imagePath)
+if ($imageName -ne $expectedImageName -or
+    -not (Test-Path -LiteralPath $imagePath -PathType Leaf)) {
+    throw "The $ServiceName service image is not the expected installed executable. Refusing to replace files."
+}
+if ($InspectOnly) {
+    Write-Output "SERVICE_IMAGE_VALIDATED name=$ServiceName"
+    exit 0
+}
 $capturedProcessId = [int]$serviceInfo.ProcessId
 $deadline = [Diagnostics.Stopwatch]::StartNew()
 $controller = [System.ServiceProcess.ServiceController]::new($ServiceName)

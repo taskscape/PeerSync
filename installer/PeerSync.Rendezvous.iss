@@ -168,12 +168,12 @@ begin
   if CurStep <> ssPostInstall then Exit;
   if not ServiceExists then
     RequireSuccess(ExpandConstant('{sys}\sc.exe'),
-      'create PeerSyncRendezvous binPath= "' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
-      '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"')
+      'create PeerSyncRendezvous binPath= "\"' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
+      '\"" start= auto obj= "NT SERVICE\PeerSyncRendezvous"')
   else
     RequireSuccess(ExpandConstant('{sys}\sc.exe'),
-      'config PeerSyncRendezvous binPath= "' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
-      '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"');
+      'config PeerSyncRendezvous binPath= "\"' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
+      '\"" start= auto obj= "NT SERVICE\PeerSyncRendezvous"');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSyncRendezvous reset= 86400 actions= restart/60000/restart/60000/restart/300000');
   { Remove the broad inheritable grant from earlier development builds before
