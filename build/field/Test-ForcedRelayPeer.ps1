@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateRange(1, 65535)][int]$LocalPort,
-    [Parameter(Mandatory)][int[]]$PeerPorts,
+    [Parameter(Mandatory)][string[]]$PeerPorts,
     [Parameter(Mandatory)][string]$OutputDirectory,
     [ValidateRange(60, 900)][int]$DurationSeconds = 300,
     [switch]$PreflightOnly
@@ -13,7 +13,17 @@ Set-StrictMode -Version Latest
 if ($LocalPort -eq 99 -or $PeerPorts.Count -eq 0) {
     throw 'Specify the installed peer listener ports, never central port 99.'
 }
-$peerPortSet = @($PeerPorts | Sort-Object -Unique)
+$parsedPorts = [System.Collections.Generic.List[int]]::new()
+foreach ($item in $PeerPorts) {
+    foreach ($piece in $item.Split(',')) {
+        $port = 0
+        if (-not [int]::TryParse($piece.Trim(), [ref]$port)) {
+            throw 'PeerPorts must be comma-separated numeric listener ports.'
+        }
+        $parsedPorts.Add($port)
+    }
+}
+$peerPortSet = @($parsedPorts | Sort-Object -Unique)
 foreach ($port in $peerPortSet) {
     if ($port -lt 1 -or $port -gt 65535 -or $port -eq 99) {
         throw 'PeerPorts must be valid peer listener ports and must exclude central port 99.'

@@ -13,8 +13,11 @@ unregisters the task and restarts through the installed process-exit helper.
 It records start/end, rule and service cleanup status in a local JSON report.
 
 The source SHA-256 is
-`E7173B7CD494E131EA19F5CBE3E7FAAC9DC5E9B1197A1EE22CE42FF2B7E11533`.
-Windows PowerShell 5.1 parsed the tool and the field-kit builder. The
+`D1F53A0071638B08AC8D0665F3EC7E30B3CEEE9156ADFC2087594F56EE5B7247`.
+Windows PowerShell 5.1 parsed the tool and the field-kit builder. An initial
+external-shell call exposed that comma-separated peer ports reached an
+`int[]` parameter as one string; the tool now parses and validates both
+comma-separated and array arguments. The actual Windows PowerShell 5.1
 read-only `-PreflightOnly` path passed on the physical first PC running
 1.0.25.0 with listener port 45973 and candidate remote ports 26328 and
 38240. It left no relay-check rule or task. A separate disabled firewall
