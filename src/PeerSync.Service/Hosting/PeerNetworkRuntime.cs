@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Quic;
@@ -32,6 +33,8 @@ namespace PeerSync.Service.Hosting;
 internal sealed class PeerNetworkRuntime : IAsyncDisposable
 {
     private static readonly TimeSpan SyncInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ListenerBindRetryWindow = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ListenerBindRetryDelay = TimeSpan.FromMilliseconds(250);
     private readonly X509Certificate2 certificate;
     private readonly byte[] localDeviceId;
     private readonly Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders;
@@ -122,9 +125,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 throw new PlatformNotSupportedException("The installed service requires Windows QUIC support.");
             }
 
-            runtime.listener = await QuicPeerListener.ListenAsync(new IPEndPoint(IPAddress.Any, deviceSettings.ListenPort),
-                runtime.options, cancellationToken).ConfigureAwait(false);
-            runtime.tcpListener = TcpPeerListener.Listen(new IPEndPoint(IPAddress.Any, deviceSettings.ListenPort), runtime.tcpOptions);
+            (runtime.listener, runtime.tcpListener) = await BindListenersAsync(deviceSettings.ListenPort,
+                runtime.options, runtime.tcpOptions, diagnostics, cancellationToken).ConfigureAwait(false);
             runtime.acceptTask = Task.WhenAll(runtime.AcceptQuicLoopAsync(runtime.stopping.Token),
                 runtime.AcceptTcpLoopAsync(runtime.stopping.Token));
             diagnostics?.TryWrite(new("service.quic_listener_ready", "peer_network")
@@ -171,6 +173,46 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         {
             await runtime.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task<(QuicPeerListener Quic, TcpPeerListener Tcp)> BindListenersAsync(int port,
+        QuicPeerOptions quicOptions, TcpPeerOptions tcpOptions, DiagnosticJournal? diagnostics,
+        CancellationToken cancellationToken)
+    {
+        long started = Stopwatch.GetTimestamp();
+        int retries = 0;
+        var endpoint = new IPEndPoint(IPAddress.Any, port);
+        while (true)
+        {
+            QuicPeerListener? quic = null;
+            TcpPeerListener? tcp = null;
+            try
+            {
+                quic = await QuicPeerListener.ListenAsync(endpoint, quicOptions, cancellationToken).ConfigureAwait(false);
+                tcp = TcpPeerListener.Listen(endpoint, tcpOptions);
+                if (retries != 0)
+                    diagnostics?.TryWrite(new("service.listener_bind_recovered", "peer_network")
+                    { ItemsVisited = retries, ElapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds });
+                return (quic, tcp);
+            }
+            catch (SocketException error) when (error.SocketErrorCode == SocketError.AddressAlreadyInUse
+                && Stopwatch.GetElapsedTime(started) < ListenerBindRetryWindow)
+            {
+                if (tcp is not null) await tcp.DisposeAsync().ConfigureAwait(false);
+                if (quic is not null) await quic.DisposeAsync().ConfigureAwait(false);
+                if (++retries == 1)
+                    diagnostics?.TryWrite(new("service.listener_bind_retry", "peer_network")
+                    { Level = DiagnosticLevel.Warning, ErrorCode = "address_in_use", NativeError = error.NativeErrorCode,
+                        RetryInMilliseconds = (int)ListenerBindRetryDelay.TotalMilliseconds });
+                await Task.Delay(ListenerBindRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (tcp is not null) await tcp.DisposeAsync().ConfigureAwait(false);
+                if (quic is not null) await quic.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
     }
 

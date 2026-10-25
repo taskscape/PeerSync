@@ -1,4 +1,12 @@
 using System.Net;
+using System.Net.Quic;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using PeerSync.Core.Diagnostics;
+using PeerSync.Core.Settings;
+using PeerSync.Net.Security;
+using PeerSync.Service.Control;
 using PeerSync.Service.Hosting;
 using Shouldly;
 using Xunit;
@@ -7,6 +15,49 @@ namespace PeerSync.Service.Tests;
 
 public sealed class PeerNetworkEndpointTests
 {
+    [Fact]
+    public async Task ListenerWaitsForPreviousTcpOwnerToReleasePort()
+    {
+        if (!QuicListener.IsSupported) return;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(25));
+        string logDirectory = Path.Combine(Path.GetTempPath(), "PeerSync-bind-retry-" + Guid.NewGuid().ToString("N"));
+        using var journal = new DiagnosticJournal(logDirectory, "service_test", debugEnabled: true);
+        var retrySeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recovered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        journal.EntryWritten += (entry, _) =>
+        {
+            if (entry.Event == "service.listener_bind_retry") retrySeen.TrySetResult();
+            if (entry.Event == "service.listener_bind_recovered") recovered.TrySetResult();
+        };
+        using var blocker = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+        { ExclusiveAddressUse = true };
+        blocker.Bind(new IPEndPoint(IPAddress.Any, 0));
+        blocker.Listen(1);
+        int port = ((IPEndPoint)blocker.LocalEndPoint!).Port;
+
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=PeerSync listener retry test", key, HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        using X509Certificate2 ephemeral = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+        using X509Certificate2 certificate = X509CertificateLoader.LoadPkcs12(
+            ephemeral.Export(X509ContentType.Pfx, "service-test"), "service-test",
+            X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.Exportable);
+        byte[] deviceId = PeerTls.DeviceId(certificate);
+        Task<PeerNetworkRuntime> startup = PeerNetworkRuntime.StartAsync(certificate, deviceId,
+            () => [], new DeviceSettings { ListenPort = port, LanDiscovery = false },
+            new ControlStatusRuntime(), (_, _) => { }, journal, timeout.Token);
+        try
+        {
+            await retrySeen.Task.WaitAsync(TimeSpan.FromSeconds(10), timeout.Token);
+        }
+        finally { blocker.Dispose(); }
+        await using var runtime = await startup;
+        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(10), timeout.Token);
+        runtime.Completion.IsFaulted.ShouldBeFalse();
+    }
+
     [Theory]
     [InlineData("192.168.0.183", true)]
     [InlineData("100.72.94.33", true)]
