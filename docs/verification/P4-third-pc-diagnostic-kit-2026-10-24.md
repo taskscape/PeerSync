@@ -80,3 +80,18 @@ verified the installer hash and Valid development signature. Tailscale
 Taildrop sent this ZIP to the third PC and exited 0 on 2026-10-25. The
 recipient's 1.0.25.0 installation and fresh three-PC convergence remain
 unverified; the earlier native WAN result used installed 1.0.23.0.
+
+On 2026-10-25 the newer
+`artifacts/deploy/PeerSync-OutsidePC-1.0.26.0-x64-upgrade.zip` was built from
+the signed client installer at source revision `0153358b5b41f8bb58bcd8334d65b616a839f51f`.
+The six-entry kit is 166,396,000 bytes with SHA-256
+`DA2973BA478EAFAA25A4957D855C7AE68785FEC3971382125E934C48E6C6ACBB`.
+Its embedded installer hashes exactly to the standalone signed setup's
+`BBB1C5C06F7ECB6D99140571C852E5EF9407F522CEB14FFE9514615CB0EF6041`;
+the builder verified its manifest, public certificate and Valid development
+signature. It contains no folder key or private key. Tailscale identified the
+online third-PC target by the same observed mobile public address used in the
+hotspot probe; `tailscale file cp` to that target exited 0. This is sender-side
+delivery only. Third-PC recipient hash, installation, rendered notifications,
+fresh three-PC convergence and native WAN retest remain open. The two LAN PCs
+already run this version and passed [fresh Add/Join in both directions](P3-fresh-add-join-physical-2026-10-25.md).
