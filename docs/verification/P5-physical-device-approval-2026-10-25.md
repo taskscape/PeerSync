@@ -33,13 +33,52 @@ passes in about eighteen seconds. The field-only control tool was
 published self-contained and its read-only `inspect` command succeeded
 against both installed services. Evidence is retained under the ignored
 `artifacts/field/approval-physical-20261025/` directory without a plaintext
-share key.
+share key. After the field run, the complete Release win-x64 Service suite
+passed 73/73 with zero skips in 70.324 seconds.
 
-P5.6 remains open until the repaired service is packaged and installed on
-both physical PCs, Pending/approve/block are observed on a freshly added
-folder, and native bytes are checked before and after the decisions. The
-existing shared folder was not changed. The one-time remote join script has
-an ACL restricted to SYSTEM and Administrators; automatic approval review
-rejected deleting it and the local DPAPI-encrypted test key (`blocked by
-policy`). Both should be removed through normal host administration after
-the field run, along with the inactive one-time scheduled tasks.
+## Repaired signed deployment and approval result
+
+Development-signed client setup 1.0.26.0 was built from committed revision
+`0153358b5b41f8bb58bcd8334d65b616a839f51f`; its SHA-256 is
+`BBB1C5C06F7ECB6D99140571C852E5EF9407F522CEB14FFE9514615CB0EF6041`.
+The manifest hash and source revision match, and Authenticode reports Valid
+with a timestamp and the established development signer. The manifest's
+dirty flag reflects a separate untracked workspace file; tracked source was
+clean at build. This is a development package, not a public release signer.
+
+Both physical PCs upgraded from 1.0.25.0 to 1.0.26.0 with setup exit 0 and
+no reboot. The second PC's copied setup matched the source hash; both logs
+record `STOPPED_AND_EXITED` before replacement. Both services are Running
+with Valid executable signatures, unchanged `settings.json` hashes, and the
+same native sentinel SHA-256
+`E881290DAB75A564F347C731338C3E2F1CC77C09C4B2E674EE041D2F7FFDD4E2`.
+
+After the upgrade, the first PC's verified pipe showed the second device in
+Pending for the isolated Require approval folder. The seed remained absent
+on the second PC. The Pending device ID matched the second physical peer's
+existing authenticated identity. Approving it through the verified pipe
+delivered exactly 4,096 native bytes to the second PC; both SHA-256 values
+were `BCAB1D0858175650E9D43D252701B0326F4AD8B0F7CD839D50DD3CE9A9AB4DEB`.
+
+Blocking that device changed the first PC's record to Blocked and drained
+the test folder's connected sessions. A new 4,096-byte file on the second
+PC was indexed locally with SHA-256
+`1E92A5773D3AB291BB75086EBB89F66DD8A3F02E5659464C7193F100570C40F2`.
+The second service was stopped with the installed process-exit guard and
+restarted; it returned Running. Both journals contain the same new QUIC
+session `51d07862-a04f-c2d2-2aee-1ea943d38e02`: the first records
+`local_policy_denied` and the second `remote_policy_denied` for the test
+folder, while allowed folder proofs and a ready session keep the older share
+connected. The blocked file remained absent on the first PC at the final
+08:24:29 UTC check. The exact remote setup, service-restart and sanitized
+decision evidence is retained under the ignored field-artifact directory.
+
+This meets the P5.6 physical Pending/approve/block and native-byte criteria.
+The **new-add renegotiation repair** itself passed the production-host
+regression but was not separately exercised by adding another fresh folder
+after the 1.0.26.0 installs; that installed Add/Join follow-up remains open
+under P3.2.2. The existing shared folder was not changed. The one-time
+remote join script has an ACL restricted to SYSTEM and Administrators;
+automatic approval review rejected deleting it and the local DPAPI-encrypted
+test key (`blocked by policy`). Both should be removed through normal host
+administration after the field run, along with the inactive one-time tasks.
