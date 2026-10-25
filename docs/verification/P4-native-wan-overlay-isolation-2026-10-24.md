@@ -75,6 +75,36 @@ The revised script and its matching `Run-NativeWanWithoutOverlay-v2.cmd`
 launcher were sent to the third PC by Taildrop as distinct v2 filenames to
 avoid Windows renaming an existing download and accidentally rerunning v1.
 
-This confirms the isolation mechanism and direct physical-LAN transfer, not
-the required native mobile-WAN path. The corrected five-minute third-PC run
-and first-PC observation are still pending. The user operates that PC.
+The corrected third-PC run completed on 2026-10-25. The operator ran the
+distinct v2 launcher on PeerSync 1.0.23.0 with Tailscale Up and the route to
+the rendezvous server over the mobile-hotspot Wi-Fi source `10.133.234.210`.
+Its report records `startedUtc=2026-10-25T06:20:33.7690876Z`,
+`endedUtc=2026-10-25T06:25:33.9616165Z`, `rulesPresentAtEnd=True`,
+`serviceRunningAtEnd=True`, `rulesRemoved=True`,
+`recoveryTaskRemoved=True`, `serviceRunningAfterCleanup=True`, and
+`failure=null`. The launcher exited 0. This report was supplied by the
+operator in the task conversation; the retained transcription is under
+`artifacts/field/third-pc-native-wan-20261025/`.
+
+The unique 88-byte file
+`native-wan-third-20261025T062033Z-85e7e40bf9b1.txt` was created on the
+third PC at the start of that window. The second physical PC installed it at
+`06:20:39Z`, and the first PC installed it at `06:21:23Z`, both before the
+rules were removed. Both independently read the SHA-256 reported by the
+third PC:
+`3D144473DAE78B94CBEBCA16A72421A489E31B8523F07DCB6EDD04FED8CA4944`.
+The second PC's service journal shows an authenticated incoming `Relay`
+session at `06:20:39.393Z`, a one-item index update, a completed 88-byte
+`relay_block` request at `06:20:39.591Z`, remote assembly verification and
+installation by `06:20:39.620Z`. It then pushed the index to the first PC
+over authenticated LAN QUIC (`192.168.0.176`); the first PC's journal opened
+a QUIC block stream to the second PC (`192.168.0.183`) just before its copy
+appeared. The journals, file observations and the operator's report are
+retained under `artifacts/field/third-pc-native-wan-20261025/`.
+
+This verifies a real mobile-hotspot WAN leg through the installed rendezvous
+relay while PeerSync on the third PC was blocked from Tailscale, followed by
+LAN propagation to the first PC. It does not classify the carrier's NAT,
+complete the full-cone/port-restricted home-NAT matrix, deliberately force
+every direct path off for the relay-only gate, test relay rate caps or prove
+72-hour durability. Those gates remain open.
