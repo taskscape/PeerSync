@@ -234,11 +234,11 @@ public sealed partial class Scanner : IDisposable
             int unchanged = 0, hashed = 0, renamed = 0, deleted = 0, unsyncable = 0;
             // Identity matching is restricted to paths absent from the successful walk.
             var renameBatch = new List<LocalFileRow>(RowRepository<LocalFileRow>.BatchSize);
-            foreach (string oldPath in index.ReadLocalPaths())
+            foreach (string oldPath in entries.ReadAbsentLocalPaths(index.ReadLocalPaths()))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string key = oldPath.ToUpperInvariant();
-                if (entries.ContainsKey(key) || entries.UnderProtection(key) || entries.UnderIgnoredDirectory(key)) continue;
+                if (entries.UnderProtection(key) || entries.UnderIgnoredDirectory(key)) continue;
                 var candidate = index.LocalFiles.Find(key);
                 if (candidate is not { Deleted: false, Type: 0, Record: not null, Flags: LocalFileState.None, FileId: not null }
                     || ignore.IsIgnored(candidate.Path, false)) continue;
@@ -378,7 +378,7 @@ public sealed partial class Scanner : IDisposable
 
             Checkpoint?.Invoke("after-hash");
             LogMemoryStage("scan.memory_hashed", session, entries.Count, stopwatch);
-            foreach (string oldPath in index.ReadLocalPaths())
+            foreach (string oldPath in entries.ReadAbsentLocalPaths(index.ReadLocalPaths()))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (updates.Count >= RowRepository<LocalFileRow>.BatchSize)
@@ -387,14 +387,14 @@ public sealed partial class Scanner : IDisposable
                     updates = new ConcurrentBag<LocalFileRow>();
                 }
                 string key = oldPath.ToUpperInvariant();
-                if (!entries.UnderIgnoredDirectory(key) && (entries.ContainsKey(key) || entries.UnderProtection(key) || IsInternal(oldPath))) continue;
+                if (!entries.UnderIgnoredDirectory(key) && (entries.UnderProtection(key) || IsInternal(oldPath))) continue;
                 var old = index.LocalFiles.Find(key) ?? throw new IOException("Local scan row disappeared during the operation gate.");
                 if (entries.UnderIgnoredDirectory(key))
                 {
                     if ((old.Flags & LocalFileState.Ignored) == 0) updates.Add(old with { Flags = old.Flags | LocalFileState.Ignored });
                     continue;
                 }
-                if (entries.ContainsKey(key) || entries.UnderProtection(key) || IsInternal(old.Path)) continue;
+                if (entries.UnderProtection(key) || IsInternal(old.Path)) continue;
                 // Ignore rules can also match paths that disappeared before this walk.
                 if (PathRules.IsValid(old.Path) && ignore.IsIgnored(old.Path, old.Type == 1))
                 {

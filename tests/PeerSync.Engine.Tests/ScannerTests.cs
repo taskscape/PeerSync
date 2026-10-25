@@ -79,6 +79,30 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task OrderedPriorMergeKeepsUnicodeRowsAndFindsMissingPathAmongNewObservations()
+    {
+        string privateUse = "p-\uE000", emoji = "p-\U0001F600";
+        await Write("p-z", "old");
+        await Write("p-é", "old");
+        await Write(privateUse, "old");
+        await Write(emoji, "old");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device);
+        (await scanner.ScanAsync(Token)).Updated.ShouldBe(4);
+        var unchanged = await scanner.ScanAsync(Token);
+        unchanged.Unchanged.ShouldBe(4); unchanged.Updated.ShouldBe(0);
+
+        File.Delete(Path.Combine(Root, emoji));
+        await Write("p-\uE001", "new");
+        var changed = await scanner.ScanAsync(Token);
+        changed.Deleted.ShouldBe(1); changed.Hashed.ShouldBe(1);
+        changed.Updated.ShouldBe(2);
+        index.LocalFiles.Find(emoji)!.Deleted.ShouldBeTrue();
+        index.LocalFiles.Find(privateUse)!.Deleted.ShouldBeFalse();
+        index.LocalFiles.Find("p-\uE001")!.Deleted.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task AbandonedObservationIsDiscardedOnlyAfterItsOwnerReleasesTheLock()
     {
         await Write("kept", "user bytes");

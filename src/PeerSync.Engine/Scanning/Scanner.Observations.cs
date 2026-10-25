@@ -18,6 +18,7 @@ public sealed partial class Scanner
         private readonly string path;
         private readonly string lockPath;
         private readonly byte[] rootIdentity;
+        private readonly Guid scanSession;
         private readonly FileStream ownership;
         private readonly SqliteConnection connection;
         private readonly DiagnosticJournal? journal;
@@ -37,12 +38,14 @@ public sealed partial class Scanner
         private readonly int[] prefixCounts = new int[3];
         private int unencodableCount;
         private bool disposed;
+        private long priorPathsCompared;
         internal int Count { get; private set; }
 
         internal ScanObservations(string indexPath, byte[] rootIdentity, Guid scanSession, DiagnosticJournal? journal)
         {
             if (rootIdentity is not { Length: 24 }) throw new ArgumentException("Invalid scan root identity.", nameof(rootIdentity));
             this.rootIdentity = rootIdentity.ToArray();
+            this.scanSession = scanSession;
             this.journal = journal;
             string directory = Path.GetDirectoryName(indexPath) ?? throw new IOException("Index has no parent directory.");
             string owner = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(indexPath)))[..16];
@@ -295,6 +298,49 @@ public sealed partial class Scanner
             existsUnencodable!.Parameters[0].Value = Utf16Bytes(key);
             return existsUnencodable.ExecuteScalar() is not null;
         }
+
+        // Both local_files.path_key and observed.path_key use SQLite's binary
+        // UTF-8 order. Read a bounded range from observed for each prior-index
+        // page, then close that reader before the caller stages any writes.
+        // This avoids interleaving a million point lookups across two files.
+        internal IEnumerable<string> ReadAbsentLocalPaths(IEnumerable<string> localPaths)
+        {
+            foreach (string[] page in localPaths.Chunk(RowRepository<LocalFileRow>.BatchSize))
+            {
+                string[] keys = page.Select(local => local.ToUpperInvariant()).ToArray();
+                var absent = new List<(string Path, string Key)>();
+                using (var readerConnection = OpenReader())
+                using (var command = readerConnection.CreateCommand())
+                {
+                    command.CommandText = "SELECT path_key FROM observed WHERE path_key >= $first "
+                        + "AND path_key <= $last ORDER BY path_key;";
+                    command.Parameters.AddWithValue("$first", keys[0]);
+                    command.Parameters.AddWithValue("$last", keys[^1]);
+                    using var reader = command.ExecuteReader();
+                    string? observed = reader.Read() ? reader.GetString(0) : null;
+                    for (int i = 0; i < page.Length; i++)
+                    {
+                        string key = keys[i];
+                        while (observed is not null && CompareUtf8(observed, key) < 0)
+                            observed = reader.Read() ? reader.GetString(0) : null;
+                        if (!StringComparer.Ordinal.Equals(observed, key))
+                            absent.Add((page[i], key));
+                    }
+                }
+                foreach (var candidate in absent)
+                    if (unencodableCount == 0 || !ContainsKey(candidate.Key))
+                        yield return candidate.Path;
+                long before = priorPathsCompared;
+                priorPathsCompared += page.Length;
+                if (priorPathsCompared / 100_000 != before / 100_000)
+                    journal?.TryWrite(new("scan.prior_paths_compared", "scan")
+                    { SessionId = scanSession, Level = DiagnosticLevel.Debug,
+                        ItemsVisited = priorPathsCompared });
+            }
+        }
+
+        private static int CompareUtf8(string left, string right) =>
+            Encoding.UTF8.GetBytes(left).AsSpan().SequenceCompareTo(Encoding.UTF8.GetBytes(right));
 
         internal bool TryGetValue(string key, out WalkEntry entry)
         {
