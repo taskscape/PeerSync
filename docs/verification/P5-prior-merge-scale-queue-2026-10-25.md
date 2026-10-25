@@ -16,6 +16,9 @@ The temporary SYSTEM task `PeerSync-P5-Scale-PriorMerge-20261025` runs
 [`build/Run-QueuedMillionScale.ps1`](../../build/Run-QueuedMillionScale.ps1)
 (SHA-256
 `BC2B6F384A81DD9FC6A7C2A6F67A5E7C8E4735085C3255F7238FF9A5D5DB6962`).
+An identical `run-queued.ps1` copy is retained in the queue, and the task
+action points at that fixed copy for any restart. Changing the task action
+left its existing waiter PID running.
 Its first `waiting.json` reports the original benchmark PID 36684 live, a
 60-hour prerequisite deadline, and no new benchmark child. The waiter PID
 31624 was independently observed live. It will require the original run's
@@ -24,6 +27,14 @@ require that older candidate to pass. At launch it rechecks all payload
 hashes, the fixture and at least 6 GiB free; during the run it aborts below
 1.5 GiB. A 48-hour benchmark ceiling is inside the payload, and a
 120-hour task cap bounds the full wait and run.
+
+A separate tiny **runner-only** control used a five-file executable payload,
+an empty fixture directory and a synthetic two-line scanner/peer report for
+1,000 files. It exercised the prerequisite-terminal check, child launch,
+stdout parsing and success-terminal writer; its terminal is
+`artifacts/scale/queued-runner-smoke-20261025/terminal.json` with exit 0 and
+empty stderr. This tests orchestration only: no real files were scanned or
+transferred in that control, and it provides no P5.3 performance evidence.
 
 The new run is **queued, not passed**. Its terminal must show the scanner
 targets and a fresh peer with all 1,000,000 native files/bytes verified and
