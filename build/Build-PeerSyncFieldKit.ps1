@@ -21,6 +21,7 @@ $entries = [ordered]@{
     "server/$central.manifest.json" = Join-Path $installer "$central.manifest.json"
     "server/$central.cer" = Join-Path $installer "$central.cer"
     'tools/Allow-PeerSync-TestTraffic.ps1' = Join-Path $root 'build\Allow-PeerSync-TestTraffic.ps1'
+    'tools/Test-ForcedRelayPeer.ps1' = Join-Path $root 'build\field\Test-ForcedRelayPeer.ps1'
     'tools/Measure-PeerSyncTree.ps1' = Join-Path $root 'build\Measure-PeerSyncTree.ps1'
     'tools/New-PeerSyncGateCorpus.ps1' = Join-Path $root 'build\New-PeerSyncGateCorpus.ps1'
     'tools/Invoke-PeerSyncSoakOperations.ps1' = Join-Path $root 'build\Invoke-PeerSyncSoakOperations.ps1'
@@ -51,6 +52,7 @@ $corpusToolHash = (Get-FileHash $entries['tools/New-PeerSyncGateCorpus.ps1'] -Al
 $operationToolHash = (Get-FileHash $entries['tools/Invoke-PeerSyncSoakOperations.ps1'] -Algorithm SHA256).Hash
 $captureLoopHash = (Get-FileHash $entries['tools/Invoke-PeerSyncSoakCaptureLoop.ps1'] -Algorithm SHA256).Hash
 $soakCompareHash = (Get-FileHash $entries['tools/Compare-PeerSyncSoakReports.ps1'] -Algorithm SHA256).Hash
+$forcedRelayHash = (Get-FileHash $entries['tools/Test-ForcedRelayPeer.ps1'] -Algorithm SHA256).Hash
 if ($certificateHash -ne $clientManifest.developmentCertificateSha256 -or
     $certificateHash -ne (Get-FileHash $entries["server/$central.cer"] -Algorithm SHA256).Hash) {
     throw 'Development signing certificates differ.'
@@ -76,6 +78,7 @@ Mixed-corpus generator SHA-256: $corpusToolHash
 Scoped operation tool SHA-256: $operationToolHash
 Hourly capture loop SHA-256: $captureLoopHash
 Soak comparison tool SHA-256: $soakCompareHash
+Bounded forced-relay peer tool SHA-256: $forcedRelayHash
 
 If an isolated test machine does not trust this development signer, review
 the .cer fingerprint above before importing that *public* certificate to its
@@ -114,6 +117,15 @@ plus tools/Compare-PeerSyncSoakReports.ps1 with docs/physical-soak.md. These
 tools keep the native synchronized root
 path out of their shareable reports. They do not close a gate without the
 required machines, elapsed time and network evidence.
+
+The optional tools/Test-ForcedRelayPeer.ps1 blocks only the installed
+PeerSync service's TCP/UDP listener and the explicitly listed remote peer
+ports for a bounded interval, then restores the service and its own firewall
+rules. A SYSTEM recovery task provides cleanup if the shell ends. Run its
+read-only -PreflightOnly check first on each physical test PC; verify that
+the supplied peer-port list includes every possible direct peer path, and
+inspect selected Relay sessions before treating a transfer as forced relay.
+It does not affect central TCP 99, and a partial/failed run is not a gate pass.
 "@
 $stream = [IO.File]::Open($output, [IO.FileMode]::CreateNew)
 try {
