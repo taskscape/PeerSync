@@ -62,3 +62,25 @@ The idle disposable `PeerSync-P3-Server2022-Clean` and
 the normal `Stop-VM` guest shutdown path. Both report `Off`; their disks and
 evidence were retained. This stopped differencing-disk writes and raised C:
 free space to about 10.3 GB. They can be restarted for later VM checks.
+
+## Low-disk watcher recovery, 2026-10-25
+
+During the 24-hour fuzz run, C: free space fell below the unchanged 6 GiB
+scale-start threshold. The queued watcher originally wrote a terminal
+`insufficient-start-disk` result immediately after fuzz passed. Its retained
+`run-after-fuzz.ps1` now waits up to six additional hours for C: to recover
+to at least 6 GiB, writing a bounded `disk-wait.json` observation every five
+minutes. If the threshold is never met, it writes the original blocked
+terminal result with the deadline. The 1.5 GiB in-run abort, exact prepared
+binary hash, passing-fuzz requirement and all benchmark success criteria are
+unchanged. This is only a launch delay; low disk does not count as a pass.
+
+The revised watcher parsed under PowerShell 7, and its script SHA-256 is
+`83376DDA353F34ACD83078AA73A3644B3D4BC6D76CC91C7A9A837D9E51EF90D5`.
+Its prepared benchmark binary still matched SHA-256
+`5FAB8864FFC04D24ED7767F4594C7F450AE70D66DE8F8ADDAD6E923E8FCD714A`.
+Only the waiting scale task was restarted; its new process PID 84052 and
+scheduled-task state `Running` were observed while the original fuzz PID
+52808 remained live. Neither task has a terminal result yet. The observed
+Windows shadow-copy allocation was growing as C: space fell; its cause is
+not established here, and no restore snapshot was changed.
