@@ -37,3 +37,7 @@ Focused validation on current source:
 This change is local source only. The installed first and second PCs have not
 been upgraded to a build containing these events, so their existing two-way
 file transfers still do not establish which candidate was selected.
+
+Later signed 1.0.25.0 installs on both physical PCs produced a [correlated
+selected QUIC LAN session and verified native-byte transfer](P2-physical-selected-route-2026-10-25.md).
+The source-only statement above describes the initial 2026-10-24 check.
