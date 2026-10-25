@@ -13,7 +13,7 @@ unregisters the task and restarts through the installed process-exit helper.
 It records start/end, rule and service cleanup status in a local JSON report.
 
 The source SHA-256 is
-`D1F53A0071638B08AC8D0665F3EC7E30B3CEEE9156ADFC2087594F56EE5B7247`.
+`78E729D107DA2B5FAF822D4CF031BD959EF9A579C132A7C7514A2712B8AE644F`.
 Windows PowerShell 5.1 parsed the tool and the field-kit builder. An initial
 external-shell call exposed that comma-separated peer ports reached an
 `int[]` parameter as one string; the tool now parses and validates both
@@ -25,7 +25,10 @@ rule control accepted the two remote ports and reported them in the port
 filter, then was removed. These controls do not exercise the mutating
 firewall/service path.
 
-The next physical check must run the tool on **each** participating PC with
+The [physical two-PC run](P4-physical-forced-relay-2026-10-25.md) subsequently
+exposed and repaired one test-harness error, then passed bidirectional Relay
+file transfer and cleanup. A broader check must run the tool on **each**
+participating PC with
 the other peers' current listener ports, wait for every `READY`, transfer a
 fresh file, and require matching native hashes plus authenticated `Relay`
 selected-session evidence in the client and central journals while the rules

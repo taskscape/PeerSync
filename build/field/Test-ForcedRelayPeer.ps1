@@ -100,8 +100,10 @@ $taskRegistered = $false
 $serviceTouched = $false
 
 function Restart-PeerSyncSafely {
-    & $helper -ServiceName PeerSync -TimeoutSeconds 60 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'The installed process-exit helper failed.' }
+    $stopLines = @(& $helper -ServiceName PeerSync -TimeoutSeconds 60)
+    if (-not @($stopLines | Where-Object { $_ -like 'STOPPED_AND_EXITED name=PeerSync' }).Count) {
+        throw 'The installed process-exit helper did not confirm STOPPED_AND_EXITED.'
+    }
     Start-Service -Name PeerSync -ErrorAction Stop
     (Get-Service -Name PeerSync).WaitForStatus(
         [System.ServiceProcess.ServiceControllerStatus]::Running,
@@ -169,10 +171,6 @@ Unregister-ScheduledTask -TaskName '__TASK__' -Confirm:$false
 } finally {
     Remove-NetFirewallRule -Name $rules -ErrorAction SilentlyContinue
     $report.rulesRemoved = -not (Get-NetFirewallRule -Name $rules -ErrorAction SilentlyContinue)
-    if ($taskRegistered -and $report.rulesRemoved) {
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    }
-    $report.recoveryTaskRemoved = -not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
     if ($serviceTouched) {
         try { Restart-PeerSyncSafely }
         catch {
@@ -183,6 +181,10 @@ Unregister-ScheduledTask -TaskName '__TASK__' -Confirm:$false
     }
     if ($null -eq $report.endedUtc) { $report.endedUtc = [DateTimeOffset]::UtcNow.ToString('O') }
     $report.serviceRunningAfterCleanup = (Get-Service -Name PeerSync -ErrorAction SilentlyContinue).Status -eq 'Running'
+    if ($taskRegistered -and $report.rulesRemoved -and $report.serviceRunningAfterCleanup) {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    $report.recoveryTaskRemoved = -not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
     $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding UTF8
     "CLEANED rulesRemoved=$($report.rulesRemoved) recoveryTaskRemoved=$($report.recoveryTaskRemoved) serviceRunning=$($report.serviceRunningAfterCleanup)"
     "REPORT $reportPath"
