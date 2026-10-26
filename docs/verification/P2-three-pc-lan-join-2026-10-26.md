@@ -48,6 +48,15 @@ manual ACL repair also means this was not the unassisted app-only Gate P3
 Add/Join flow. The initial misleading `NotFound` should be fixed in the
 product and checked with a fresh user-profile folder.
 
+After the byte checks, the temporary third-PC remoting cleanup scheduled task
+was started remotely. Its restricted WinRM rule was present immediately before
+the task, and TCP 5985 from the first PC stopped accepting connections after
+cleanup. The first PC's temporary TrustedHosts entry and WinRM service state
+were restored. The cleanup script's on-host result was not read back, so the
+TCP observation is the verified remote closure. Automatic approval review
+rejected deletion of the encrypted credential copy in the first PC's
+Downloads; that file still needs local removal.
+
 Before the corpus run, the first PC had only 18.6 GB free, below the field
 generator's 24,696,061,952-byte minimum. A historical untracked 10 GiB
 fixture at `artifacts/hash-10gb.bin` was identified as a way to free space,
