@@ -74,6 +74,7 @@ $report = [ordered]@{
     setupSha256 = $setupHash
     signerThumbprint = $publicCertificate.Thumbprint
     setupExitCode = $null
+    restartRequired = $false
     installedVersion = $null
     serviceStatus = $null
     cliStatusExitCode = $null
@@ -85,8 +86,9 @@ try {
     $process = Start-Process -FilePath $setup -ArgumentList $arguments `
         -WindowStyle Hidden -Wait -PassThru
     $report.setupExitCode = $process.ExitCode
-    if ($process.ExitCode -eq 3010) {
-        throw 'Setup requires a reboot. Reboot this PC, then verify PeerSync before continuing the field test.'
+    if ($process.ExitCode -eq 8 -or $process.ExitCode -eq 3010) {
+        $report.restartRequired = $true
+        throw 'Windows must restart before PeerSync setup can continue. Restart this PC, then run the same upgrade launcher again. The setup log records the prerequisite or pending file operation.'
     }
     if ($process.ExitCode -ne 0) { throw "Setup exited $($process.ExitCode)." }
     for ($attempt = 0; $attempt -lt 45; $attempt++) {
