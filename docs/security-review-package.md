@@ -2,8 +2,9 @@
 
 This is a handoff map for the P5.2 reviewer, not a completed independent
 review. Review the [design threat table](../Resilio-style%20P2P%20Sync%20for%20Windows%20Implementation%20Plan.md#threats-and-mitigations)
-against the implementation and record each finding, severity, reproduction,
-fix or accepted rationale before closing P5.2.
+against the implementation and use the [review record](security-review-record-template.md)
+to capture the exact candidate revision, installed hosts, findings, severity,
+reproduction, fix or accepted rationale before closing P5.2.
 
 | Threat or boundary | Primary implementation to inspect | Existing local evidence / open question |
 | --- | --- | --- |
@@ -12,6 +13,7 @@ fix or accepted rationale before closing P5.2.
 | Peer-advertised endpoint and presence fanout abuse | `src/PeerSync.Rendezvous/Tracker/PresenceRegistry.cs`, `src/PeerSync.Service/Hosting/PeerNetworkRuntime.cs` | [Endpoint validation](verification/P4-peer-endpoint-validation-2026-10-24.md) rejects multicast, limited broadcast and reserved targets before publication or dialing; [presence fanout hardening](verification/P4-presence-fanout-2026-10-24.md) coalesces 500-folder bursts into lightweight pending signals and builds current lists when sent. Independently test authenticated malicious announcements, queue saturation, untrusted but syntactically valid unicast targets, and sustained multi-device load on the deployed server. |
 | LAN observer | `src/PeerSync.Net/Discovery/LanDiscoveryPacket.cs` and `LanDiscovery.cs` | P2 tests cover rotating HMAC tags. Verify adjacent-hour handling and that raw FolderIds do not appear in announcements. |
 | Read-only or malicious peer | `src/PeerSync.Protocol/Signing/SignedRecordFactory.cs`, `src/PeerSync.Engine/Sync/NeededSet.cs`, `src/PeerSync.Engine/Hashing/` | Boundary and Engine tests cover signatures and content hashes. Attempt forged records, malformed signed directory graphs and corrupt block responses. |
+| Malicious encrypted backup peer | The untrusted encrypted backup-peer design is deferred to P6.1 and is not a claimed v1 feature | Verify the release protocol has no enabled backup-peer admission path. Record this threat as out of scope for v1 only after that check; review ciphertext integrity and withholding when P6.1 is implemented. |
 | Leaked key, unknown or blocked device | `src/PeerSync.Service/Hosting/PeerNetworkRuntime.cs`, `InstalledFolderHost.cs`, `src/PeerSync.Service/Control/ControlStatusRpc.Mutations.cs` | [Physical two-PC approval](verification/P5-physical-device-approval-2026-10-25.md) passed Pending, exact native transfer after approval, and policy-denied reconnect after block on signed 1.0.26.0 clients. Independently inspect the control authorization and denial paths. |
 | Compromised writer and hostile paths | `src/PeerSync.Engine/Archive/`, `src/PeerSync.Engine/Native/SafeFileTree.cs`, `src/PeerSync.Core/Paths/PathRules.cs` | Engine and fuzz tests cover archive recovery and path rules. Exercise a destructive signed update and restore visible versions through the installed UI. |
 | Private scanner observation | `src/PeerSync.Engine/Scanning/Scanner.Observations.cs`, `src/PeerSync.Engine/Scanning/Scanner.cs` | The disposable stage contains native relative names and metadata in the index directory, outside support bundles. [Local evidence](verification/P5-scanner-observation-staging-2026-10-23.md) covers root binding, active-owner lock and abandoned-stage cleanup. Independently inspect installed ACL inheritance, crash leftovers and any chance that untrusted stage bytes could authorize a deletion. |
@@ -29,15 +31,23 @@ verifies the parser and local client state. The later installed-guest checks
 above cover those specific hosts; neither local nor VM checks can inspect a
 privileged full/live dump on every deployment host.
 
-A current `dotnet list PeerSync.slnx package --vulnerable --include-transitive
---format json --no-restore` audit queried the NuGet.org source after restore.
-Its retained report under `artifacts/security/nuget-vulnerable-2026-10-23.json`
-lists 35 projects and no reported vulnerable top-level or transitive package.
+The 2026-10-26 `dotnet list PeerSync.slnx package --vulnerable
+--include-transitive --format json --no-restore` audit queried NuGet.org
+after locked restore. Its retained local report at
+`artifacts/security/nuget-vulnerable-2026-10-26.json` has SHA-256
+`040DA93A8D8F15CAAD1C2D5BED94E58FFB60D3EF14C5E262C5A2C8F31AA1A1CE`,
+lists 35 projects and reports no vulnerable top-level or transitive package.
 This is advisory coverage at audit time, not proof that the code or packages
 are free of security defects. The independent reviewer should rerun it on the
 release candidate and examine the pinned package set.
 
-The P5 fuzz campaign, million-file fresh-peer run, public update-feed signer and 72-hour soak are
-separate open gates. A reviewer should use the exact candidate commit and
-record whether those results were available at review time. Do not mark
-P5.2 complete from this package alone.
+The completed [24-hour seven-target fuzz campaign](verification/P5-fuzz-restart-2026-10-24.md)
+exceeds the user-approved three-hour duration cap. The [100,000-file
+current-source local performance run](verification/P5-bounded-100k-scale-2026-10-26.md)
+verified all native paths and bytes within 88.87 minutes, and the [canonical
+local verifier](verification/P5-current-head-local-2026-10-26.md) passed 1,830
+methods. Formal P5.3 closure still awaits merged code and hosted CI. The
+three-hour physical LAN/WAN/release soaks, public update-feed signer, release
+packages and independent security review remain open. A reviewer should pin
+the exact candidate commit and record which results existed at review time.
+Do not mark P5.2 complete from this package alone.
