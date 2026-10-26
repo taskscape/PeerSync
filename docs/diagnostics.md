@@ -314,6 +314,7 @@ local index-session identifier; the selected transport's ID appears in
 | --- | --- |
 | `service.quic_listener_ready`, `service.tcp_listener_ready` | QUIC or TCP listener bound the configured device port. Both should be present and use the same number. If one is absent, inspect `service.start_failed` and the immediately preceding event. |
 | `service.lan_discovery_unavailable`, `discovery.lan_socket_unavailable`, `discovery.lan_send_failed` | Local multicast/broadcast discovery could not start or send. Compare firewall and active interface state on both devices; explicit predefined hosts bypass LAN discovery. |
+| `discovery.lan_memberships`, `discovery.lan_membership_join_failed`, `discovery.lan_membership_refresh_failed` | An address-change refresh reports desired/joined IPv4 or IPv6 interface counts, or a sanitized failure category. These events contain no adapter names or network addresses; inspect local adapter state separately when a path fails. |
 | `service.lan_peer_discovered` | A matching folder-tagged LAN announcement was received. If this appears on only one side, compare the LAN-enabled folder set and interface/firewall rules. |
 | `discovery.host_resolution_failed`, `discovery.host_dial_failed` | A configured host did not resolve or authenticate. Verify `host:port`, DNS and the remote service listeners. |
 | `control.predefined_hosts_updated` | An authorized local caller replaced a folder's configured direct endpoints; `itemsChanged` is the host count, and endpoint values are not logged. |

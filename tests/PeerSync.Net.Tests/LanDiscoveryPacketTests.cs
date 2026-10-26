@@ -4,6 +4,7 @@ using PeerSync.Net.Discovery;
 using Shouldly;
 using Xunit;
 using System.Security.Cryptography;
+using System.Net.Sockets;
 
 namespace PeerSync.Net.Tests;
 
@@ -99,6 +100,29 @@ public sealed class LanDiscoveryPacketTests
         secondResult.Result.Port.ShouldBe(47821);
         IPAddress.IsLoopback(firstResult.Result.Address).ShouldBeFalse();
         IPAddress.IsLoopback(secondResult.Result.Address).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task AddressRefreshRejoinsUnchangedInterfacesAndRetriesFailedMemberships()
+    {
+        await using var discovery = new LanDiscovery(new byte[32], 47821, static () => []);
+        var joined = new HashSet<int> { 7, 8 };
+        var desired = new HashSet<int> { 7, 9 };
+        var dropped = new List<int>();
+        var added = new List<int>();
+
+        discovery.ReconcileMemberships(joined, desired, dropped.Add, added.Add, "ipv4");
+        dropped.ShouldBe([7, 8]);
+        added.ShouldBe([7, 9]);
+        joined.SetEquals(desired).ShouldBeTrue();
+
+        desired = [9];
+        discovery.ReconcileMemberships(joined, desired, dropped.Add,
+            _ => throw new SocketException((int)SocketError.NetworkDown), "ipv4");
+        joined.ShouldBeEmpty();
+
+        discovery.ReconcileMemberships(joined, desired, dropped.Add, added.Add, "ipv4");
+        joined.SetEquals(desired).ShouldBeTrue();
     }
 
     [Fact]
