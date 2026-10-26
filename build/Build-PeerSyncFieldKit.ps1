@@ -23,6 +23,7 @@ $entries = [ordered]@{
     'tools/Allow-PeerSync-TestTraffic.ps1' = Join-Path $root 'build\Allow-PeerSync-TestTraffic.ps1'
     'tools/Test-ForcedRelayPeer.ps1' = Join-Path $root 'build\field\Test-ForcedRelayPeer.ps1'
     'tools/Measure-PeerSyncTree.ps1' = Join-Path $root 'build\Measure-PeerSyncTree.ps1'
+    'tools/Get-PeerSyncTestTreeContentBytes.ps1' = Join-Path $root 'build\Get-PeerSyncTestTreeContentBytes.ps1'
     'tools/New-PeerSyncGateCorpus.ps1' = Join-Path $root 'build\New-PeerSyncGateCorpus.ps1'
     'tools/Invoke-PeerSyncSoakOperations.ps1' = Join-Path $root 'build\Invoke-PeerSyncSoakOperations.ps1'
     'tools/Invoke-PeerSyncSoakCaptureLoop.ps1' = Join-Path $root 'build\Invoke-PeerSyncSoakCaptureLoop.ps1'
@@ -48,6 +49,7 @@ if ((Get-FileHash $entries["client/$client"] -Algorithm SHA256).Hash -ne $client
 }
 $certificateHash = (Get-FileHash $entries["client/$client.cer"] -Algorithm SHA256).Hash
 $treeToolHash = (Get-FileHash $entries['tools/Measure-PeerSyncTree.ps1'] -Algorithm SHA256).Hash
+$treeBudgetHash = (Get-FileHash $entries['tools/Get-PeerSyncTestTreeContentBytes.ps1'] -Algorithm SHA256).Hash
 $corpusToolHash = (Get-FileHash $entries['tools/New-PeerSyncGateCorpus.ps1'] -Algorithm SHA256).Hash
 $operationToolHash = (Get-FileHash $entries['tools/Invoke-PeerSyncSoakOperations.ps1'] -Algorithm SHA256).Hash
 $captureLoopHash = (Get-FileHash $entries['tools/Invoke-PeerSyncSoakCaptureLoop.ps1'] -Algorithm SHA256).Hash
@@ -74,6 +76,7 @@ Central setup SHA-256: $($centralManifest.installerSha256)
 Installer source revision: $($clientManifest.sourceRevision)
 Public development certificate SHA-256: $certificateHash
 Tree-measurement tool SHA-256: $treeToolHash
+Tree-budget preflight SHA-256: $treeBudgetHash
 Mixed-corpus generator SHA-256: $corpusToolHash
 Scoped operation tool SHA-256: $operationToolHash
 Hourly capture loop SHA-256: $captureLoopHash
@@ -110,6 +113,8 @@ physical gates are recorded in plan.md in the repository.
 
 For the three-PC 9 GiB LAN corpus (10 GiB total test-tree ceiling), pause the test folder on the first PC,
 then use tools/New-PeerSyncGateCorpus.ps1 as described in docs/physical-soak.md.
+Keep tools/Get-PeerSyncTestTreeContentBytes.ps1 beside the corpus and soak
+scripts; they check old content and reserve room before writing.
 Resume the folder after generation and verify all peers with the tree tool.
 For physical LAN/WAN soak evidence, use tools/Invoke-PeerSyncSoakOperations.ps1,
 tools/Invoke-PeerSyncSoakCaptureLoop.ps1 and tools/Measure-PeerSyncTree.ps1

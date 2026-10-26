@@ -37,6 +37,16 @@ while the synchronized test tree remains under the 10 GiB ceiling.
 The random content is intentionally hard to compress. The generation script
 never removes an existing tree and refuses a reused run ID, reparse paths,
 an output inside the synchronized folder, and insufficient free space.
+Keep `Get-PeerSyncTestTreeContentBytes.ps1` beside the generator in the
+extracted `tools` directory. Before creating a run, the generator measures
+existing synchronized content (excluding PeerSync's root `.psp` metadata)
+and refuses a 9 GiB run if that content plus the new corpus and ownership
+marker would exceed 10 GiB. This preflight catches old installer and test
+files left in a reused share. Move no files during the paused preflight;
+choose a fresh test folder or archive old test artifacts outside the share
+before generating. The final tree capture independently enforces the cap.
+Use `-PreflightOnly` with a new run GUID and unused report path to print the
+existing, projected and free-space byte counts without creating files.
 
 Pause this test folder in the app on the first PC before generation so peers
 do not consume partially written large files. Create the report directory
@@ -79,6 +89,11 @@ trails, including any failed operation, with the gate evidence. The tool uses
 a bounded file count and random create, overwrite, append, rename and delete
 operations. Do not use it on irreplaceable data; the test subtree will sync
 and occupy space on all peers.
+Keep the tree-budget helper beside this script too. Before each batch, the
+script measures the current tree and reserves the maximum possible growth of
+that batch on each of three PCs. Concurrent unrelated writes can still race
+this metadata preflight, so the hourly full-content tree capture remains the
+authoritative 10 GiB assertion.
 
 From each physical PC, use the same run GUID but a distinct machine label.
 This example runs repeated short batches through the final capture hour while

@@ -12,6 +12,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'Get-PeerSyncTestTreeContentBytes.ps1')
 
 $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\')
 $logs = [IO.Path]::GetFullPath($LogDirectory).TrimEnd('\')
@@ -26,6 +27,12 @@ if (-not [IO.Directory]::Exists($logs) -or
 if (([IO.File]::GetAttributes($rootPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
     throw 'Root cannot be a reparse point.'
 }
+
+# Reserve the largest possible growth of this batch on each of three peers.
+# Each batch remeasures the whole tree, so old soak files consume the budget.
+$growthReserveBytes = [long]$Count * 65536 * 3
+$currentContentBytes = Get-PeerSyncTestTreeContentBytes -Root $rootPath `
+    -MaximumBytes (10GB - $growthReserveBytes)
 
 $run = $RunId.ToString('N')
 $container = [IO.Path]::Combine($rootPath, 'PeerSync-Soak', $run)
@@ -109,6 +116,8 @@ try {
         runId = $run; machineLabel = $MachineLabel;
         utc = [DateTimeOffset]::UtcNow.ToString('O'); seed = $randomSeed;
         requested = $Count; ownedFilesBefore = $paths.Count;
+        treeContentBytesAtStart = $currentContentBytes;
+        growthReserveBytes = $growthReserveBytes;
         generatorSha256 = $scriptHash })
     for ($number = 1; $number -le $Count; $number++) {
         $choice = if ($paths.Count -eq 0) { 'create' }

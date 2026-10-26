@@ -28,6 +28,7 @@ if ([IO.File]::Exists($output) -or [IO.Directory]::Exists($output)) {
 }
 
 $entries = [ordered]@{
+    'tools/Get-PeerSyncTestTreeContentBytes.ps1' = 'build/Get-PeerSyncTestTreeContentBytes.ps1'
     'tools/New-PeerSyncGateCorpus.ps1' = 'build/New-PeerSyncGateCorpus.ps1'
     'tools/Invoke-PeerSyncSoakOperations.ps1' = 'build/Invoke-PeerSyncSoakOperations.ps1'
     'tools/Invoke-PeerSyncSoakCaptureLoop.ps1' = 'build/Invoke-PeerSyncSoakCaptureLoop.ps1'
@@ -66,7 +67,10 @@ PCs. Transfer the ZIP through a trusted channel, compare its SHA-256 with the
 builder's printed value, then extract the same ZIP on each PC.
 
 The generated corpus defaults to 9 GiB of content and 100,000 small files.
-Keep the entire test tree at or below 10 GiB, including later soak writes.
+The generator and soak writer check existing tree content before writing;
+keep the entire test tree at or below 10 GiB, including later soak writes.
+Use the generator's -PreflightOnly switch to inspect the exact budget without
+creating any files in the synchronized folder.
 The required active window is three hours, with matching tree captures at
 scheduled hours 0, 1, 2 and 3. Follow docs/physical-soak.md for the exact
 three-PC LAN, WAN and report-comparison steps. The scripts refuse reused

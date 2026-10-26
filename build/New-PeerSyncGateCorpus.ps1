@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][guid]$RunId,
     [Parameter(Mandatory)][string]$OutputFile,
+    [switch]$PreflightOnly,
     [ValidateRange(1048576, 10737418240)][long]$TotalBytes = 9GB,
     [ValidateRange(1, 100000)][int]$SmallFileCount = 100000,
     [ValidateRange(1, 1048576)][int]$SmallFileBytes = 1024,
@@ -12,6 +13,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'Get-PeerSyncTestTreeContentBytes.ps1')
 
 $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\')
 $output = [IO.Path]::GetFullPath($OutputFile)
@@ -68,6 +70,29 @@ if ([IO.Directory]::Exists($target) -or [IO.File]::Exists($target)) {
     throw 'This run already has a corpus folder; inspect it before creating a new run.'
 }
 
+# The required cap applies to the entire synchronized tree, including old test
+# files and this run's ownership marker, rather than only to new corpus bytes.
+$markerReserveBytes = 1024L
+$existingBudget = 10GB - $TotalBytes - $markerReserveBytes
+if ($existingBudget -lt 0) {
+    throw 'The requested corpus leaves no room for its ownership marker under 10 GiB.'
+}
+$existingContentBytes = Get-PeerSyncTestTreeContentBytes -Root $rootPath `
+    -MaximumBytes $existingBudget
+if ($PreflightOnly) {
+    [pscustomobject]@{
+        status = 'ready'
+        existingContentBytes = $existingContentBytes
+        requestedContentBytes = $TotalBytes
+        projectedContentBytesBeforeMarker = $existingContentBytes + $TotalBytes
+        maximumTestTreeContentBytes = 10GB
+        freeBytes = $drive.AvailableFreeSpace
+        requiredFreeBytes = $requiredFree
+        runId = $run
+    } | ConvertTo-Json -Compress
+    return
+}
+
 $relative = "PeerSync-GateCorpus/$run"
 $scriptHash = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
 $started = [DateTimeOffset]::UtcNow
@@ -84,6 +109,7 @@ function Write-Report([string]$status, [string]$errorCode) {
         runId = $run
         corpusRelativePath = $relative
         requestedContentBytes = $TotalBytes
+        existingContentBytesAtStart = $existingContentBytes
         smallFileCount = $SmallFileCount
         smallFileBytes = $SmallFileBytes
         deepLevels = $DeepLevels
@@ -163,6 +189,7 @@ try {
         $createdBytes -ne $TotalBytes) {
         throw 'Corpus content count or byte total is inconsistent.'
     }
+    [void](Get-PeerSyncTestTreeContentBytes -Root $rootPath -MaximumBytes 10GB)
     Write-Report 'complete' $null
     Write-Output $output
 } catch {
