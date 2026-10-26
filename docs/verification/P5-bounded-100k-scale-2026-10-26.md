@@ -2,9 +2,11 @@
 
 The revised [test budget](../requirements/three-hour-ten-gib-test-budget.md)
 requires a current-source scan and exact fresh-peer native verification of
-100,000 files within one three-hour benchmark execution. This local gate
-**passed**. It does not stand in for installed-service throughput or the
-remaining physical LAN, WAN and release checks.
+100,000 files within one three-hour benchmark execution. These local
+performance assertions **passed**. The formal P5.3 task remains open until
+the PR is merged and current-head CI is green under `plan.md` §0.2. This run
+does not stand in for installed-service throughput or the remaining physical
+LAN, WAN and release checks.
 
 The runner was `build/Run-P5-Scale.ps1 -Files 100000 -NoBuild`. Its retained
 evidence is in
