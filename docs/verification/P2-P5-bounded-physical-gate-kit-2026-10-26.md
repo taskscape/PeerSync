@@ -27,3 +27,9 @@ An operator must still transfer the ZIP, verify its external SHA-256 on each
 PC, follow `docs/physical-soak.md`, and return the generated tree reports,
 operation journals, topology and installed-version records. Local package
 integrity and synthetic controls are not physical convergence or soak results.
+
+Windows PowerShell 5.1 also built the kit with exit 0 in a separate local
+control, and ran the revised generator on a fresh 1 MiB fixture with exit 0,
+14 created files and exactly 1,048,576 content bytes. These controls exercise
+the shell used by the physical field instructions; the default 9 GiB corpus
+still needs the actual three-PC run.
