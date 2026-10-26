@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][guid]$RunId,
     [Parameter(Mandatory)][string]$OutputFile,
-    [ValidateRange(1048576, 10737418240)][long]$TotalBytes = 10GB,
+    [ValidateRange(1048576, 10737418240)][long]$TotalBytes = 9GB,
     [ValidateRange(1, 100000)][int]$SmallFileCount = 100000,
     [ValidateRange(1, 1048576)][int]$SmallFileBytes = 1024,
     [ValidateRange(1, 128)][int]$DeepLevels = 24,

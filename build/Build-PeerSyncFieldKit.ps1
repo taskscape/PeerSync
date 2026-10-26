@@ -108,7 +108,7 @@ firewall rules are needed before first listen. See the included operations,
 diagnostics and user guides. The virtual-machine validation and remaining
 physical gates are recorded in plan.md in the repository.
 
-For the three-PC 10 GiB LAN corpus, pause the test folder on the first PC,
+For the three-PC 9 GiB LAN corpus (10 GiB total test-tree ceiling), pause the test folder on the first PC,
 then use tools/New-PeerSyncGateCorpus.ps1 as described in docs/physical-soak.md.
 Resume the folder after generation and verify all peers with the tree tool.
 For physical LAN/WAN soak evidence, use tools/Invoke-PeerSyncSoakOperations.ps1,

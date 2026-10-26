@@ -8,7 +8,7 @@ versions identical during a single run. Record each physical PC's model,
 Windows version, network adapter/link speed, service and installer versions,
 the corpus generation command and hashes, and UTC start/end times separately.
 
-For Gate P2, use three physical PCs and a 10 GiB mixed corpus including large
+For Gate P2, use three physical PCs and a 9 GiB mixed corpus including large
 files, 100,000 small files and deep trees. Record each random create/edit,
 rename, delete, permission change, sleep/resume and Wi-Fi switch with UTC time
 and the affected PC. For Gate P4, additionally record the actual home NAT,
@@ -28,10 +28,12 @@ session; do not change machine-wide execution policy.
 On the first physical PC, use a test folder with at least 25 GiB free on its
 volume; the script checks room for both native content and PeerSync's local
 blocks, plus a 5 GiB reserve. The other two PCs also need room for native and
-block copies. The generator creates 10 GiB of random file content: 100,000
+block copies. The generator creates 9 GiB of random file content: 100,000
 small files, 24 nested levels with a file at each level, and eight large
 files. Its small local JSON report counts content bytes and files; the
 run-specific `owner.json` marker adds a little metadata outside that total.
+The 9 GiB default leaves up to 1 GiB for the later random-operation files
+while the synchronized test tree remains under the 10 GiB ceiling.
 The random content is intentionally hard to compress. The generation script
 never removes an existing tree and refuses a reused run ID, reparse paths,
 an output inside the synchronized folder, and insufficient free space.
@@ -56,7 +58,7 @@ if ((Get-Content $report -Raw | ConvertFrom-Json).status -ne 'complete') {
 ```
 
 Require `status: complete`, `createdFiles: 100032`, and
-`createdContentBytes: 10737418240` in that report. Preserve the command,
+`createdContentBytes: 9663676416` in that report. Preserve the command,
 report, run ID and script SHA-256. Resume the folder and record the UTC time;
 require all three peers to settle within three hours, then use the tree
 measurement tool below on all PCs with the same
