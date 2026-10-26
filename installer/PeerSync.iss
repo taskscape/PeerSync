@@ -11,6 +11,13 @@
 #if AppVer == ""
   #error Publish PeerSync.Service.exe before compiling the installer
 #endif
+#define VcRedistExe StageRoot + "\redist\vc_redist.exe"
+#define VcRedistVersionPacked 0
+#define VcRedistVersion GetPackedVersion(VcRedistExe, VcRedistVersionPacked)
+#if VcRedistVersion == ""
+  #error Bundle a versioned vc_redist.exe before compiling the installer
+#endif
+#define VcRegistryArch Arch
 
 [Setup]
 AppId={{F6E23D72-1DFD-49D6-933B-A9B1FF63E6B5}
@@ -104,6 +111,7 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync"""; Flags: runhidden; RunOnceId: "DeleteFirewallRule"
 
 [Code]
+#include "VcRuntime.iss"
 var PostInstallSucceeded: Boolean;
 
 function GetCustomSetupExitCode: Integer;
@@ -182,19 +190,22 @@ var
   RedistCode: Integer;
 begin
   Result := '';
-  ExtractTemporaryFile('vc_redist.exe');
-  RedistCode := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
-  if RedistCode = 3010 then
+  if not VcRuntimeAtLeastPackaged then
   begin
-    NeedsRestart := True;
-    Result := 'The Microsoft Visual C++ runtime requires a restart. Restart Windows and run PeerSync Setup again.';
-    Exit;
-  end;
-  if (RedistCode <> 0) and (RedistCode <> 1638) then
-  begin
-    Result := 'The Microsoft Visual C++ runtime could not be installed (exit code ' +
-      IntToStr(RedistCode) + '). See the setup log.';
-    Exit;
+    ExtractTemporaryFile('vc_redist.exe');
+    RedistCode := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
+    if RedistCode = 3010 then
+    begin
+      NeedsRestart := True;
+      Result := 'The Microsoft Visual C++ runtime requires a restart. Restart Windows and run PeerSync Setup again.';
+      Exit;
+    end;
+    if (RedistCode <> 0) and (RedistCode <> 1638) then
+    begin
+      Result := 'The Microsoft Visual C++ runtime could not be installed (exit code ' +
+        IntToStr(RedistCode) + '). See the setup log.';
+      Exit;
+    end;
   end;
   if ServiceExists then
   begin

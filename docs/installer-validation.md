@@ -6,9 +6,13 @@ and Inno Setup 7.1. The build script publishes self-contained ReadyToRun
 service, app, and CLI payloads into `publish/<arch>/`, then invokes ISCC.
 It downloads the Microsoft-signed Visual C++ v14 Redistributable for the
 selected architecture from Microsoft's documented permalink, verifies its
-Authenticode publisher, and bundles it. Setup installs that prerequisite
-before replacing service files; a required reboot stops Setup before the
-upgrade and must be followed by a rerun. The manifest records its SHA-256.
+Authenticode publisher, and bundles it. Setup checks the installed runtime's
+architecture, registry version, and `VCRUNTIME140.dll` version before replacing service
+files. It skips the prerequisite when the installed version is at least the
+bundled version, avoiding a redundant redistributable run and its Windows
+restore-point activity on upgrades. A missing or older runtime still runs the
+bundled prerequisite; a required reboot stops Setup before the upgrade and
+must be followed by a rerun. The manifest records its SHA-256.
 The [Server 2025 clean-VM smoke](verification/P3-server2025-installer-smoke-2026-10-22.md)
 records the missing-runtime reproduction and the successful bundled fix.
 

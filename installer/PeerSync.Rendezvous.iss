@@ -5,6 +5,13 @@
 #if AppVer == ""
   #error Publish PeerSync.Rendezvous.exe before compiling the installer
 #endif
+#define VcRedistExe StageRoot + "\redist\vc_redist.exe"
+#define VcRedistVersionPacked 0
+#define VcRedistVersion GetPackedVersion(VcRedistExe, VcRedistVersionPacked)
+#if VcRedistVersion == ""
+  #error Bundle a versioned vc_redist.exe before compiling the installer
+#endif
+#define VcRegistryArch "x64"
 
 [Setup]
 AppId={{347EEC9C-2B64-4B93-889A-6F57142E1F76}
@@ -73,6 +80,7 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\Peer
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\PeerSyncRendezvous"; ValueType: dword; ValueName: "TypesSupported"; ValueData: "7"; Flags: uninsdeletekey
 
 [Code]
+#include "VcRuntime.iss"
 function ServiceExists: Boolean;
 begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PeerSyncRendezvous');
@@ -125,18 +133,21 @@ var Code, I: Integer;
     Output: TExecOutput;
 begin
   Result := '';
-  ExtractTemporaryFile('vc_redist.exe');
-  Code := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
-  if Code = 3010 then
+  if not VcRuntimeAtLeastPackaged then
   begin
-    NeedsRestart := True;
-    Result := 'The Visual C++ runtime requires a restart. Restart Windows and run setup again.';
-    Exit;
-  end;
-  if (Code <> 0) and (Code <> 1638) then
-  begin
-    Result := 'The Visual C++ runtime failed (exit code ' + IntToStr(Code) + ').';
-    Exit;
+    ExtractTemporaryFile('vc_redist.exe');
+    Code := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
+    if Code = 3010 then
+    begin
+      NeedsRestart := True;
+      Result := 'The Visual C++ runtime requires a restart. Restart Windows and run setup again.';
+      Exit;
+    end;
+    if (Code <> 0) and (Code <> 1638) then
+    begin
+      Result := 'The Visual C++ runtime failed (exit code ' + IntToStr(Code) + ').';
+      Exit;
+    end;
   end;
   ExtractTemporaryFile('Grant-RendezvousCertificate.ps1');
   ExtractTemporaryFile('Import-RendezvousWebHostingCertificate.ps1');
