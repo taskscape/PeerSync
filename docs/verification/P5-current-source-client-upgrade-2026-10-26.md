@@ -64,10 +64,11 @@ then arrived in opposite directions between the physical PCs with exact
 SHA-256 matches. The retained report, setup log, signed-file and file-byte
 checks are under `artifacts/field/client-1.0.28.0-second-20261026/`.
 
-The third PC was operated separately by its user. Its reported setup is not
-yet an independently verified installed-client result. It should run the
-included wrapper from outside its synchronized folder and retain its local
-JSON report; no folder key is needed for that upgrade.
+The third PC was initially operated separately by its user. The later
+authenticated [third-PC LAN field check](P2-three-pc-lan-join-2026-10-26.md)
+independently verified its 1.0.28.0 running service, joined it to the shared
+test folder, and matched native bytes across all three PCs. The third-PC join
+needed a manual service-account ACL grant, so it is not the app-only gate.
 
 An initial 1,427,599,907-byte size estimate incorrectly included the root
 `.psp` metadata. The tree verifier excludes that metadata from the 10 GiB

@@ -32,3 +32,7 @@ future field kits.
 
 This physical-PC prerequisite finding supplements the clean Windows 11 **VM**
 lifecycle required by Gate P3. It does not close that gate.
+
+The third PC subsequently joined the installed-service test folder and
+verified files on all three physical PCs; see the [LAN join and ACL finding](P2-three-pc-lan-join-2026-10-26.md). That later assisted join does not
+replace Gate P3's unassisted app-only flow.

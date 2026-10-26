@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Security.Principal;
 using Grpc.Core;
 using PeerSync.Control.Contracts;
+using PeerSync.Core.Keys;
 using Wire = PeerSync.Control.Contracts.V1;
 
 namespace PeerSync.Cli;
@@ -50,6 +52,7 @@ public static class FolderCommand
                 }
                 case "add":
                 {
+                    if (!await GrantFolderAccessAsync(values[0], error).ConfigureAwait(false)) return 1;
                     Wire.FolderInfo folder = await client.AddFolderAsync(values[0], cancellationToken).ConfigureAwait(false);
                     Wire.GetFolderKeysResponse keys = await client.GetFolderKeysAsync(folder.FolderId, cancellationToken).ConfigureAwait(false);
                     await output.WriteLineAsync(json ? JsonSerializer.Serialize(new
@@ -59,6 +62,13 @@ public static class FolderCommand
                 }
                 case "join":
                 {
+                    try { using var parsed = KeyText.Decode(values[0]); }
+                    catch (Exception exception) when (exception is FormatException or ArgumentException)
+                    {
+                        await error.WriteLineAsync("Invalid folder key.").ConfigureAwait(false);
+                        return 1;
+                    }
+                    if (!await GrantFolderAccessAsync(values[1], error).ConfigureAwait(false)) return 1;
                     Wire.FolderInfo folder = await client.JoinFolderAsync(values[0], values[1], cancellationToken).ConfigureAwait(false);
                     await output.WriteLineAsync(json ? JsonSerializer.Serialize(FolderDto(folder), JsonOptions)
                         : $"Joined {folder.Path} ({folder.FolderId}, {folder.Access})").ConfigureAwait(false);
@@ -115,6 +125,18 @@ public static class FolderCommand
         {
             await error.WriteLineAsync($"Service unavailable: {exception.GetType().Name}").ConfigureAwait(false);
             return 1;
+        }
+    }
+
+    private static async Task<bool> GrantFolderAccessAsync(string path, TextWriter error)
+    {
+        try { FolderAccessGrant.Grant(path); return true; }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or
+            System.Security.SecurityException or IdentityNotMappedException)
+        {
+            await error.WriteLineAsync($"Could not grant PeerSync service access to the selected folder: {exception.GetType().Name}")
+                .ConfigureAwait(false);
+            return false;
         }
     }
 
