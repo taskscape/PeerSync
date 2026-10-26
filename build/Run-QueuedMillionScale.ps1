@@ -1,12 +1,15 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$QueueDirectory,
-    [ValidateRange(1, 120)][int]$WaitHours = 60,
+    [ValidateRange(1, 3)][int]$WaitHours = 3,
     [switch]$PreflightOnly
 )
 $ErrorActionPreference = 'Stop'
 $queue = (Resolve-Path -LiteralPath $QueueDirectory).Path
 $prepared = Get-Content -LiteralPath (Join-Path $queue 'prepared.json') -Raw | ConvertFrom-Json
+if ([int]$prepared.requestedFiles -gt 100000) {
+    throw 'The historical million-file queue is superseded; new required runs are capped at 100,000 files. Use Run-P5-Scale.ps1.'
+}
 $previousQueue = [string]$prepared.prerequisiteQueue
 $previousTerminal = Join-Path $previousQueue 'terminal.json'
 $previousRunning = Join-Path $previousQueue 'running.json'
@@ -115,7 +118,7 @@ try {
     }
     Assert-Payload
 
-    $diskDeadline = [DateTime]::UtcNow.AddHours(6)
+    $diskDeadline = [DateTime]::UtcNow.AddHours(3)
     $freeBefore = (Get-PSDrive C).Free
     while ($freeBefore -lt $minimumStartFree -and [DateTime]::UtcNow -lt $diskDeadline) {
         [ordered]@{ status = 'waiting-for-disk'; observedUtc = [DateTime]::UtcNow.ToString('O');
@@ -143,7 +146,14 @@ try {
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $queue 'running.json') -Encoding utf8
 
     $diskAbort = $false
+    $timeAbort = $false
     while (-not $child.WaitForExit(60000)) {
+        if ([DateTime]::UtcNow -ge $started.AddHours(3)) {
+            $timeAbort = $true
+            Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue
+            $child.WaitForExit()
+            break
+        }
         if ((Get-PSDrive C).Free -lt $minimumContinueFree) {
             $diskAbort = $true
             Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue
@@ -160,11 +170,11 @@ try {
     $peer = $rows | Where-Object { $_.target -eq 'P5 million-file fresh peer' -and $null -ne $_.correct } |
         Select-Object -Last 1
     $stderrBytes = (Get-Item -LiteralPath (Join-Path $queue 'stderr.log')).Length
-    $passed = -not $diskAbort -and $child.ExitCode -eq 0 -and $scanner -and
+    $passed = -not $diskAbort -and -not $timeAbort -and $child.ExitCode -eq 0 -and $scanner -and
         $scanner.correct -and $scanner.targetMet -and $peer -and $peer.correct -and
         $peer.verifiedFiles -eq [int]$prepared.requestedFiles -and $stderrBytes -eq 0
     Write-Terminal $(if ($passed) { 'passed' } else { 'failed' }) `
-        $(if ($diskAbort) { 'low-disk-abort' } elseif ($passed) { 'targets-met' }
+        $(if ($diskAbort) { 'low-disk-abort' } elseif ($timeAbort) { 'three-hour-time-budget-abort' } elseif ($passed) { 'targets-met' }
             else { 'benchmark-failed-or-target-missed' }) `
         @{ exitCode = $child.ExitCode; scanner = $scanner; peer = $peer;
             stderrBytes = $stderrBytes; freeBytes = (Get-PSDrive C).Free }

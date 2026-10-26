@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern('^\d{4}-\d{2}-\d{2}T\d{2}:00:00Z$')][string]$FirstHourUtc,
     [Parameter(Mandatory)][string]$OutputDirectory,
-    [ValidateRange(0, 168)][int]$Intervals = 73
+    [ValidateRange(0, 3)][int]$Intervals = 3
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest

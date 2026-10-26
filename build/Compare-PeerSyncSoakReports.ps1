@@ -6,9 +6,9 @@ param(
     [Parameter(Mandatory)][ValidateCount(2, 16)][string[]]$MachineLabels,
     [Parameter(Mandatory)][ValidateCount(2, 16)][string[]]$InputDirectories,
     [Parameter(Mandatory)][string]$OutputDirectory,
-    [ValidateRange(0, 168)][int]$Intervals = 73,
+    [ValidateRange(0, 3)][int]$Intervals = 3,
     [ValidateRange(2, 16)][int]$MinimumMachines = 3,
-    [ValidateRange(1, 168)][int]$MinimumHours = 72
+    [ValidateRange(1, 3)][int]$MinimumHours = 3
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest

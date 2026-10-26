@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateRange(1,86400)][int]$Seconds = 600)
+param([ValidateRange(1,10800)][int]$Seconds = 600)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root

@@ -62,3 +62,22 @@ sequence, `correct=true` and `targetMet=true`. The benchmark child is still
 live in its fresh-peer source-publication phase; `stderr.log` is empty.
 Neither its peer result nor a current-source terminal has been reported, so
 P5.3 remains open.
+
+## Superseded by the three-hour, 100,000-file gate, 2026-10-26
+
+The user [reduced required test size and duration](../requirements/three-hour-ten-gib-test-budget.md)
+while this immutable million-file benchmark was still running. I verified
+that PID 83240 was the expected executable and command line, then stopped only
+that child. Its watcher wrote `terminal.json` at 06:49:51 UTC with
+`status=failed`, `reason=benchmark-failed-or-target-missed`, exit `-1`, no peer
+row and empty stderr. The terminal's scanner row remains a valid stress
+measurement: 1,000,000 files, 1,001,000 rows, 247.4074071-second first
+index, 0.01735% idle CPU, 129,937,408-byte peak working set and zero
+unchanged rehashes/updates. The last live stage was source publication; the
+fresh peer had not begun native verification. Both benchmark and watcher PIDs
+exited. The fixture, databases, stdout/stderr and terminal were retained.
+
+This deliberate interruption reflects the revised test budget, not a proven
+product failure or a P5.3 pass. A new current-source 100,000-file end-to-end
+benchmark with a three-hour deadline is required. No duplicate million-file
+run is authorized by this record.

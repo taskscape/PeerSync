@@ -3,8 +3,8 @@ param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][guid]$RunId,
     [Parameter(Mandatory)][string]$OutputFile,
-    [ValidateRange(1048576, 1099511627776)][long]$TotalBytes = 50GB,
-    [ValidateRange(1, 1000000)][int]$SmallFileCount = 100000,
+    [ValidateRange(1048576, 10737418240)][long]$TotalBytes = 10GB,
+    [ValidateRange(1, 100000)][int]$SmallFileCount = 100000,
     [ValidateRange(1, 1048576)][int]$SmallFileBytes = 1024,
     [ValidateRange(1, 128)][int]$DeepLevels = 24,
     [ValidateRange(1, 1048576)][int]$DeepFileBytes = 4096,
@@ -71,6 +71,7 @@ if ([IO.Directory]::Exists($target) -or [IO.File]::Exists($target)) {
 $relative = "PeerSync-GateCorpus/$run"
 $scriptHash = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
 $started = [DateTimeOffset]::UtcNow
+$deadlineUtc = $started.AddHours(3)
 $createdFiles = 0
 $createdBytes = [long]0
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -98,12 +99,14 @@ function Write-Report([string]$status, [string]$errorCode) {
 }
 
 function New-RandomFile([string]$path, [long]$size) {
+    if ([DateTimeOffset]::UtcNow -ge $deadlineUtc) { throw 'Corpus generation exceeded three hours.' }
     $stream = [IO.FileStream]::new($path, [IO.FileMode]::CreateNew,
         [IO.FileAccess]::Write, [IO.FileShare]::None, 1048576,
         [IO.FileOptions]::SequentialScan)
     try {
         $remaining = $size
         while ($remaining -gt 0) {
+            if ([DateTimeOffset]::UtcNow -ge $deadlineUtc) { throw 'Corpus generation exceeded three hours.' }
             $count = [int][Math]::Min($buffer.Length, $remaining)
             if ($count -eq $buffer.Length) {
                 $rng.GetBytes($buffer)
@@ -133,6 +136,7 @@ try {
     $smallRoot = [IO.Path]::Combine($target, 'small')
     [IO.Directory]::CreateDirectory($smallRoot) | Out-Null
     for ($i = 0; $i -lt $SmallFileCount; $i++) {
+        if ([DateTimeOffset]::UtcNow -ge $deadlineUtc) { throw 'Corpus generation exceeded three hours.' }
         $bucket = [IO.Path]::Combine($smallRoot, ('{0:D4}' -f [int][Math]::Floor($i / 1000)))
         if ($i % 1000 -eq 0) { [IO.Directory]::CreateDirectory($bucket) | Out-Null }
         New-RandomFile ([IO.Path]::Combine($bucket, ('{0:D7}.bin' -f $i))) $SmallFileBytes

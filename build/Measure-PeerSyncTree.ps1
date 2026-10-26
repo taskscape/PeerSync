@@ -11,11 +11,11 @@ param(
     [Parameter(ParameterSetName = 'Compare')]
     [ValidateRange(2, 16)][int]$MinimumMachines = 3,
     [Parameter(ParameterSetName = 'Compare')]
-    [ValidateRange(1, 60)][int]$MaxStartSkewMinutes = 30,
+    [ValidateRange(1, 15)][int]$MaxStartSkewMinutes = 15,
     [Parameter(Mandatory, ParameterSetName = 'Audit')]
     [ValidateCount(2, 1000)][string[]]$Reports,
     [Parameter(ParameterSetName = 'Audit')]
-    [ValidateRange(1, 168)][int]$MinimumHours = 72,
+    [ValidateRange(1, 3)][int]$MinimumHours = 3,
     [Parameter(ParameterSetName = 'Audit')]
     [ValidateRange(2, 16)][int]$RequiredMachines = 3,
     [Parameter(Mandatory)][string]$OutputFile
@@ -133,6 +133,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
             }
             $before = [IO.FileInfo]::new($path)
             $beforeSize = $before.Length
+            if ($beforeSize -gt 10GB -or $bytes + $beforeSize -gt 10GB) {
+                throw [IO.IOException]::new('Test tree exceeds the 10 GiB content budget.')
+            }
             $beforeTicks = $before.LastWriteTimeUtc.Ticks
             $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
             $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
@@ -212,7 +215,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
                 $captureStart = Convert-ToUtc $snapshot.startedUtc
                 $captureEnd = Convert-ToUtc $snapshot.endedUtc
                 if ($captureStart -lt $timestamp -or
-                    $captureStart -ge $timestamp.AddHours(1) -or
+                    $captureStart -gt $timestamp.AddMinutes(15) -or
                     $captureEnd -lt $captureStart -or $captureEnd -gt $checked) {
                     throw 'An hourly snapshot has inconsistent timestamps.'
                 }
@@ -228,6 +231,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
     }
     $sorted = @($hours | Sort-Object timestamp)
     if ($sorted.Count -lt ($MinimumHours + 1)) { $auditIssues.Add('insufficient-hours') }
+    if ($sorted.Count -gt 4) { $auditIssues.Add('exceeds-three-hour-cap') }
     for ($index = 1; $index -lt $sorted.Count; $index++) {
         if ($sorted[$index].runId -ne $sorted[0].runId) { $auditIssues.Add('run-id-mismatch') }
         if ($sorted[$index].collectorSha256 -ne $sorted[0].collectorSha256) {
@@ -239,11 +243,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
         }
     }
     $elapsedHours = if ($sorted.Count -gt 1) {
-        ($sorted[-1].firstStart - $sorted[0].lastStart).TotalHours
+        ($sorted[-1].timestamp - $sorted[0].timestamp).TotalHours
     } else { 0 }
     if ($elapsedHours -lt $MinimumHours) {
         $auditIssues.Add('insufficient-elapsed-time')
     }
+    if ($elapsedHours -gt 3) { $auditIssues.Add('exceeds-three-hour-cap') }
     $audit = [ordered]@{
         schema = 'peersync-tree-soak-audit-v1'; checkedUtc = [DateTimeOffset]::UtcNow.ToString('O')
         runId = if ($sorted.Count -gt 0) { $sorted[0].runId } else { $null }
@@ -251,6 +256,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Audit') {
         lastHourUtc = if ($sorted.Count -gt 0) { $sorted[-1].hourUtc } else { $null }
         passedHours = $sorted.Count; requiredIntervals = $MinimumHours
         elapsedHours = $elapsedHours
+        observedCaptureStartSpanHours = if ($sorted.Count -gt 1) {
+            ($sorted[-1].firstStart - $sorted[0].lastStart).TotalHours
+        } else { 0 }
         requiredMachines = $RequiredMachines
         machineLabels = if ($sorted.Count -gt 0) { $sorted[0].labels } else { $null }
         collectorSha256 = if ($sorted.Count -gt 0) { $sorted[0].collectorSha256 } else { $null }
@@ -271,7 +279,8 @@ foreach ($snapshotPath in $Snapshots) {
             $item.machineLabel -notmatch '^[A-Za-z0-9_-]{1,32}$' -or
             $item.collectorSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
             $item.treeSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
-            $item.files -lt 0 -or $item.directories -lt 0 -or $item.bytes -lt 0) {
+            $item.files -lt 0 -or $item.directories -lt 0 -or
+            $item.bytes -lt 0 -or $item.bytes -gt 10GB) {
             throw 'Incomplete snapshot.'
         }
         $item.hourUtc = Get-HourValue $item.hourUtc
@@ -302,7 +311,7 @@ if ($loaded.Count -gt 0) {
             $captureStart = Convert-ToUtc $snapshot.startedUtc
             $captureEnd = Convert-ToUtc $snapshot.endedUtc
             if ($captureStart -lt $expectedHour -or
-                $captureStart -ge $expectedHour.AddHours(1) -or
+                $captureStart -gt $expectedHour.AddMinutes(15) -or
                 $captureEnd -lt $captureStart) {
                 $issues.Add('capture-time-invalid')
             }

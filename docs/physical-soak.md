@@ -8,7 +8,7 @@ versions identical during a single run. Record each physical PC's model,
 Windows version, network adapter/link speed, service and installer versions,
 the corpus generation command and hashes, and UTC start/end times separately.
 
-For Gate P2, use three physical PCs and a 50 GB mixed corpus including large
+For Gate P2, use three physical PCs and a 10 GiB mixed corpus including large
 files, 100,000 small files and deep trees. Record each random create/edit,
 rename, delete, permission change, sleep/resume and Wi-Fi switch with UTC time
 and the affected PC. For Gate P4, additionally record the actual home NAT,
@@ -25,10 +25,10 @@ session; do not change machine-wide execution policy.
 
 ## Create the mixed LAN corpus
 
-On the first physical PC, use a test folder with at least 105 GiB free on its
+On the first physical PC, use a test folder with at least 25 GiB free on its
 volume; the script checks room for both native content and PeerSync's local
 blocks, plus a 5 GiB reserve. The other two PCs also need room for native and
-block copies. The generator creates 50 GiB of random file content: 100,000
+block copies. The generator creates 10 GiB of random file content: 100,000
 small files, 24 nested levels with a file at each level, and eight large
 files. Its small local JSON report counts content bytes and files; the
 run-specific `owner.json` marker adds a little metadata outside that total.
@@ -56,9 +56,10 @@ if ((Get-Content $report -Raw | ConvertFrom-Json).status -ne 'complete') {
 ```
 
 Require `status: complete`, `createdFiles: 100032`, and
-`createdContentBytes: 53687091200` in that report. Preserve the command,
-report, run ID and script SHA-256. Resume the folder, wait for all three peers
-to settle, then use the tree measurement tool below on all PCs with the same
+`createdContentBytes: 10737418240` in that report. Preserve the command,
+report, run ID and script SHA-256. Resume the folder and record the UTC time;
+require all three peers to settle within three hours, then use the tree
+measurement tool below on all PCs with the same
 run ID and UTC hour. If generation stops partway through, leave the partial
 subtree for inspection; start a new run ID only after deliberately resolving
 the old one. The small-fixture control for this tool is recorded in the
@@ -89,7 +90,7 @@ $label = 'pc-a' # pc-b and pc-c on the other machines
 $root = 'C:\PeerSync-Test\Share'
 $logDirectory = 'C:\Temp\PeerSync-soak-operations'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
-$end = [DateTime]::Parse($first).ToUniversalTime().AddHours(73)
+$end = [DateTime]::Parse($first).ToUniversalTime().AddHours(3)
 while ((Get-Date).ToUniversalTime() -lt $end) {
   $minute = (Get-Date).ToUniversalTime().Minute
   if ($minute -lt 15 -or $minute -ge 55) {
@@ -108,8 +109,9 @@ root, and retain all batch logs; record the downtime. The script does not
 perform sleep/resume, Wi-Fi switches or permission changes. Do those
 deliberately and record their UTC times and outcomes separately. An
 unattended loop that stops or loses hours cannot by itself pass the gate.
-If hashing the full corpus takes longer than 15 minutes on any peer, extend
-the common quiet window before restarting the timed gate.
+If hashing the full corpus takes longer than 15 minutes on any peer, reduce
+the workload within the 10 GiB ceiling and restart the timed gate. Every
+capture must start within 15 minutes of its nominated UTC hour.
 
 ## Capture each hour
 
@@ -125,8 +127,8 @@ For unattended capture, start this in a **separate** PowerShell 5.1 session
 on each PC before the same future UTC hour. Copy the identical first-hour
 value to all PCs. The loop waits for each hour, writes a new snapshot and a
 local JSONL journal, and stops with a failed record if an hour is missed or
-the tool changes. `-Intervals 73` requests 74 snapshots, allowing the audit
-to verify at least 72 elapsed hours despite small capture-start jitter. A
+the tool changes. `-Intervals 3` requests four hourly snapshots spanning the
+three-hour scheduled operation window. A
 stopped console or a long sleep can leave a gap; keep the journal and repeat
 the timed gate as needed:
 
@@ -139,7 +141,7 @@ $reports = 'C:\Temp\PeerSync-soak'
 New-Item -ItemType Directory -Force -Path $reports | Out-Null
 & .\tools\Invoke-PeerSyncSoakCaptureLoop.ps1 -Root $root -RunId $run `
   -MachineLabel $label -FirstHourUtc $first -OutputDirectory $reports `
-  -Intervals 73
+  -Intervals 3
 if ($LASTEXITCODE -ne 0) { throw 'Hourly capture stopped; retain its journal.' }
 ```
 
@@ -179,9 +181,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Peers differ or evidence is incomplete.' }
 
 This rejects failed/missing snapshots, duplicate machine labels, a different
 run or hour, differing tool versions, mismatched tree hashes/counts and scans
-whose start times are more than 30 minutes apart. Capture at least 73
-consecutive hourly checkpoints. The automated loop requests 74 so small
-start-time jitter does not shorten the measured interval.
+whose start times are more than 15 minutes apart. Capture all four
+consecutive hourly checkpoints at hours 0, 1, 2 and 3. Stop random
+operations at hour 3; the final read-only capture and report comparison
+may finish afterward.
 
 After collecting all machine snapshots and capture-loop journals, use the
 packaged batch comparator to run every hourly comparison and the elapsed-time
@@ -196,7 +199,7 @@ $first = '2026-10-23T11:00:00Z' # use the actual common first hour
   -MachineLabels @('pc-a', 'pc-b', 'pc-c') `
   -InputDirectories @('C:\Temp\collected\pc-a', 'C:\Temp\collected\pc-b',
     'C:\Temp\collected\pc-c') -OutputDirectory 'C:\Temp\PeerSync-soak-results' `
-  -Intervals 73 -MinimumHours 72 -MinimumMachines 3
+  -Intervals 3 -MinimumHours 3 -MinimumMachines 3
 if ($LASTEXITCODE -ne 0) { throw 'At least one hourly comparison or the audit failed.' }
 ```
 
@@ -206,15 +209,17 @@ were already produced separately:
 ```powershell
 $reports = @(Get-ChildItem 'C:\Temp\PeerSync-soak\compare-*.json' |
   Sort-Object Name | Select-Object -ExpandProperty FullName)
-& .\tools\Measure-PeerSyncTree.ps1 -Reports $reports -MinimumHours 72 `
+& .\tools\Measure-PeerSyncTree.ps1 -Reports $reports -MinimumHours 3 `
   -RequiredMachines 3 -OutputFile 'C:\Temp\PeerSync-soak\soak-audit.json'
 if ($LASTEXITCODE -ne 0) { throw 'Soak evidence is incomplete.' }
 ```
 
-The audit requires a single run ID, the same tool and machine set, 73 or more
-consecutive UTC hours, at least 72 hours between the last first-hour capture
-start and the first final-hour capture start, and a passing comparison with
-three or more peers at each hour. A passing audit establishes only tree
+The audit requires a single run ID, the same tool and machine set, four
+consecutive nominated UTC hours spanning three hours, captures starting
+within 15 minutes of each nominated hour, and a passing comparison with
+three or more peers at each hour. The three-hour limit applies to the active
+operation window; the final read-only capture and report comparison may
+finish afterward. A passing audit establishes only tree
 agreement at those checkpoints. Inspect the operation, service and diagnostic
 evidence for data loss, errors, resets and recovery,
 and retain the full reports and environment record with the gate decision.
