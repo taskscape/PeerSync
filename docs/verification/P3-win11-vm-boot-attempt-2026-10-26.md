@@ -1,4 +1,10 @@
-# Clean Windows 11 VM boot attempt — 2026-10-26
+# Earlier clean Windows 11 VM boot attempt — 2026-10-26
+
+This records the failed offline-image boot attempt. A later normal Windows
+Setup installation booted successfully and completed the
+[clean Windows 11 PeerSync lifecycle](P3-clean-windows11-lifecycle-2026-10-26.md).
+The boot failures below remain useful diagnostics, but are no longer the
+current state of this guest.
 
 Gate P3 still requires a complete installer upgrade, keep-data uninstall and
 remove-data uninstall on a clean Windows 11 VM. This attempt does **not** pass
