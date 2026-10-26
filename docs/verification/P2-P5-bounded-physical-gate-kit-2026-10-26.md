@@ -90,3 +90,18 @@ On the first PC, the packaged read-only default 9 GiB preflight returned
 the content cap. The first PC had 42,220,085,248 free bytes against the
 24,696,061,952-byte generator minimum. These are preflight measurements,
 not generated-corpus or three-PC convergence evidence.
+
+## Recheck after two-client upgrade, 2026-10-26
+
+With both physical LAN clients on development-signed 1.0.28.0, a fresh
+Windows PowerShell 5.1 `-PreflightOnly` on the first PC returned `ready` and
+created no output file or corpus. The synchronized root had 732,818,841
+counted content bytes; adding the default 9,663,676,416-byte corpus would
+project 10,396,495,257 bytes, 340,922,983 below the 10 GiB tree cap. The
+first volume reported 33,992,404,992 free bytes against the
+24,696,061,952-byte requirement. The same metadata-only counter read the
+second PC's synchronized root through its administrator share and found
+exactly 732,818,841 content bytes. Records are under
+`artifacts/field/physical-preflight-20261026/`. These are dated readiness
+checks on two PCs; the third PC's LAN placement, capacity and full native
+tree are unverified, and the corpus has not been generated.
