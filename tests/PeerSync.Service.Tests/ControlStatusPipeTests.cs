@@ -209,6 +209,29 @@ public sealed class ControlStatusPipeTests : IDisposable
     }
 
     [Fact]
+    public async Task MissingJoinRootReturnsActionableFolderAccessStatusWithoutLeakingPath()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string statePath = Path.Combine(fixture, "missing-root-state", "peersync.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+        var runtime = new ControlStatusRuntime();
+        await using var folderHost = await InstalledFolderHost.StartForTestAsync(
+            statePath, Device(10), identity.User!.Value, runtime, cancellationToken: Token);
+        runtime.AttachFolderHost(folderHost);
+        string pipe = Pipe;
+        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
+        using var client = Client(pipe, identity.User!);
+        string missingPath = Path.Combine(fixture, "missing-join-root");
+        using var key = FolderKeys.CreateNew();
+
+        var error = await Should.ThrowAsync<RpcException>(() => client.JoinFolderAsync(key.ExportText(), missingPath, Token));
+        error.StatusCode.ShouldBe(StatusCode.NotFound);
+        error.Status.Detail.ShouldContain("inaccessible to the PeerSync service");
+        error.Status.Detail.ShouldNotContain(missingPath);
+        (await client.ListFoldersAsync(Token)).Folders.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task PauseResumeTimedPauseAndRemovePreserveUserFiles()
     {
         using var identity = WindowsIdentity.GetCurrent();

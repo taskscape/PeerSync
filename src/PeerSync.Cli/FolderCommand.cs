@@ -117,7 +117,9 @@ public static class FolderCommand
         }
         catch (RpcException exception)
         {
-            await error.WriteLineAsync($"Service request failed: {exception.StatusCode}").ConfigureAwait(false);
+            string detail = exception.Status.Detail;
+            await error.WriteLineAsync($"Service request failed: {exception.StatusCode}"
+                + (string.IsNullOrWhiteSpace(detail) ? "" : $". {detail}")).ConfigureAwait(false);
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or

@@ -233,9 +233,7 @@ internal sealed class MainWindow : Window, IDisposable
         }
         using var client = ControlStatusClient.CreateForInstalledService();
         await client.AddFolderAsync(path);
-        if (grant.ProtectedChildren.Count > 0 || grant.Truncated)
-            MessageBox.Show(this, $"Some children have protected ACLs and may need manual access: {string.Join("\n", grant.ProtectedChildren.Take(10))}",
-                "Folder access", MessageBoxButton.OK, MessageBoxImage.Warning);
+        ShowProtectedAccessWarning(grant);
     }
 
     private async Task JoinFolderAsync()
@@ -249,13 +247,25 @@ internal sealed class MainWindow : Window, IDisposable
         var picker = new OpenFolderDialog { Title = "Choose where to sync the joined folder" };
         if (picker.ShowDialog(this) != true) return;
         string path = picker.FolderName;
-        try { await FolderAccessGrant.GrantAsync(path, new Progress<string>(text => model.Activity = text), CancellationToken.None); }
+        FolderGrantResult grant;
+        try { grant = await FolderAccessGrant.GrantAsync(path, new Progress<string>(text => model.Activity = text), CancellationToken.None); }
         catch (Exception error) when (error is UnauthorizedAccessException or System.Security.SecurityException)
         {
             if (await ElevatedActions.GrantFolderAsync(path) != 0) throw new IOException("Administrator access could not be granted.");
+            grant = new([], false);
         }
         using var client = ControlStatusClient.CreateForInstalledService();
         await client.JoinFolderAsync(key.Value, path);
+        ShowProtectedAccessWarning(grant);
+    }
+
+    private void ShowProtectedAccessWarning(FolderGrantResult grant)
+    {
+        if (grant.ProtectedChildren.Count == 0 && !grant.Truncated) return;
+        string more = grant.Truncated || grant.ProtectedChildren.Count > 10 ? "\nMore items may be affected." : "";
+        MessageBox.Show(this,
+            $"Some files or folders have protected ACLs and may need manual access:\n{string.Join("\n", grant.ProtectedChildren.Take(10))}{more}",
+            "Folder access", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private async Task ShareFolderAsync()
