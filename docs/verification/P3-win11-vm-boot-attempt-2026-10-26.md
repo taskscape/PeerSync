@@ -27,6 +27,14 @@ to Off and its virtual disks were detached from the host after inspection.
 The original boot VHDX files remain available for recovery; the current VM
 configuration uses only `system.vhdx` and `boot-template.vhdx`.
 
+A further host-side repair used [Microsoft-documented `BCDBoot` with `/c`](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/bcdboot-command-line-options-techref-di?view=windows-11) on a
+new, empty EFI VHDX, leaving the VM's attached disks unchanged. It copied
+boot files but returned exit `183`: the verbose log ends with
+`Failed to create a new system store` and status `c0000035` while creating
+the new BCD. That newly created VHDX remains detached. The failure on an
+empty EFI partition rules out merely reusing the earlier invalid BCD file;
+it does not establish that the applied Windows image itself is defective.
+
 The next attempt must boot through normal Windows Setup or repair the guest
 boot chain from guest-side WinPE, then prove the clean install and required
 PeerSync lifecycle. Neither this offline image application nor a physical

@@ -14,9 +14,16 @@ records `vc_redist.exe /install /quiet /norestart` returning `3010`, followed
 by `PrepareToInstall failed: The Microsoft Visual C++ runtime requires a
 restart` and `Need to restart Windows? Yes`. Setup exited `8`. The separate
 field collector confirmed that both the PeerSync service and installed
-service executable were absent after the failed setup. The operator must
-restart this PC and rerun the same verified package; a successful install
-and subsequent sync have not yet been observed.
+service executable were absent after the failed setup.
+
+The operator restarted `LARKBOX-X-1` and reran the same verified ZIP. The
+post-reboot report `PeerSync-third-PC-deploy-20261026T130501Z.txt`, sent by
+Taildrop, records the same ZIP SHA-256, `READY version=1.0.28.0
+service=Running` from the installer runner, and an independent final
+`READY version=1.0.28.0 service=Running` check in the field launcher. The
+report was read on the first PC; no folder key or password appears in it.
+The new third PC has not yet joined the shared test folder, so the physical
+three-PC sync and corpus gates remain open.
 
 The upgrade runner now treats setup exit codes `8` and `3010` as a
 `restartRequired` result with a concrete rerun instruction. The original
