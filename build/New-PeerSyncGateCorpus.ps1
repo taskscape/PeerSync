@@ -54,9 +54,11 @@ if ($largeBytes -lt $LargeFileCount) {
     throw 'Each large file needs at least one byte.'
 }
 $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($rootPath))
-$requiredFree = $TotalBytes * 2 + 5GB
+$blockReserve = $TotalBytes
+$safetyHeadroom = 5GB
+$requiredFree = $TotalBytes + $blockReserve + $safetyHeadroom
 if ($drive.AvailableFreeSpace -lt $requiredFree) {
-    throw "Insufficient free space for native files and PeerSync blocks: need at least $requiredFree bytes."
+    throw "Insufficient free disk space: available $($drive.AvailableFreeSpace) bytes; this generator reserves $requiredFree bytes ($TotalBytes native test content + $blockReserve independent PeerSync blocks + $safetyHeadroom safety headroom). The 10 GiB cap limits synchronized test content, not all on-disk copies."
 }
 
 $run = $RunId.ToString('N')
@@ -88,6 +90,8 @@ if ($PreflightOnly) {
         maximumTestTreeContentBytes = 10GB
         freeBytes = $drive.AvailableFreeSpace
         requiredFreeBytes = $requiredFree
+        blockReserveBytes = $blockReserve
+        safetyHeadroomBytes = $safetyHeadroom
         runId = $run
     } | ConvertTo-Json -Compress
     return

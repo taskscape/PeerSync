@@ -17,6 +17,14 @@ longer/larger evidence remains historical and is not silently reclassified.
 The caps apply to verification workloads and active operation windows. Build,
 fixture preparation, read-only final report comparison and calendar spacing
 between the already accepted P1 campaign dates are recorded separately.
+The 10 GiB cap is for synchronized test content. PeerSync retains independent
+verified blocks under `.psp/blocks`, so random test content can consume roughly
+twice its native byte count on each peer. The field generator currently reserves
+another 5 GiB of free disk as operational headroom. For its default 9 GiB
+corpus, its **disk preflight** therefore asks for 23 GiB free on the source
+volume before generation; this is an implementation safety threshold, not a
+23 GiB test-content target or a new acceptance cap. Its preflight reports the
+three components and actual free bytes so an operator can distinguish them.
 No failed assertion, missing physical network path, independent security
 review, release-signer check or code-signing requirement is waived. A run that
 hits its new time cap is a failed or incomplete gate; it cannot be accepted

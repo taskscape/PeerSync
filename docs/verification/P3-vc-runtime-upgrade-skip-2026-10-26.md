@@ -32,3 +32,23 @@ the rendezvous 1.0.0.0 setup was restored from the pre-existing Windows shadow
 copy (SHA-256
 `36FCD0C863C7955F2EE2CFFD76096B37EAF9FEDB0B1073120DDD124FC6F64586`).
 Neither restored artifact contains this source change.
+
+A separate development-signed 1.0.31.0 validation installer was built from
+source revision `748b7537588fe26e0a5e2d62e0c034a25c520311` with the
+existing signed 1.0.31.0 payload. Its SHA-256 is
+`F39269FE577ABBC1A51B8227BFDC5743C3D8B4152BD7B2B5A941483AE6A8619D`.
+On the second physical PC (`DESKTOP-BN535U0`), Windows Remoting verified the
+machine identity, administrator token, running PeerSync 1.0.31.0 service,
+and native `VCRUNTIME140.dll` version 14.51.36247.0. It copied the installer
+with a matching hash and ran a same-version silent upgrade. Setup exited 0,
+the service returned to Running at 1.0.31.0, and the retained setup log says
+`Visual C++ runtime already meets bundled version 14.51.36247.0; skipping redistributable.`
+The log also reports `Need to restart Windows? No`. The machine had
+48,090,382,336 free bytes before the copy and 47,917,506,560 afterward;
+the difference includes the retained 166,851,408-byte setup file. The
+encrypted remote session and temporary local TrustedHosts change were closed
+and restored. Evidence is in
+`artifacts/field/vc-runtime-skip-20261026/second-pc-validation.json` and
+`second-pc-setup.log` (ignored field artifacts). This validates the skip on
+one already-current physical PC; the missing/older-runtime branch and a
+release-signed upgrade remain open.
