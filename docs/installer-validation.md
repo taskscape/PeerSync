@@ -18,6 +18,14 @@ $thumbprint = 'YOUR_LOCALMACHINE_CODE_SIGNING_CERTIFICATE_THUMBPRINT'
 ./build/Build-Installer.ps1 -Arch arm64 -Version 1.0.0 -CertificateThumbprint $thumbprint -DevelopmentSigning
 ```
 
+The default build performs a locked solution restore. If a local development
+machine already has restored assets but another process temporarily locks a
+NuGet analyzer, `-UseExistingRestoredAssets` publishes with `--no-restore`.
+It is accepted only with `-DevelopmentSigning` or `-UnsignedDevelopment`, and
+the manifest records `restoreMode: existing-assets`. This local fallback
+does not establish locked-restore or release-build parity; CI and release
+builds must use the default `restoreMode: locked` path.
+
 `-UnsignedDevelopment` permits local compiler validation without a signing
 identity. It records `localDevelopmentOnly: true` in the adjacent manifest;
 do not distribute that setup. A development certificate signs test builds but
