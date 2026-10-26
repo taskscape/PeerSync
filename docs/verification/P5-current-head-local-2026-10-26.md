@@ -1,5 +1,30 @@
 # P5 current-head local verifier, 2026-10-26
 
+## Current PR head at `aa9ae5c`
+
+The canonical `./build/Verify.ps1 -Runtime win-x64 -FuzzSeconds 600` passed
+on `aa9ae5cb2841c8c3743e72d992ad2bca158b33d4` in 1,115.312 seconds.
+Locked solution restore, the Release build (zero warnings and errors), all
+native/runtime checks and six self-contained spike publishes completed.
+The eleven current-run TRX files contain **1,834 passed, zero failed and zero
+skipped** methods, including 1,046 Engine and 17 real-engine simulation cases.
+The seven-target fuzz run processed 179,572 seeds over 600.001 seconds with
+zero crashes. `artifacts/verification-win-x64.json` reports `status: passed`;
+the full log is `artifacts/verification-current-head-aa9ae5c-overlay.log`,
+and `artifacts/fuzz/summary.log` contains the current fuzz result.
+
+An active Roslyn MCP server held a DLL in the shared NuGet cache while the
+first locked restore attempted to repair an incomplete package extraction.
+For this successful run, `NUGET_PACKAGES` pointed to a disposable isolated
+cache under `artifacts/field/nuget-overlay-aa9ae5c/packages-v2`; locked
+solution restore passed there without changing the shared package cache or
+stopping the server. The earlier failed restore log is
+`artifacts/verification-current-head-aa9ae5c.log`. These are local results;
+the current [PR run 40374756805](https://github.com/taskscape/PeerSync/actions/runs/40374756805)
+was denied by the Actions budget before any producer job executed. The
+formal hosted-CI/merge, physical, independent-review and release-signing
+gates remain open.
+
 ## Repaired branch at `9b7363b`
 
 The first canonical fallback after the Server 2022 installer repair ran on
