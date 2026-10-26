@@ -33,3 +33,21 @@ control, and ran the revised generator on a fresh 1 MiB fixture with exit 0,
 14 created files and exactly 1,048,576 content bytes. These controls exercise
 the shell used by the physical field instructions; the default 9 GiB corpus
 still needs the actual three-PC run.
+
+## First physical PC preflight, 2026-10-26
+
+The first PC's installed `PeerSync` service is Running at version 1.0.26.0.
+Its already shared test folder, `C:\PeerSync-Test\Physical-Two-PC-20261024`,
+contains 565,872,452 native content bytes before corpus generation. Adding
+the default 9,663,676,416-byte corpus would produce 10,229,548,868 bytes,
+leaving 507,869,372 bytes below the 10 GiB test-tree cap for operations. The
+same volume had 33,876,029,440 bytes free at preflight, above the generator's
+24,696,061,952-byte native-plus-block minimum. Recheck space and content
+immediately before generation; these values are a dated snapshot.
+
+The 21,738-byte kit ZIP was copied into that shared folder and its SHA-256
+matched the builder value above. The installed CLI's `dump-index --json`
+listed `PeerSync-physical-gates-f999a931.zip` as a live 21,738-byte file. The
+local status showed connected authenticated sessions for two remote devices
+in the folder. This does not prove either recipient received the ZIP, that the
+third PC is on the same LAN, or that the 9 GiB physical corpus has run.
