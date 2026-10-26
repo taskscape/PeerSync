@@ -107,6 +107,37 @@ The scanner row subsequently completed before the fresh-peer stage. For its
 rehashes and updates, idle CPU was 0.0086803%, and 1,167 samples recorded a
 134,856,704-byte peak working set and 86,011,904-byte sampled peak private
 memory. Its 1,001,000 rows, sequence preservation, bounded changed paths,
-`correct=true` and `targetMet=true` pass the scanner targets. The peer stage
-and overall terminal remain pending. The scanner result names an additional
+`correct=true` and `targetMet=true` pass the scanner targets. At this
+checkpoint the peer stage and overall terminal were pending. The scanner
+result names an additional
 run-specific database and diagnostic directory inside the retained fixture.
+
+## Terminal result, 2026-10-26
+
+The fixed `dafd167` benchmark finished at 04:30:25 UTC with terminal
+`status=passed`, `reason=targets-met`, exit 0 and empty stderr. The runner
+recorded 54,151,585,792 free C: bytes at completion, above its 1.5 GiB
+in-run guard. The original benchmark PID 36684 has exited. Its immutable
+executable hash and clean benchmark-input provenance are still recorded in
+`prepared.json`.
+
+The scanner terminal row confirms 1,000,000 native files and 1,001,000 index
+rows. First indexing took 229.955197 seconds against the 1,200-second
+target. The unchanged walk took 61.7057197 seconds, with zero rehashes or
+updates and the sequence preserved. Idle CPU was 0.0086803%; the observed
+peak working set was 134,856,704 bytes and sampled peak private memory was
+86,011,904 bytes. The runner accepted `correct=true` and `targetMet=true`.
+
+The fresh peer completed in 2,598 rounds and 69,503.6951158 seconds, within
+its 48-hour ceiling. Its final row has 1,001,000 peer index rows and
+`verifiedFiles=1000000` with `correct=true`. The benchmark's
+`VerifyNative` function enumerates all 1,000 expected native directories,
+checks each directory's exact file count and ordinary-file status, opens
+every expected pathname, and checks its one-byte length and content
+`number % 251`. This is exact native path/byte verification of the fixed
+binary's fresh peer over the in-memory test transport, not a physical
+million-file network transfer.
+
+The later prior-path-merge source has a distinct queued payload. Its
+benchmark started after this terminal result, so this older pass does not
+by itself close the current-source P5.3 gate.

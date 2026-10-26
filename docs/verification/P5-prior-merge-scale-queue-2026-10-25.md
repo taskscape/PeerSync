@@ -36,7 +36,29 @@ stdout parsing and success-terminal writer; its terminal is
 empty stderr. This tests orchestration only: no real files were scanned or
 transferred in that control, and it provides no P5.3 performance evidence.
 
-The new run is **queued, not passed**. Its terminal must show the scanner
+At registration the new run was **queued, not passed**. Its terminal must
+show the scanner
 targets and a fresh peer with all 1,000,000 native files/bytes verified and
-empty stderr before P5.3 can close. The first run is still separate and live;
-no second benchmark was started concurrently.
+empty stderr before P5.3 can close. The first run was then separate and live;
+no second benchmark had started concurrently.
+
+## Prerequisite passed; current-source run started, 2026-10-26
+
+The prerequisite fixed-binary run finished with `status=passed`, exit 0,
+empty stderr, scanner target met and all 1,000,000 fresh-peer native paths
+and bytes verified. Its full evidence is in
+[the post-fuzz run record](P5-post-fuzz-scale-queue-2026-10-24.md).
+Only after that process exited did the queued watcher start the distinct
+`8ccb4bc` payload at 04:31:13 UTC as benchmark PID 83240. The launch record
+has the expected executable SHA-256, `prerequisiteStatus=passed` and
+54,150,909,952 free C: bytes, above the 6 GiB start threshold. The 1.5 GiB
+in-run disk guard remains active.
+
+The current-source scanner row has already passed: 1,000,000 native files,
+1,001,000 rows, 247.4074071-second first index, 15.5127545-second unchanged
+walk, zero rehashes/updates, 0.01735% idle CPU, 129,937,408-byte observed
+peak working set, 81,117,184-byte sampled peak private memory, preserved
+sequence, `correct=true` and `targetMet=true`. The benchmark child is still
+live in its fresh-peer source-publication phase; `stderr.log` is empty.
+Neither its peer result nor a current-source terminal has been reported, so
+P5.3 remains open.
