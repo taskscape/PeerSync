@@ -34,30 +34,50 @@ try
     { Level = settingsRecovered ? DiagnosticLevel.Warning : DiagnosticLevel.Information });
     Console.WriteLine("LOGS " + run.DirectoryPath);
     var runtime = new ControlStatusRuntime(journal);
-    string statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "state", "peersync.db");
-    await using var folderHost = await InstalledFolderHost.StartAsync(statePath, settings.DeviceCertificateThumbprint,
-        settings, runtime, journal);
-    runtime.AttachFolderHost(folderHost);
-    await using var updates = UpdatePoller.Start(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync"), journal);
-    while (true)
+    runtime.BeginInstalledStartup();
+    ControlApiHost? firstHost = null;
+    try
     {
-        await using var host = await ControlApiHost.StartInstalledAsync(runtime, journal);
-        journal.TryWrite(new("service.control_ready", "startup") { Transport = DiagnosticTransport.NamedPipe });
-        Task controlShutdown = host.WaitForShutdownAsync();
-        Task finished = await Task.WhenAny(controlShutdown, folderHost.Completion, host.RestartRequested).ConfigureAwait(false);
-        if (finished == folderHost.Completion)
+        // Register with SCM before loading folders and starting peer transports.
+        // A cold Windows host can take longer than SCM's default 30-second start
+        // window to open its state and crypto providers. The control interceptor
+        // holds every authenticated RPC until AttachFolderHost marks it ready.
+        firstHost = await ControlApiHost.StartInstalledAsync(runtime, journal);
+        journal.TryWrite(new("service.control_listening", "startup") { Transport = DiagnosticTransport.NamedPipe });
+        string statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "state", "peersync.db");
+        await using var folderHost = await InstalledFolderHost.StartAsync(statePath, settings.DeviceCertificateThumbprint,
+            settings, runtime, journal);
+        runtime.AttachFolderHost(folderHost);
+        await using var updates = UpdatePoller.Start(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync"), journal);
+        while (true)
         {
-            await folderHost.Completion.ConfigureAwait(false);
-            throw new InvalidOperationException("The installed folder scheduler stopped unexpectedly.");
+            var host = firstHost ?? await ControlApiHost.StartInstalledAsync(runtime, journal);
+            firstHost = null;
+            await using (host)
+            {
+                journal.TryWrite(new("service.control_ready", "startup") { Transport = DiagnosticTransport.NamedPipe });
+                Task controlShutdown = host.WaitForShutdownAsync();
+                Task finished = await Task.WhenAny(controlShutdown, folderHost.Completion, host.RestartRequested).ConfigureAwait(false);
+                if (finished == folderHost.Completion)
+                {
+                    await folderHost.Completion.ConfigureAwait(false);
+                    throw new InvalidOperationException("The installed folder scheduler stopped unexpectedly.");
+                }
+                if (finished == host.RestartRequested)
+                {
+                    journal.TryWrite(new("service.control_restarting", "control") { Transport = DiagnosticTransport.NamedPipe });
+                    continue;
+                }
+                await controlShutdown.ConfigureAwait(false);
+                break;
+            }
         }
-        if (finished == host.RestartRequested)
-        {
-            journal.TryWrite(new("service.control_restarting", "control") { Transport = DiagnosticTransport.NamedPipe });
-            continue;
-        }
-        await controlShutdown.ConfigureAwait(false);
-        break;
+    }
+    finally
+    {
+        runtime.AbortInstalledStartup();
+        if (firstHost is not null) await firstHost.DisposeAsync();
     }
     journal.TryWrite(new("service.stopped", "shutdown"));
     return 0;

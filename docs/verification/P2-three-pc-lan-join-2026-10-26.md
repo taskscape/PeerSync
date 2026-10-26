@@ -62,3 +62,9 @@ generator's 24,696,061,952-byte minimum. A historical untracked 10 GiB
 fixture at `artifacts/hash-10gb.bin` was identified as a way to free space,
 but automatic command review rejected deletion. The corpus was not started;
 disk capacity and whole-tree content must be rechecked immediately before it.
+After the disposable Windows 11 VM's cold-start check and offline VHD
+compaction, the first PC had 12,271,849,472 bytes free. Deleting only the
+historical 10 GiB fixture would still leave about 1.7 GB below the
+24,696,061,952-byte generator preflight; additional free space is needed.
+The fixture and encrypted credential were not deleted by Codex after the
+automatic command-review rejection.

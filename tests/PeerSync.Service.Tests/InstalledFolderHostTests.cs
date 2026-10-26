@@ -25,6 +25,7 @@ using Xunit;
 
 namespace PeerSync.Service.Tests;
 
+[Collection("InstalledFolderHostNativeQuic")]
 public sealed class InstalledFolderHostTests
 {
     [Fact]
@@ -730,3 +731,6 @@ public sealed class InstalledFolderHostTests
         public void Dispose() { }
     }
 }
+
+[CollectionDefinition("InstalledFolderHostNativeQuic", DisableParallelization = true)]
+public sealed class InstalledFolderHostNativeQuicGroup { }

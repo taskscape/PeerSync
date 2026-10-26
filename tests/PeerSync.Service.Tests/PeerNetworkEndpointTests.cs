@@ -30,9 +30,9 @@ public sealed class PeerNetworkEndpointTests
             if (entry.Event == "service.listener_bind_retry") retrySeen.TrySetResult();
             if (entry.Event == "service.listener_bind_recovered") recovered.TrySetResult();
         };
-        // The service binds QUIC before TCP. A TCP-only ephemeral port can be
-        // occupied by another UDP listener, making this TCP retry test fail
-        // before it reaches the listener that this test deliberately blocks.
+        // The service binds QUIC before TCP. Choose from its configured port
+        // range: Windows may allocate TCP ephemeral ports inside a contiguous
+        // UDP exclusion range, so repeated port-zero binds do not escape it.
         using var blocker = ReserveTcpPortWithAvailableUdp();
         int port = ((IPEndPoint)blocker.LocalEndPoint!).Port;
 
@@ -66,7 +66,7 @@ public sealed class PeerNetworkEndpointTests
             { ExclusiveAddressUse = true };
             try
             {
-                blocker.Bind(new IPEndPoint(IPAddress.Any, 0));
+                blocker.Bind(new IPEndPoint(IPAddress.Any, Random.Shared.Next(20000, 45001)));
                 blocker.Listen(1);
                 int port = ((IPEndPoint)blocker.LocalEndPoint!).Port;
                 using var udpProbe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)

@@ -64,6 +64,39 @@ public sealed class ControlStatusPipeTests : IDisposable
     }
 
     [Fact]
+    public async Task InstalledStartupAcceptsThePipeButHoldsRequestsUntilFolderRecoveryCompletes()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var runtime = new ControlStatusRuntime();
+        runtime.BeginInstalledStartup();
+        string pipe = Pipe;
+        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!], cancellationToken: Token);
+        using var client = Client(pipe, identity.User!);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        stop.CancelAfter(TimeSpan.FromSeconds(10));
+
+        Task<ControlStatusSnapshot> status = client.GetStatusAsync(stop.Token);
+        var folders = client.ListFoldersAsync(stop.Token);
+        await using var events = client.WatchControlEventsAsync(stop.Token).GetAsyncEnumerator(stop.Token);
+        Task<bool> firstEvent = events.MoveNextAsync().AsTask();
+        await Task.Delay(150, Token);
+        status.IsCompleted.ShouldBeFalse();
+        folders.IsCompleted.ShouldBeFalse();
+        firstEvent.IsCompleted.ShouldBeFalse();
+
+        string statePath = Path.Combine(fixture, "startup-state", "peersync.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+        await using var folderHost = await InstalledFolderHost.StartForTestAsync(
+            statePath, Device(10), identity.User!.Value, runtime, cancellationToken: Token);
+        runtime.AttachFolderHost(folderHost);
+
+        (await status).InstanceId.ShouldNotBe(Guid.Empty);
+        (await folders).Folders.ShouldBeEmpty();
+        (await firstEvent).ShouldBeTrue();
+        events.Current.FullSnapshot.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task FolderManagementRpcsAddJoinListPeersAndStreamIndexOverTheVerifiedPipe()
     {
         using var identity = WindowsIdentity.GetCurrent();
