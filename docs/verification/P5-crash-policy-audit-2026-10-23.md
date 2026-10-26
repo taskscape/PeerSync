@@ -56,3 +56,15 @@ results are retained under
 `artifacts/field/client-1.0.26-crash-policy-20261025/`. The audit does not
 inspect privileged full/live dumps, OS process telemetry, the third PC or the
 physical Rendezvous server. Independent review remains open.
+
+On 2026-10-26, the installed audit was repeated on both physical LAN clients
+after their 1.0.31.0 upgrade. Each machine's packaged script read the 64-bit
+machine registry and reported `allAutomaticReportsExcluded=true`, all three
+client executables owned by the PeerSync installer, and no configured global
+or per-executable LocalDumps values. Both services were Running. The two
+read-only JSON results are retained under
+`artifacts/field/client-1.0.31-crash-policy-20261026/`; the second-PC query
+used a temporary WinRM session, after which the first PC's WinRM service and
+TrustedHosts setting were restored. This remains point-in-time policy
+evidence; the third PC, physical Rendezvous server, privileged dump handling
+and independent review remain open.
