@@ -1,11 +1,12 @@
 # Current-source physical client upgrade, 2026-10-26
 
-The first physical client was upgraded from 1.0.26.0 to the development-signed
-1.0.28.0 build so the remaining field checks can exercise the scanner source
-used by the passing 100,000-file local benchmark. This is an installed-client
-upgrade check, not a three-PC corpus, soak, release-signing or production
-rollout result. The second and third clients have not yet been verified at
-1.0.28.0.
+The first and second physical clients were upgraded from 1.0.26.0 to the
+development-signed 1.0.28.0 build so the remaining field checks can exercise
+the scanner source used by the passing 100,000-file local benchmark. This is
+an installed-client upgrade check, not a three-PC corpus, soak,
+release-signing or production rollout result. The third-PC operator reports
+installing 1.0.28.0, but its installed version and service state have not yet
+been independently verified.
 
 `build/Build-Installer.ps1` produced the x64 setup from tracked source
 `e3be5dca83e07a821ab75fe567b3aa3de915c9fb` with explicit Inno Setup
@@ -29,8 +30,8 @@ byte ZIP has SHA-256
 The ZIP was reopened locally, all six entries were found, and the extracted
 setup hash matched the manifest. Windows PowerShell 5.1 parsing passed; its
 `-PreflightOnly` check returned `READY_TO_INSTALL` and an incomplete-package
-negative control returned `FAILED` with exit 1. Those checks did not perform
-an installation on the other two clients.
+negative control returned `FAILED` with exit 1. The second-PC installation is
+recorded below; these local checks do not verify the third PC.
 
 The first PC's retained before/after records are under
 `artifacts/field/client-1.0.28.0-first-20261026/`. Before setup, the
@@ -46,11 +47,27 @@ the folder was compared.
 The upgrade ZIP was copied into the existing first-PC shared test folder,
 `C:\PeerSync-Test\Physical-Two-PC-20261024`, with an identical SHA-256.
 The first PC's installed `dump-index --json` listed it as a live 166,914,504-
-byte file. Recipient arrival and installation remain unverified. Operators
-must extract it outside the synchronized folder, exit the tray app, then run
-the included `Run-PeerSync-Upgrade.cmd` elevated on the second and third PCs;
-the wrapper verifies the setup, signer, version, installed service and CLI,
-and emits a local JSON report.
+byte file. The second-PC recipient's file had the identical SHA-256. Its
+administrator share and Task Scheduler service were reachable through Windows
+instrumentation; the tray app was not running. The ZIP was extracted outside
+the synchronized folder to `C:\Temp\PeerSync-client-upgrade-1.0.28.0-20261026`
+on that PC. A one-time SYSTEM task ran the included validated upgrade script
+and was deleted after it finished. Its preserved JSON report records previous
+version 1.0.26.0, source revision `e3be5dc`, setup hash and signer matching
+this package, setup exit 0, installed version 1.0.28.0, service Running, CLI
+status exit 0 and no error. The task returned 0 and printed `READY`. The
+service, app and CLI executables were independently read through the
+administrator share: all report version 1.0.28.0 and valid development
+signatures. Three sampled shared-file hashes, including the upgrade ZIP,
+matched their before-upgrade values. Two newly created 4 KiB random files
+then arrived in opposite directions between the physical PCs with exact
+SHA-256 matches. The retained report, setup log, signed-file and file-byte
+checks are under `artifacts/field/client-1.0.28.0-second-20261026/`.
+
+The third PC was operated separately by its user. Its reported setup is not
+yet an independently verified installed-client result. It should run the
+included wrapper from outside its synchronized folder and retain its local
+JSON report; no folder key is needed for that upgrade.
 
 An initial 1,427,599,907-byte size estimate incorrectly included the root
 `.psp` metadata. The tree verifier excludes that metadata from the 10 GiB
