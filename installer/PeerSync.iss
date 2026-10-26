@@ -28,9 +28,9 @@ ArchitecturesInstallIn64BitMode=arm64
 ArchitecturesAllowed=x64compatible and not arm64
 ArchitecturesInstallIn64BitMode=x64compatible and not arm64
 #endif
-; The tray dashboard may retain PeerSync.exe across user sessions. A silent
-; upgrade must close it before replacing the executable; a graceful Restart
-; Manager close was insufficient on the physical second-PC field upgrade.
+; The tray dashboard may retain PeerSync.exe across user sessions. Restart
+; Manager remains enabled, while PrepareToInstall also closes the exact
+; installed dashboard and waits for exit before replacing its executable.
 CloseApplications=force
 RestartApplications=no
 UsePreviousTasks=yes
@@ -60,6 +60,8 @@ Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
 Source: "Stop-ServiceAndWait.ps1"; Flags: dontcopy noencryption
 Source: "Stop-ServiceAndWait.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Stop-ClientAppAndWait.ps1"; Flags: dontcopy noencryption
+Source: "Stop-ClientAppAndWait.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Update-Helper.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Assert-UpdateSetupSignature.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
@@ -194,12 +196,26 @@ begin
       IntToStr(RedistCode) + '). See the setup log.';
     Exit;
   end;
-  if not ServiceExists then Exit;
-  ExtractTemporaryFile('Stop-ServiceAndWait.ps1');
-  if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{tmp}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSync') <> 0 then
-    Result := 'The PeerSync service or its old process did not exit. See setup log.';
+  if ServiceExists then
+  begin
+    ExtractTemporaryFile('Stop-ServiceAndWait.ps1');
+    if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{tmp}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSync') <> 0 then
+    begin
+      Result := 'The PeerSync service or its old process did not exit. See setup log.';
+      Exit;
+    end;
+  end;
+  if FileExists(ExpandConstant('{app}\app\PeerSync.exe')) then
+  begin
+    ExtractTemporaryFile('Stop-ClientAppAndWait.ps1');
+    if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{tmp}\Stop-ClientAppAndWait.ps1') + '" -ExecutablePath "' +
+      ExpandConstant('{app}\app\PeerSync.exe') + '"') <> 0 then
+      Result := 'The PeerSync dashboard did not exit. See setup log.';
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -246,6 +262,11 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep <> usUninstall then Exit;
+  if FileExists(ExpandConstant('{app}\app\PeerSync.exe')) then
+    RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\tools\Stop-ClientAppAndWait.ps1') + '" -ExecutablePath "' +
+      ExpandConstant('{app}\app\PeerSync.exe') + '"');
   if ServiceExists then
     RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
