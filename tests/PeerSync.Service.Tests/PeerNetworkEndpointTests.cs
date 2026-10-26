@@ -30,10 +30,10 @@ public sealed class PeerNetworkEndpointTests
             if (entry.Event == "service.listener_bind_retry") retrySeen.TrySetResult();
             if (entry.Event == "service.listener_bind_recovered") recovered.TrySetResult();
         };
-        using var blocker = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
-        { ExclusiveAddressUse = true };
-        blocker.Bind(new IPEndPoint(IPAddress.Any, 0));
-        blocker.Listen(1);
+        // The service binds QUIC before TCP. A TCP-only ephemeral port can be
+        // occupied by another UDP listener, making this TCP retry test fail
+        // before it reaches the listener that this test deliberately blocks.
+        using var blocker = ReserveTcpPortWithAvailableUdp();
         int port = ((IPEndPoint)blocker.LocalEndPoint!).Port;
 
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -56,6 +56,30 @@ public sealed class PeerNetworkEndpointTests
         await using var runtime = await startup;
         await recovered.Task.WaitAsync(TimeSpan.FromSeconds(10), timeout.Token);
         runtime.Completion.IsFaulted.ShouldBeFalse();
+    }
+
+    private static Socket ReserveTcpPortWithAvailableUdp()
+    {
+        for (int attempt = 0; attempt < 32; attempt++)
+        {
+            var blocker = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+            { ExclusiveAddressUse = true };
+            try
+            {
+                blocker.Bind(new IPEndPoint(IPAddress.Any, 0));
+                blocker.Listen(1);
+                int port = ((IPEndPoint)blocker.LocalEndPoint!).Port;
+                using var udpProbe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+                { ExclusiveAddressUse = true };
+                udpProbe.Bind(new IPEndPoint(IPAddress.Any, port));
+                return blocker;
+            }
+            catch (SocketException)
+            {
+                blocker.Dispose();
+            }
+        }
+        throw new IOException("No TCP listener port was also available for QUIC after 32 attempts.");
     }
 
     [Theory]
