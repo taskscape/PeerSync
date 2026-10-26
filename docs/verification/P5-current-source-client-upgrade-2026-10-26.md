@@ -52,9 +52,14 @@ the included `Run-PeerSync-Upgrade.cmd` elevated on the second and third PCs;
 the wrapper verifies the setup, signer, version, installed service and CLI,
 and emits a local JSON report.
 
-The existing shared tree now contains 1,427,599,907 native content bytes.
-Adding the required 9 GiB corpus there would exceed the 10 GiB test-tree cap.
-Before the physical LAN run, either use a fresh shared test folder or move
-obsolete test artifacts out of this tree after all recipients have finished
-with them. Recheck the exact content total and free space before generation;
-no corpus was started on the first PC as part of this upgrade.
+An initial 1,427,599,907-byte size estimate incorrectly included the root
+`.psp` metadata. The tree verifier excludes that metadata from the 10 GiB
+content cap. The corrected packaged PowerShell 5.1 preflight measured
+732,810,649 counted content bytes and 694,836,644 `.psp` metadata bytes on
+the first PC. The projected content after a 9 GiB corpus is 10,396,487,065
+bytes, leaving 340,931,175 bytes below the cap. The read-only preflight
+returned `status: ready` without creating a target or report, and the volume
+had 42,220,085,248 free bytes against the generator's 24,696,061,952-byte
+minimum. Recheck content and free space immediately before generation and
+keep later soak writes inside the remaining headroom. No corpus was started
+on the first PC as part of this upgrade.
