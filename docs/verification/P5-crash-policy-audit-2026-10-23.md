@@ -65,6 +65,11 @@ or per-executable LocalDumps values. Both services were Running. The two
 read-only JSON results are retained under
 `artifacts/field/client-1.0.31-crash-policy-20261026/`; the second-PC query
 used a temporary WinRM session, after which the first PC's WinRM service and
-TrustedHosts setting were restored. This remains point-in-time policy
-evidence; the third PC, physical Rendezvous server, privileged dump handling
-and independent review remain open.
+TrustedHosts setting were restored. On 2026-10-27 the same installed audit ran
+through the temporary restricted management session on physical third PC
+`LARKBOX-X-1` after its 1.0.31.0 upgrade. Its three executable exclusions and
+installer ownership markers were present; global and per-executable LocalDumps
+had no configured values. The read-only JSON is under
+`artifacts/field/client-1.0.31.0-third-20261027/crash-policy.json`.
+These are point-in-time policy observations; physical Rendezvous server,
+privileged dump handling and independent review remain open.
