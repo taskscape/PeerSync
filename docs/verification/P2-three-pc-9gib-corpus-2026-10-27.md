@@ -60,3 +60,25 @@ This is an intervention and a real availability failure even if the native
 hashes eventually match. The source-side retry repair is recorded in
 [the authentication-recovery note](P2-peer-authentication-recovery-2026-10-27.md);
 it has not been installed on the three field PCs in this run.
+
+The monitor wrote its terminal result at **07:21:05 UTC**, the original
+three-hour deadline. It reports `failed` with
+`native-convergence-deadline`. The source and second PC each held exactly
+100,033 files and 9,663,676,591 bytes in this run's native subtree; the
+third held 74,620 files and 9,637,653,679 bytes. The deficit was exactly
+25,413 small files and 26,022,912 bytes. No common capture hour was
+signaled, so no three-way native hash comparison exists. The monitor stderr
+file is empty. Its terminal JSON and one-minute progress journal are retained
+under `artifacts/field/physical-preflight-20261027/`.
+
+At the deadline the manually restarted second service was running, and the
+third service journal still recorded successful `apply.complete` events and a
+1,000-file pull pass with no deferred items; it had not stopped or run out of
+content. Its recent journal also recorded requests to a peer that could not
+serve a block, causing avoidable fallback traffic. The installed 1.0.31.0
+build predates [author-first block routing](P2-source-aware-block-routing-2026-10-27.md),
+the [authentication retry repair](P2-peer-authentication-recovery-2026-10-27.md),
+and [service recovery reporting](P3-service-noncrash-recovery-2026-10-27.md).
+This run is a failed physical gate, not a throughput pass or a hash pass.
+The source repairs need a new signed test build and a fresh bounded physical
+run; a later arrival of the remaining files cannot change this run's result.

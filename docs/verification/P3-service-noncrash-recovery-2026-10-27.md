@@ -17,10 +17,16 @@ its Windows service lifetime with a nonzero exit code before orderly disposal
 when startup or a supervised component fails. It leaves normal operator stop
 and control-host restart paths unchanged. Local `sc failureflag /?` confirms
 that this flag makes configured recovery actions eligible when a service
-enters `SERVICE_STOPPED` with a nonzero Win32 exit code.
+enters `SERVICE_STOPPED` with a nonzero Win32 exit code. Microsoft documents
+[`ServiceBase.ExitCode`](https://learn.microsoft.com/dotnet/api/system.serviceprocess.servicebase.exitcode)
+as the code to set before a failed service stop. The
+[`SERVICE_FAILURE_ACTIONS_FLAG` documentation](https://learn.microsoft.com/windows/win32/api/winsvc/ns-winsvc-service_failure_actions_flag)
+says changing the flag takes effect at the next system start, so a controlled
+post-reboot field/VM check is necessary; merely seeing `qfailureflag` return
+true after setup does not prove recovery is active immediately.
 
 `PeerSync.Service` built locally in Release with zero warnings and errors on
 the changed source. The current installed 1.0.31.0 field build has neither
 change. A fresh development-signed installer and a controlled SCM
-managed-failure check are still required before claiming automatic recovery;
+managed-failure check after reboot are still required before claiming automatic recovery;
 the physical corpus interruption remains a recorded availability failure.
