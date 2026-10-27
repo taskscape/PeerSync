@@ -82,3 +82,7 @@ and [service recovery reporting](P3-service-noncrash-recovery-2026-10-27.md).
 This run is a failed physical gate, not a throughput pass or a hash pass.
 The source repairs need a new signed test build and a fresh bounded physical
 run; a later arrival of the remaining files cannot change this run's result.
+The subsequent [requirement amendment](../requirements/three-hour-ten-gib-test-budget.md)
+sets the next physical run to 50,000 small files under the same 9 GiB and
+three-hour bounds, as the user had approved reducing file count to fit that
+window. This historical 100,000-file run remains failed.

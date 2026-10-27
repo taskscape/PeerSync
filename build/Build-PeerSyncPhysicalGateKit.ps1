@@ -51,7 +51,7 @@ $manifest = [ordered]@{
     corpusDefaultBytes = 9GB
     maximumTestTreeContentBytes = 10GB
     maximumActiveHours = 3
-    requiredSmallFiles = 100000
+    requiredSmallFiles = 50000
     requiredCaptureIntervals = 3
     files = $hashes
 }
@@ -66,7 +66,7 @@ Use it with the already installed PeerSync clients on three physical Windows
 PCs. Transfer the ZIP through a trusted channel, compare its SHA-256 with the
 builder's printed value, then extract the same ZIP on each PC.
 
-The generated corpus defaults to 9 GiB of content and 100,000 small files.
+The generated corpus defaults to 9 GiB of content and 50,000 small files.
 The generator and soak writer check existing tree content before writing;
 keep the entire test tree at or below 10 GiB, including later soak writes.
 Use the generator's -PreflightOnly switch to inspect the exact budget without

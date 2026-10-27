@@ -9,7 +9,7 @@ longer/larger evidence remains historical and is not silently reclassified.
 
 | Gate | Revised acceptance |
 | --- | --- |
-| P2 physical LAN corpus | Three physical PCs converge a 9 GiB random-content mix with 100,000 small files, 24 deep levels and eight large files within three hours after the source folder resumes. Keep total test-tree content at or below 10 GiB, reserving up to 1 GiB for later soak operations. Preserve native counts, hashes, transport and elapsed-time evidence. |
+| P2 physical LAN corpus | Three physical PCs converge a 9 GiB random-content mix with **50,000 small files**, 24 deep levels and eight large files within three hours after the source folder resumes. Keep total test-tree content at or below 10 GiB; measure the existing tree before generation and reserve whatever space remains for later soak operations. Preserve native counts, hashes, transport and elapsed-time evidence. |
 | P2/P4/P5 physical soaks | At most three hours of active random operations, with comparable native-tree snapshots at scheduled hours 0, 1, 2 and 3. The final read-only capture and report comparison may finish after operations stop. Preserve sleep/resume, Wi-Fi, NAT and relay observations required by the respective gate. A missed or mismatched checkpoint fails. |
 | P5 fuzz | Three continuous hours with all seven existing targets, retained corpus, zero crashes and stderr. The already completed 24-hour seven-target campaign exceeds the reduced duration and remains valid evidence; do not rerun it for this change. |
 | P5 scale | First index **100,000 files** within 20 minutes on SSD; idle CPU below 1%; observed peak working set and sampled private memory below 300 MB; unchanged rescan has zero rehashes/updates and preserves sequence. A fresh peer must verify all 100,000 native names and bytes and index rows within one three-hour end-to-end benchmark execution. The older million-file completed result remains useful stress evidence, but the interrupted later million-file run does not close the revised gate. |
@@ -25,6 +25,16 @@ corpus, its **disk preflight** therefore asks for 23 GiB free on the source
 volume before generation; this is an implementation safety threshold, not a
 23 GiB test-content target or a new acceptance cap. Its preflight reports the
 three components and actual free bytes so an operator can distinguish them.
+
+The physical P2 count was reduced from 100,000 to 50,000 after the first
+[three-PC field run](../verification/P2-three-pc-9gib-corpus-2026-10-27.md)
+hit the three-hour deadline: the third PC held all large/deep-tree content
+but lacked 25,413 small files. This applies the user's instruction to reduce
+the file count to fit three hours. The old run remains failed; it is not
+retroactively accepted. The separate P5 local scale gate still requires
+100,000 files and its completed 88.87-minute result remains valid. The 9 GiB
+content amount, three physical PCs, 24 deep levels, eight large files,
+native-byte/hash comparison and three-hour deadline are unchanged.
 No failed assertion, missing physical network path, independent security
 review, release-signer check or code-signing requirement is waived. A run that
 hits its new time cap is a failed or incomplete gate; it cannot be accepted

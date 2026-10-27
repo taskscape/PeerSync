@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory)][string]$OutputFile,
     [switch]$PreflightOnly,
     [ValidateRange(1048576, 10737418240)][long]$TotalBytes = 9GB,
-    [ValidateRange(1, 100000)][int]$SmallFileCount = 100000,
+    [ValidateRange(1, 100000)][int]$SmallFileCount = 50000,
     [ValidateRange(1, 1048576)][int]$SmallFileBytes = 1024,
     [ValidateRange(1, 128)][int]$DeepLevels = 24,
     [ValidateRange(1, 1048576)][int]$DeepFileBytes = 4096,
