@@ -17,6 +17,30 @@ public sealed class DirectoryParentProofTests : IDisposable
     public DirectoryParentProofTests() => Directory.CreateDirectory(fixture);
 
     [Fact]
+    public async Task OnlyUnprovenAuthenticatedDirectMembersCanAdvanceABlockingParent()
+    {
+        await using var index = await Open();
+        var (queued, draft) = await Prepare(index);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
+        await Graph(index, Source(1), 2);
+        var proof = (await index.BeginDirectoryParentProofAsync(queued, draft, Source(1), Id(9), Now,
+            cancellationToken: Token)).Proof;
+        proof = await Discover(index, queued, draft, proof);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/other").ShouldBeFalse();
+        index.HasUnprovenDirectoryParentMember("topic/0000/grandchild").ShouldBeFalse();
+
+        var root = index.ReadNextDirectoryParentRoot(proof)!;
+        await index.AdvanceDirectoryParentRootAsync(queued, draft, proof, root,
+            index.ReadDirectoryGraphMemberPage(root.Source.SourceId, limit: 1), Token);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeTrue();
+        await index.DiscardDirectoryPublicationAsync(queued, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task ParentRepresentativesAndVerifiedPrefixesSurviveReopenAndVectorOnlyQueueRestaging()
     {
         DirectoryPublication queued; DirectoryCaptureState draft; DirectoryParentProof proof; DirectoryParentRoot root;

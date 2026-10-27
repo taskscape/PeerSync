@@ -96,8 +96,8 @@ public sealed partial class FileApplier
             if (decision.BlockedReason == "directory-publication-pending") Signal("publication-pending", session);
             return FileApplyOutcome.Blocked;
         }
-        if (scheduled && decision.Winner is { Deleted: true } && index.HasBlockingDirectoryPublication(key, includeDescendants: true))
-            Signal("ancestor-publication-bypassed", session);
+        if (scheduled && index.HasBlockingDirectoryPublication(key, includeDescendants: true))
+            Signal(decision.Winner is { Deleted: true } ? "ancestor-publication-bypassed" : "ancestor-publication-child-recovery", session);
         if (!decision.RequiresApply) return FileApplyOutcome.Unchanged;
         if (!selection.RangeComplete) { Signal("index-range-pending", session); return FileApplyOutcome.Deferred; }
         var winner = decision.Winner!;
