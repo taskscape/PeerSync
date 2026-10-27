@@ -2333,6 +2333,8 @@ The [development-signed 1.0.39.0 field deployment](docs/verification/P2-three-pc
 
 The subsequent [durable metadata-yield repair and 1.0.40.0 field deployment](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#durable-metadata-yields-and-10400-field-deployment) addresses 34 measured third-PC graph timeouts that had completed durable nodes but triggered exponential backoff. The full Release Engine suite passes 1,058/1,058, and all three physical clients now run the exact development-signed 1.0.40.0 package with unchanged sentinels. A read-only full native snapshot before deployment found matching 50,132-file, 10,398,480,862-byte trees on all three PCs, but it was outside the formal hourly window. Immediately after deployment the second had zero and the third ten remaining failed-run needed rows. A fresh four-checkpoint three-hour physical soak, WAN soak, independent review and release signing remain unchecked.
 
+The [metadata pass fairness repair](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#metadata-pass-fairness-and-10410-field-deployment) caps total graph work under one folder operation gate at ten seconds. A read-only third-PC probe found 62 incomplete graphs with 360,926 pending nodes, which could otherwise occupy multi-minute Puller passes. Full local Engine 1,058/1,058 passes; all three physical services now run the signed-development 1.0.41.0 package with unchanged sentinels. Its immediate third-PC index still has ten needed failed-run deletions. Convergence, the fresh three-hour physical soak and the separate release gates remain unchecked.
+
 ## 9. Phase 3: WPF app and installer (weeks 14-17)
 
 Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
