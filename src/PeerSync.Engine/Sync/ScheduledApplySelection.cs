@@ -58,11 +58,11 @@ internal sealed class ScheduledApplySelection : IDisposable
         LocalFileRow? known, NeededDecision decision, bool scheduled)
     {
         if (!index.HasBlockingDirectoryPublication(key, includeDescendants: true)) return false;
-        // The parent-root proof itself may be waiting for this exact direct
-        // child. A scheduled authenticated live receipt changes the capture
-        // epoch before the old parent can publish, breaking that dependency
-        // cycle without releasing the barrier for unrelated work or an
-        // unpublished target/descendant.
+        // An ordinary or reconstruction parent-root proof may be waiting for
+        // this exact direct child. A scheduled authenticated live receipt
+        // changes the capture epoch before an ordinary ancestor can publish,
+        // breaking that dependency cycle without releasing the barrier for
+        // unrelated work or an unpublished target/descendant.
         if (scheduled && decision.BlockedReason is null && decision.RequiresApply
             && decision.Winner is { Deleted: false } live
             && !live.SourceDevice.SequenceEqual(ownDevice)

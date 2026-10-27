@@ -30,9 +30,10 @@ public sealed partial class FolderIndex
     public DirectoryParentProof? ReadDirectoryParentProof(string path)
     { using var connection = database.OpenReader(); return FindParentProof(connection, null, PathRules.Key(path)); }
 
-    /// <summary>An authenticated parent graph has a still-unproven direct child
-    /// at this path. A scheduled live receipt for that exact child may advance
-    /// the parent proof; unrelated paths must retain the publication barrier.</summary>
+    /// <summary>An authenticated ordinary or reconstruction parent graph has a
+    /// still-unproven direct child at this path. A scheduled live receipt for
+    /// that exact child may advance the parent proof; unrelated paths retain
+    /// any ordinary ancestor publication barrier.</summary>
     public bool HasUnprovenDirectoryParentMember(string path)
     {
         string key = PathRules.Key(path), parent = CaptureParent(key);
@@ -46,7 +47,7 @@ public sealed partial class FolderIndex
             + "JOIN directory_graphs g ON g.id=r.source_id AND g.complete=1 AND g.retiring=0 "
             + "AND g.root_id=q.root_id AND g.directory_path=r.source_path AND g.node_hash=r.node_hash AND g.node_length=r.node_length "
             + "JOIN directory_graph_members m ON m.graph_id=r.source_id AND m.path_key=$key "
-            + "WHERE q.path_key=$parent AND q.reconstruction_only=0 AND q.paused=0 "
+            + "WHERE q.path_key=$parent AND q.paused=0 "
             + "AND p.discovery_complete=1 AND p.resetting=0 AND p.remote_revision=p.discovery_revision "
             + "AND r.complete=0 AND (r.cursor IS NULL OR m.path_key>r.cursor));";
         command.Parameters.AddWithValue("$parent", parent);

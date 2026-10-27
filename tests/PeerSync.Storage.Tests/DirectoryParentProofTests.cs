@@ -16,11 +16,13 @@ public sealed class DirectoryParentProofTests : IDisposable
     private static CancellationToken Token => TestContext.Current.CancellationToken;
     public DirectoryParentProofTests() => Directory.CreateDirectory(fixture);
 
-    [Fact]
-    public async Task OnlyUnprovenAuthenticatedDirectMembersCanAdvanceABlockingParent()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyUnprovenAuthenticatedDirectMembersCanAdvanceABlockingParent(bool reconstructionOnly)
     {
         await using var index = await Open();
-        var (queued, draft) = await Prepare(index);
+        var (queued, draft) = await Prepare(index, reconstructionOnly);
         index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
         await Graph(index, Source(1), 2);
         var proof = (await index.BeginDirectoryParentProofAsync(queued, draft, Source(1), Id(9), Now,
@@ -245,10 +247,12 @@ public sealed class DirectoryParentProofTests : IDisposable
         proof.ToString().ShouldNotContain("TOPIC");
     }
 
-    private static async Task<(DirectoryPublication, DirectoryCaptureState)> Prepare(FolderIndex index)
+    private static async Task<(DirectoryPublication, DirectoryCaptureState)> Prepare(FolderIndex index, bool reconstructionOnly = false)
     {
         var source = Source(1); await index.LocalFiles.UpsertAsync([new("topic", 1, 0, Now, 16, false, Now, null, new Dictionary<ulong, ulong> { [1] = 1 }, source.Record, Native)], Token);
-        var queued = await index.StageDirectoryPublicationAsync(new(Guid.NewGuid(), "topic", Root, Native, index.LocalFiles.Find("topic")!.LocalSequence, 16, source.Record, Id(11), 0, Now, Now), Token);
+        var queued = await index.StageDirectoryPublicationAsync(new DirectoryPublication(Guid.NewGuid(), "topic", Root, Native,
+            index.LocalFiles.Find("topic")!.LocalSequence, 16, source.Record, Id(11), 0, Now, Now)
+        { ReconstructionOnly = reconstructionOnly }, Token);
         var draft = await index.BeginDirectoryCaptureAsync("topic", Root, Native, Id(10), 0, new byte[16], Token);
         draft = await index.AdvanceDirectoryCaptureAsync(draft, 0, null, null, Id(12), 12, Token);
         return await Rebind(index, queued, draft);

@@ -170,7 +170,7 @@ public sealed partial class FolderIndex
             if (HasPendingCase(connection, transaction, expected.PathKey, includeDescendants: !(frozen.Type == 1 && !frozen.Deleted && expected.ExpectedLocalSequence is null)))
                 throw new IOException("Case preservation must complete before applying the original path.");
             LocalFiles.WriteBatch(connection, transaction, [frozen], cancellationToken);
-            WakeOrdinaryParentPublication(connection, transaction, expected.PathKey);
+            WakeWaitingParentPublication(connection, transaction, expected.PathKey);
             Archive.WriteBatch(connection, transaction, retained, cancellationToken);
             using var needed = new NeededRewrite(connection, transaction, resolver);
             needed.Update(expected.PathKey);
