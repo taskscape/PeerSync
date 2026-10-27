@@ -253,6 +253,7 @@ begin
       '\"" start= auto');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSync reset= 86400 actions= restart/60000/restart/60000/restart/300000');
+  RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'failureflag PeerSync 1');
   RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--init');
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +

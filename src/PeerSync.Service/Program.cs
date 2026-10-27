@@ -56,23 +56,36 @@ try
             firstHost = null;
             await using (host)
             {
-                journal.TryWrite(new("service.control_ready", "startup") { Transport = DiagnosticTransport.NamedPipe });
-                Task controlShutdown = host.WaitForShutdownAsync();
-                Task finished = await Task.WhenAny(controlShutdown, folderHost.Completion, host.RestartRequested).ConfigureAwait(false);
-                if (finished == folderHost.Completion)
+                try
                 {
-                    await folderHost.Completion.ConfigureAwait(false);
-                    throw new InvalidOperationException("The installed folder scheduler stopped unexpectedly.");
+                    journal.TryWrite(new("service.control_ready", "startup") { Transport = DiagnosticTransport.NamedPipe });
+                    Task controlShutdown = host.WaitForShutdownAsync();
+                    Task finished = await Task.WhenAny(controlShutdown, folderHost.Completion, host.RestartRequested).ConfigureAwait(false);
+                    if (finished == folderHost.Completion)
+                    {
+                        await folderHost.Completion.ConfigureAwait(false);
+                        throw new InvalidOperationException("The installed folder scheduler stopped unexpectedly.");
+                    }
+                    if (finished == host.RestartRequested)
+                    {
+                        journal.TryWrite(new("service.control_restarting", "control") { Transport = DiagnosticTransport.NamedPipe });
+                        continue;
+                    }
+                    await controlShutdown.ConfigureAwait(false);
+                    break;
                 }
-                if (finished == host.RestartRequested)
+                catch
                 {
-                    journal.TryWrite(new("service.control_restarting", "control") { Transport = DiagnosticTransport.NamedPipe });
-                    continue;
+                    host.MarkServiceFailure();
+                    throw;
                 }
-                await controlShutdown.ConfigureAwait(false);
-                break;
             }
         }
+    }
+    catch
+    {
+        firstHost?.MarkServiceFailure();
+        throw;
     }
     finally
     {

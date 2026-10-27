@@ -33,6 +33,15 @@ public sealed class ControlApiHost : IAsyncDisposable
     internal PowerEvents Power => power;
     internal Task RestartRequested => lifetime.RestartRequested;
 
+    // A supervised component failure can leave the Windows service host in a
+    // normal StopAsync path. Set the SCM exit code before disposal so configured
+    // non-crash recovery actions distinguish that failure from an operator stop.
+    internal void MarkServiceFailure()
+    {
+        if (application.Services.GetService<IHostLifetime>() is PeerSyncServiceLifetime service)
+            service.ExitCode = 1;
+    }
+
     public static Task<ControlApiHost> StartInstalledAsync(ControlStatusRuntime runtime, DiagnosticJournal? diagnostics = null, CancellationToken cancellationToken = default)
     {
         var group = (SecurityIdentifier)new NTAccount(Environment.MachineName, ControlServiceNames.UsersGroup).Translate(typeof(SecurityIdentifier));
@@ -91,6 +100,8 @@ public sealed class ControlApiHost : IAsyncDisposable
         try { await app.StartAsync(token).ConfigureAwait(false); return new(app, shutdown, stopping, budget, power, networkChanges); }
         catch
         {
+            if (app.Services.GetService<IHostLifetime>() is PeerSyncServiceLifetime service)
+                service.ExitCode = 1;
             networkChanges.Changed -= runtime.NotifyNetworkChanged;
             networkChanges.Dispose(); stopping.Dispose(); shutdown.Dispose(); await app.DisposeAsync().ConfigureAwait(false); throw;
         }
