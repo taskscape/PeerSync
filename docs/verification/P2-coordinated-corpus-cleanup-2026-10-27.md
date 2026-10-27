@@ -18,6 +18,8 @@ joined root, requires the archive to be on the same volume, and refuses
 `-Move` while the local PeerSync service is running. Its default is read-only;
 an explicit `-Move` performs one directory rename and writes a JSON report
 outside the shared folder. It never deletes content or clears an index.
+An externally retained owner marker is subject to the same ancestor reparse
+check as the source and archive paths.
 
 The first PC's read-only preflight identified the 16 late copies and exact
 19,122,356,224-byte total while reporting `moved: false`. A disposable
@@ -27,7 +29,8 @@ Running again after the controlled stop. The guest remained on signed
 1.0.32.0. These are utility checks, not physical corpus acceptance.
 
 For the field cleanup, first install 1.0.32.0 on the third PC and verify all
-three joined roots and owner markers. Run read-only preflight on each exact
+three joined roots and owner markers. Create a distinct local archive directory
+outside each joined root on the same volume. Run read-only preflight on each exact
 root. Stop PeerSync on **all three PCs** before any move; move each machine's
 old-run directory to a unique archive path outside its joined root, then
 restart all three services. Retain the original source archive and every late

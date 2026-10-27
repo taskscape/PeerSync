@@ -68,6 +68,7 @@ Assert-OrdinaryAncestors $outputParent
 
 $marker = if ($OwnerMarkerPath) { [IO.Path]::GetFullPath($OwnerMarkerPath) }
     else { [IO.Path]::Combine($source, 'owner.json') }
+Assert-OrdinaryAncestors ([IO.Path]::GetDirectoryName($marker))
 if (-not [IO.File]::Exists($marker) -or
     ([IO.File]::GetAttributes($marker) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
     throw 'The exact run ownership marker is missing or is a reparse point.'
