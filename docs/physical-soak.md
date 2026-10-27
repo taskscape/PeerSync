@@ -80,6 +80,44 @@ the old one. The small-fixture control for this tool is recorded in the
 
 ## Run random operations
 
+For an unattended three-hour operation window, the packaged
+`Invoke-PeerSyncPhysicalSoak.ps1` starts the hourly capture loop and runs
+bounded operation batches on one PC. Stage the launcher and its four companion
+scripts together in a directory outside the synchronized folder. Use the same
+fresh run GUID and future UTC hour on all three PCs, with distinct labels and
+existing local output directories. Run each launcher in Windows PowerShell
+5.1 before that hour. `-PreflightOnly` checks the tree's 10 GiB content limit,
+tool hashes, paths and timing without starting the soak:
+
+```powershell
+$run = [guid]'11111111-2222-3333-4444-555555555555' # replace once
+$first = '2026-10-27T13:00:00Z' # replace with the same future UTC hour
+$root = 'C:\PeerSync-Test\Share' # replace on each PC
+$reports = 'C:\PeerSync-Gate-Evidence\soak' # outside the share; create first
+& .\tools\Invoke-PeerSyncPhysicalSoak.ps1 -Root $root -RunId $run `
+  -MachineLabel 'pc-a' -FirstHourUtc $first -OutputDirectory $reports `
+  -PreflightOnly
+# After all three preflights return ready, rerun the same line without
+# -PreflightOnly on each PC; keep each launcher process running.
+```
+
+The launcher records its own SHA-256 and companion-tool hashes in a unique
+JSONL journal, keeps child stdout/stderr outside the share, and refuses a
+duplicate run/label journal. It starts four hourly snapshots at hours 0–3,
+runs random batches only during minutes 20–45 of each active hour, and stops
+operations at hour 3. Each batch has a 15-minute or remaining-window bound;
+failure stops its exact child process and retains the log. The final read-only
+hour-3 capture can finish after operations stop. A `complete` launcher record
+does not itself pass the gate: collect all three machines' four snapshots and
+run the batch comparator below. Record sleep/resume, Wi-Fi changes, permission
+changes and native route evidence separately. If a machine restarts or a
+scheduled hour is missed, preserve the partial journals and treat that run as
+incomplete.
+
+The manual batch and capture-loop commands below remain available for a
+controlled recovery or focused check. Do not run them concurrently with the
+launcher for the same run and label.
+
 The kit's `tools/Invoke-PeerSyncSoakOperations.ps1` creates and changes files
 only under `PeerSync-Soak\<run-guid>\<machine-label>` inside the specified
 synchronized folder. Its per-machine ownership marker prevents a different
