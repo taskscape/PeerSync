@@ -6,24 +6,26 @@ namespace PeerSync.Engine.Sync;
 public sealed partial class FileApplier
 {
     // A newer tombstone may be the causal input a child reconstruction needs.
-    // This exception changes only an already-deleted regular-file row; it never
-    // mutates native content or releases the staged ancestor's publication hold.
+    // A missing local row is allowed only for the exact unproven graph member.
+    // This exception never mutates native content or releases the ancestor hold.
     private async Task<bool> TryApplyAbsentTombstoneAsync(SafeFileTree tree, ScheduledApplySelection selection,
         string key, Guid session, CancellationToken token)
     {
         if (!selection.HoldsReferences || !selection.RangeComplete
-            || selection.Known is not { Type: 0, Deleted: true, Flags: LocalFileState.None, Record: not null } known
+            || selection.Known is { } known && known is not { Type: 0, Deleted: true, Flags: LocalFileState.None, Record: not null }
+            || selection.Known is null && !index.HasUnprovenDirectoryParentMember(key)
+            || index.HasBlockingDirectoryPublicationAtOrBelow(key)
             || index.HasPendingCasePreservation(key, includeDescendants: true)) return false;
         // Selection adds the publication barrier after ordinary policy. Recheck
         // that policy so this exception cannot mask ignored/otherwise blocked work.
-        var decision = needed.Decide(new(key, known, index.RemotesForPath(key).ToArray()));
+        var decision = needed.Decide(new(key, selection.Known, index.RemotesForPath(key).ToArray()));
         if (decision.BlockedReason is not null || !decision.RequiresApply
             || decision.Winner is not { Type: 0, Deleted: true } winner || decision.DesiredRecord is null) return false;
         var desired = VersionView.Open(decision.DesiredRecord, keys, winner.SourceDevice.ToArray());
         if (!desired.Deleted || desired.Type != 0 || !Absent()) return false;
         var state = new ApplyState { Root = tree.Identity.ToArray(), Version = desired, Vector = decision.Vector,
             Prepared = true, ScheduledDeletion = true };
-        var intent = new ApplyIntent(session, key, known.LocalSequence, state.Encode());
+        var intent = new ApplyIntent(session, key, selection.Known?.LocalSequence, state.Encode());
         await index.ReserveApplyAsync(intent, token).ConfigureAwait(false);
         Signal("prepared", session);
         if (!Absent())

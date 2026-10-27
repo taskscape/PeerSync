@@ -2327,6 +2327,8 @@ The distinct 20:00 [three-PC attempt](docs/verification/P2-three-pc-physical-soa
 
 Development-signed [1.0.38.0 is now installed](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#10370-deployment-and-remaining-queued-publication-delay) on all three PCs with Running services and unchanged sentinels. The first PC's SYSTEM signing check failed before setup because machine trust lacked the development signer; an elevated user install validated the exact package and completed. Automatic approval review blocked the optional machine-trust import, so no machine trust was changed. The first post-upgrade read-only second/third indexes still had 44/47 needed soak rows, while the third's pending publication queue fell from 97 to 14. This is recovery progress, not a physical corpus or soak pass.
 
+The [exact second-PC dependency probe](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#exact-missing-tombstone-dependency-and-source-repair) found a complete reconstruction rebase waiting on its authenticated direct member: a missing local regular-file row with a scheduled signed tombstone. The ordinary ancestor publication blocked that deletion. The narrow Engine repair admits only that absent native target and exact unproven graph member under a complete remote range; five focused controls and the full local Release Engine suite pass **1,057/1,057**. Physical deployment, complete three-PC native convergence and a new four-checkpoint, three-hour soak are still required. The two failed attempts remain failed.
+
 ## 9. Phase 3: WPF app and installer (weeks 14-17)
 
 Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
