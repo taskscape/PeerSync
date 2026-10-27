@@ -69,7 +69,7 @@ public sealed class TransportFolder : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(keys);
         if (ownDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(ownDevice));
         this.rootPath = rootPath; this.index = index; own = ownDevice.ToArray(); clock = timeProvider ?? TimeProvider.System;
-        this.ignore = ignore ?? new IgnoreMatcher();
+        this.ignore = ignore ?? new IgnoreMatcher(settings?.IgnoreRules ?? "");
         this.uploadThrottle = uploadThrottle; this.downloadThrottle = downloadThrottle;
         folderId = keys.FolderId();
         puller = new(rootPath, index, keys, own, FetchAsync, settings, clock, journal, directorySnapshots, this.ignore);

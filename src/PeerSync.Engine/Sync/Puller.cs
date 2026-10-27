@@ -80,8 +80,9 @@ public sealed class Puller : IDisposable
         ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(fetch);
         this.index = index; this.rootPath = rootPath; this.fetch = fetch; own = ownDevice?.ToArray() ?? throw new ArgumentNullException(nameof(ownDevice));
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson()); clock = timeProvider ?? TimeProvider.System; this.journal = journal;
-        needed = new(index, keys, own, this.settings, journal: journal);
-        scanner = new(rootPath, index, keys, own, ignore: ignore, timeProvider: clock, settings: this.settings, journal: journal)
+        IgnoreMatcher effectiveIgnore = ignore ?? new(this.settings.IgnoreRules);
+        needed = new(index, keys, own, this.settings, ignore: effectiveIgnore, journal: journal);
+        scanner = new(rootPath, index, keys, own, ignore: effectiveIgnore, timeProvider: clock, settings: this.settings, journal: journal)
             { StageDirectorySnapshots = directorySnapshots };
         if (directorySnapshots) publications = new(rootPath, index, keys, own, this.settings, clock, journal);
         metadata = new(rootPath, index, keys, own, clock, fetch, journal);

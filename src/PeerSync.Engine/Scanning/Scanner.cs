@@ -75,10 +75,10 @@ public sealed partial class Scanner : IDisposable
         this.rootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
         this.index = index; this.keys = keys; device = deviceId.ToArray();
         deviceShort = BinaryPrimitives.ReadUInt64LittleEndian(device);
-        this.ignore = ignore ?? new();
+        this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
+        this.ignore = ignore ?? new IgnoreMatcher(this.settings.IgnoreRules);
         this.clock = timeProvider ?? TimeProvider.System;
         this.journal = journal;
-        this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
         this.hashConcurrency = hashConcurrency ?? Math.Max(1, Environment.ProcessorCount - 1);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(this.hashConcurrency);
     }

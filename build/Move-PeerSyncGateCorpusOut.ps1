@@ -33,6 +33,14 @@ function Assert-OrdinaryAncestors([string]$path) {
     }
 }
 
+function ExtendedPath([string]$path) {
+    if ($path.StartsWith('\\?\', [StringComparison]::Ordinal)) { return $path }
+    if ($path.StartsWith('\\', [StringComparison]::Ordinal)) {
+        return '\\?\UNC\' + $path.Substring(2)
+    }
+    return '\\?\' + $path
+}
+
 $rootPath = FullDirectory $Root
 $archivePath = FullDirectory $ArchiveRoot
 $run = $RunId.ToString('N')
@@ -81,13 +89,18 @@ if ($owner.schema -ne 'peersync-gate-corpus-owner-v1' -or
 }
 
 $queue = [System.Collections.Generic.Queue[string]]::new()
-$queue.Enqueue($source)
+$queue.Enqueue((ExtendedPath $source))
 $files = [long]0
 $bytes = [long]0
 while ($queue.Count -gt 0) {
     $directory = $queue.Dequeue()
     foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
-        $attributes = [IO.File]::GetAttributes($entry)
+        try {
+            $attributes = [IO.File]::GetAttributes($entry)
+        } catch {
+            $detail = $_.Exception.GetBaseException()
+            throw "Cannot inspect corpus entry (pathLength=$($entry.Length), path=$entry): $($detail.GetType().Name): $($detail.Message)"
+        }
         if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Corpus contains a reparse point: $entry"
         }

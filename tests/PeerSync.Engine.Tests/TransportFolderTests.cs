@@ -3,6 +3,7 @@ using System.Security.Authentication;
 using System.Threading.Channels;
 using Google.Protobuf;
 using PeerSync.Core.Ignore;
+using PeerSync.Core.Settings;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
@@ -20,6 +21,39 @@ public sealed class TransportFolderTests : IDisposable
     private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-TransportFolder-" + Guid.NewGuid().ToString("N"));
     private readonly FolderKeys keys = FolderKeys.CreateNew();
     private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task InstalledFolderIgnorePolicyExcludesRemoteFilesButTransfersOtherPaths()
+    {
+        await using var source = await NodeAsync(81);
+        string retired = Path.Combine(source.Root, "retired");
+        Directory.CreateDirectory(retired);
+        File.WriteAllText(Path.Combine(retired, "old.txt"), "retired content");
+        File.WriteAllText(Path.Combine(source.Root, "current.txt"), "current content");
+        await Scan(source);
+
+        string receiverRoot = Path.Combine(fixture, "82", "tree");
+        Directory.CreateDirectory(receiverRoot);
+        await using var receiverIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "82", "index.db"), Token);
+        byte[] receiverId = new byte[32];
+        BinaryPrimitives.WriteUInt64LittleEndian(receiverId, 82);
+        await using var receiver = new TransportFolder(receiverRoot, receiverIndex, keys, receiverId,
+            new FolderSettings { IgnoreRules = "/retired/" });
+        await receiver.RunPassAsync(Token);
+
+        var network = new InMemoryNetwork();
+        var endpoint = network.Register(receiverId, receiver.CreateHandler);
+        network.Register(source.Id, source.Engine.CreateHandler);
+        await using var peer = await receiver.ConnectAsync(endpoint.Connect(source.Id), Token);
+        (await peer.SynchronizeAsync(cancellationToken: Token)).Complete.ShouldBeTrue();
+        var applied = await receiver.RunPassAsync(Token);
+
+        applied.Failed.ShouldBe(0);
+        File.ReadAllText(Path.Combine(receiverRoot, "current.txt")).ShouldBe("current content");
+        Directory.Exists(Path.Combine(receiverRoot, "retired")).ShouldBeFalse();
+        receiverIndex.RemotesForPath("retired/old.txt").Any().ShouldBeTrue();
+        receiverIndex.Needed.Find("retired/old.txt").ShouldBeNull();
+    }
 
     [Fact]
     public async Task RealSignedIndexAndVerifiedChunksTransferThroughInterfaceAndForwardToThirdNode()

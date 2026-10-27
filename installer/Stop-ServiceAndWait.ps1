@@ -3,8 +3,8 @@ param(
     [Parameter(Mandatory)]
     [ValidateSet('PeerSync', 'PeerSyncRendezvous')]
     [string]$ServiceName,
-    [ValidateRange(1, 120)]
-    [int]$TimeoutSeconds = 30,
+    [ValidateRange(1, 300)]
+    [int]$TimeoutSeconds = 180,
     [switch]$InspectOnly
 )
 

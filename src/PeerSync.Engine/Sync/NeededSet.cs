@@ -34,7 +34,7 @@ public sealed class NeededSet
         if (ownDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(ownDevice));
         this.index = index; this.keys = keys; this.ownDevice = ownDevice.ToArray();
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
-        this.ignore = ignore ?? new();
+        this.ignore = ignore ?? new IgnoreMatcher(this.settings.IgnoreRules);
         this.journal = journal;
     }
 
