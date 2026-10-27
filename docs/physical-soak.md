@@ -68,7 +68,7 @@ if ((Get-Content $report -Raw | ConvertFrom-Json).status -ne 'complete') {
 }
 ```
 
-Require `status: complete`, `createdFiles: 100032`, and
+Require `status: complete`, `createdFiles: 50032`, and
 `createdContentBytes: 9663676416` in that report. Preserve the command,
 report, run ID and script SHA-256. Resume the folder and record the UTC time;
 require all three peers to settle within three hours, then use the tree

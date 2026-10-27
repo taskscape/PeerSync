@@ -86,3 +86,16 @@ The subsequent [requirement amendment](../requirements/three-hour-ten-gib-test-b
 sets the next physical run to 50,000 small files under the same 9 GiB and
 three-hour bounds, as the user had approved reducing file count to fit that
 window. This historical 100,000-file run remains failed.
+
+For the next run, the exact owner-marked source subtree was moved atomically
+from the first PC's synchronized root to
+`C:\PeerSync-Test\GateCorpus-Archive\93781174d3fe4effab3396321847784e`
+at 08:00:23 UTC. The archive retained its matching `owner.json` and the
+immediate counted shared content was 732,843,417 bytes. Eight old large files
+then reappeared in the synchronized path from peers that still held the old
+corpus (9,561,178,112 bytes). The revised generator's whole-tree preflight
+correctly rejected a new 9 GiB run. The first PC's scanner started at
+08:00:25 UTC and was still processing this bulk removal at 08:07 UTC; this
+record does not yet classify the reappearance as a persistent deletion defect.
+The old corpus must be absent from all three synchronized roots, and the
+preflight must pass, before a fresh 50,000-file run begins.
