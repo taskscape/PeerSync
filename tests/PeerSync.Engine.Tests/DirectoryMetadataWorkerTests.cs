@@ -54,7 +54,7 @@ public sealed partial class DirectorySnapshotCaptureTests
     }
 
     [Fact]
-    public async Task LargeMetadataGraphMakesDurablePartialProgressWithoutFailureBackoff()
+    public async Task MetadataPassYieldsLargeGraphToOtherPullerWorkWithoutFailureBackoff()
     {
         WriteFiles(Enumerable.Range(0, 48).Select(number => $"item-{number:D3}").ToArray());
         await using var producer = await FolderIndex.OpenAsync(Database, Token);
@@ -71,9 +71,11 @@ public sealed partial class DirectorySnapshotCaptureTests
                 await Task.Delay(TimeSpan.FromMilliseconds(50), token);
                 return published.TryRead(hash.Span, length, token)
                     ?? throw new IOException("Expected metadata block is unavailable.");
-            }, journal) { SourceDeadline = TimeSpan.FromSeconds(1) };
+            }, journal) { PassDeadline = TimeSpan.FromSeconds(1) };
 
+        var timer = System.Diagnostics.Stopwatch.StartNew();
         var first = await worker.RunAsync(token: Token);
+        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
         first.Visited.ShouldBe(1);
         first.Completed.ShouldBe(0);
         first.Deferred.ShouldBe(0);
