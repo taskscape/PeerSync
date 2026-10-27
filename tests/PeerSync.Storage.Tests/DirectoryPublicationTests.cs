@@ -197,6 +197,26 @@ public sealed class DirectoryPublicationTests : IDisposable
     }
 
     [Fact]
+    public async Task OnlyUnprovenDirectRebaseGraphMembersMayAdvanceAWaitingReconstruction()
+    {
+        await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 3);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
+        var proof = await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/other").ShouldBeFalse();
+        index.HasUnprovenDirectoryParentMember("topic/0001/grandchild").ShouldBeFalse();
+        proof = await index.AdvanceDirectoryRebaseAsync(queued, draft, proof,
+            index.ReadDirectoryGraphMemberPage(graph, limit: 1), Token);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeTrue();
+        await index.PauseDirectoryPublicationAsync(queued, true, Now, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeFalse();
+        await index.DiscardDirectoryPublicationAsync(index.ReadDirectoryPublication("topic")!, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task RebaseRejectsStaleEpochWrongGraphRootAndIncompleteOrRetiringGraph()
     {
         await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 1);
