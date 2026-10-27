@@ -77,6 +77,40 @@ function Quote([string]$value) { return "'" + $value.Replace("'", "''") + "'" }
 function Encode-Command([string]$command) {
     return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 }
+function Start-RedirectedPowerShell([string]$command, [string]$stdout, [string]$stderr) {
+    foreach ($path in @($stdout, $stderr)) {
+        $file = [IO.File]::Open($path, [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $file.Dispose()
+    }
+    # Windows PowerShell 5.1 Start-Process -PassThru returns a Process object
+    # that was not started by that object; its ExitCode stays null even after
+    # HasExited and WaitForExit. Start the child through the Process object and
+    # redirect inside the child so the parent can read its real exit code.
+    $wrapped = 'try { & { ' + $command + ' } 1> ' + (Quote $stdout) +
+        ' 2> ' + (Quote $stderr) +
+        '; $code = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; ' +
+        'if ($code -ne 0 -and (Get-Item -LiteralPath ' + (Quote $stderr) +
+        ').Length -eq 0) { [IO.File]::AppendAllText(' + (Quote $stderr) +
+        ', "Child PowerShell exited $code" + [Environment]::NewLine) }; exit $code ' +
+        '} catch { [IO.File]::AppendAllText(' + (Quote $stderr) +
+        ', $_.Exception.ToString() + [Environment]::NewLine); exit 1 }'
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $powershell
+    $start.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' +
+        (Encode-Command $wrapped)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw 'The child PowerShell process did not start.' }
+        return $process
+    } catch {
+        $process.Dispose()
+        throw
+    }
+}
 function Require-ToolsUnchanged {
     foreach ($name in $hashes.Keys) {
         $actual = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name) -Algorithm SHA256).Hash
@@ -99,13 +133,7 @@ try {
         ' -Intervals 3'
     $captureOut = Join-Path $output "soak-capture-$run-$MachineLabel-stdout.txt"
     $captureErr = Join-Path $output "soak-capture-$run-$MachineLabel-stderr.txt"
-    if ([IO.File]::Exists($captureOut) -or [IO.File]::Exists($captureErr)) {
-        throw 'Capture process output already exists.'
-    }
-    $captureProcess = Start-Process -FilePath $powershell -ArgumentList @(
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-EncodedCommand', (Encode-Command $captureCommand)) -WindowStyle Hidden `
-        -RedirectStandardOutput $captureOut -RedirectStandardError $captureErr -PassThru
+    $captureProcess = Start-RedirectedPowerShell $captureCommand $captureOut $captureErr
     Write-Record ([ordered]@{ schema='peersync-physical-soak-launcher-v1'; kind='capture-start';
         utc=[DateTimeOffset]::UtcNow.ToString('O'); processId=$captureProcess.Id })
 
@@ -114,6 +142,7 @@ try {
         $now = [DateTime]::UtcNow
         $captureProcess.Refresh()
         if ($captureProcess.HasExited) {
+            $captureProcess.WaitForExit()
             throw "Capture loop ended before the three-hour window; exit $($captureProcess.ExitCode)."
         }
         if ($now -lt $nextBatch) {
@@ -134,10 +163,7 @@ try {
             ' -LogDirectory ' + (Quote $output) + ' -Count ' + $OperationsPerBatch
         $operationOut = Join-Path $output ("soak-operations-$run-$MachineLabel-{0:D3}-stdout.txt" -f $batches)
         $operationErr = Join-Path $output ("soak-operations-$run-$MachineLabel-{0:D3}-stderr.txt" -f $batches)
-        $operationProcess = Start-Process -FilePath $powershell -ArgumentList @(
-            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-            '-EncodedCommand', (Encode-Command $operationCommand)) -WindowStyle Hidden `
-            -RedirectStandardOutput $operationOut -RedirectStandardError $operationErr -PassThru
+        $operationProcess = Start-RedirectedPowerShell $operationCommand $operationOut $operationErr
         $batchDeadline = [DateTime]::UtcNow.AddMinutes(15)
         if ($batchDeadline -gt $end) { $batchDeadline = $end }
         while ($true) {
@@ -148,10 +174,12 @@ try {
             }
             Start-Sleep -Seconds 2
         }
+        $operationProcess.WaitForExit()
+        $operationExitCode = $operationProcess.ExitCode
         Write-Record ([ordered]@{ schema='peersync-physical-soak-launcher-v1'; kind='operation-batch';
             utc=[DateTimeOffset]::UtcNow.ToString('O'); batch=$batches;
-            exitCode=$operationProcess.ExitCode; stdout=$operationOut; stderr=$operationErr })
-        if ($operationProcess.ExitCode -ne 0) { throw "Operation batch $batches failed." }
+            exitCode=$operationExitCode; stdout=$operationOut; stderr=$operationErr })
+        if ($operationExitCode -ne 0) { throw "Operation batch $batches failed." }
         $operationProcess.Dispose()
         $operationProcess = $null
         if ([DateTime]::UtcNow -gt $end) { throw 'An operation batch exceeded the three-hour active window.' }
@@ -165,6 +193,7 @@ try {
         if ([DateTime]::UtcNow -ge $captureDeadline) { throw 'Final read-only capture exceeded its one-hour completion allowance.' }
         Start-Sleep -Seconds 15
     }
+    $captureProcess.WaitForExit()
     if ($captureProcess.ExitCode -ne 0) { throw "Capture loop exited $($captureProcess.ExitCode)." }
     $status = 'complete'
 } catch {
