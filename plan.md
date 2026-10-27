@@ -2331,6 +2331,8 @@ The [exact second-PC dependency probe](docs/verification/P2-three-pc-physical-so
 
 The [development-signed 1.0.39.0 field deployment](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#10390-field-deployment-and-exact-dependency-transition) succeeded on all three PCs with Running services and unchanged sentinels. The second PC's exact previously blocked graph-member deletion now has a clean local signed tombstone and no needed row, proving that narrow repair reached the field. Its reconstruction publication and 43 other needed soak rows remained at the bounded read-only check; the third had 29. Full native equality and a new three-hour soak remain open.
 
+The subsequent [durable metadata-yield repair and 1.0.40.0 field deployment](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#durable-metadata-yields-and-10400-field-deployment) addresses 34 measured third-PC graph timeouts that had completed durable nodes but triggered exponential backoff. The full Release Engine suite passes 1,058/1,058, and all three physical clients now run the exact development-signed 1.0.40.0 package with unchanged sentinels. A read-only full native snapshot before deployment found matching 50,132-file, 10,398,480,862-byte trees on all three PCs, but it was outside the formal hourly window. Immediately after deployment the second had zero and the third ten remaining failed-run needed rows. A fresh four-checkpoint three-hour physical soak, WAN soak, independent review and release signing remain unchecked.
+
 ## 9. Phase 3: WPF app and installer (weeks 14-17)
 
 Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
