@@ -15,7 +15,8 @@ if (-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($output))) {
 $measure = Join-Path $PSScriptRoot 'Measure-PeerSyncTree.ps1'
 $capture = Join-Path $PSScriptRoot 'Invoke-PeerSyncSoakCaptureLoop.ps1'
 $compare = Join-Path $PSScriptRoot 'Compare-PeerSyncSoakReports.ps1'
-foreach ($script in @($measure, $capture, $compare)) {
+$budget = Join-Path $PSScriptRoot 'Get-PeerSyncTestTreeContentBytes.ps1'
+foreach ($script in @($measure, $capture, $compare, $budget)) {
     if (-not [IO.File]::Exists($script)) { throw "Missing field tool: $script" }
 }
 
@@ -37,6 +38,23 @@ $liveReports = Join-Path $output 'live-reports'
 [IO.Directory]::CreateDirectory($liveRoot) | Out-Null
 [IO.Directory]::CreateDirectory($liveReports) | Out-Null
 [IO.File]::WriteAllText((Join-Path $liveRoot 'control.txt'), 'three-hour-control')
+$deepDirectory = $liveRoot
+for ($depth = 1; $depth -le 24; $depth++) {
+    $deepDirectory = Join-Path $deepDirectory ('level-{0:D3}' -f $depth)
+}
+$deepFile = Join-Path $deepDirectory 'depth-024.bin'
+if ($deepFile.Length -le 260 -or $deepFile -notmatch '^[A-Za-z]:\\') {
+    throw 'The live long-path fixture is not an absolute path beyond MAX_PATH.'
+}
+[IO.Directory]::CreateDirectory('\\?\' + $deepDirectory) | Out-Null
+[IO.File]::WriteAllText(('\\?\' + $deepFile), 'deep-tree-control')
+. $budget
+$expectedLiveBytes = [Text.Encoding]::UTF8.GetByteCount('three-hour-control') +
+    [Text.Encoding]::UTF8.GetByteCount('deep-tree-control')
+$measuredLiveBytes = Get-PeerSyncTestTreeContentBytes -Root $liveRoot
+if ($measuredLiveBytes -ne $expectedLiveBytes) {
+    throw 'The budget preflight did not count the long-path file.'
+}
 $currentText = $currentHour.ToString('yyyy-MM-ddTHH:mm:ssZ',
     [Globalization.CultureInfo]::InvariantCulture)
 & $capture -Root $liveRoot -RunId $runId -MachineLabel 'pc-a' `
@@ -47,9 +65,10 @@ if ($liveExit -ne 0 -or -not [IO.File]::Exists($liveSnapshot)) {
     throw 'The one-hour live capture control failed.'
 }
 $live = Get-Content -LiteralPath $liveSnapshot -Raw | ConvertFrom-Json
-if ($live.status -ne 'complete' -or $live.files -ne 1 -or
+if ($live.status -ne 'complete' -or $live.files -ne 2 -or
+    $live.directories -ne 24 -or $live.bytes -ne $expectedLiveBytes -or
     $live.collectorSha256 -ne $collectorHash) {
-    throw 'The live snapshot is not the expected complete single-file report.'
+    throw 'The live snapshot did not include the long-path file.'
 }
 
 function New-SyntheticSet([string]$variant, [bool]$omitOne) {
@@ -120,6 +139,7 @@ $report = [ordered]@{
     captureLoopSha256 = (Get-FileHash -LiteralPath $capture -Algorithm SHA256).Hash
     comparatorSha256 = (Get-FileHash -LiteralPath $compare -Algorithm SHA256).Hash
     liveSnapshot = $liveSnapshot; liveExitCode = $liveExit
+    liveBytes = $measuredLiveBytes; liveLongPath = $deepFile.Length
     positiveSummary = $pass.path; positiveExitCode = $pass.exitCode
     positiveMatchedHours = $pass.summary.matchedHours
     negativeSummary = $missing.path; negativeExitCode = $missing.exitCode

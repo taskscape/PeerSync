@@ -14,14 +14,23 @@ function Get-PeerSyncTestTreeContentBytes {
     if (([IO.File]::GetAttributes($rootPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw 'Test-tree root cannot be a reparse point.'
     }
+    # The field kit runs in Windows PowerShell 5.1. Traverse through the
+    # extended-length form so a deep synchronized path is still counted.
+    if ($rootPath -match '^[A-Za-z]:\\') {
+        $scanRoot = '\\?\' + $rootPath
+    } elseif ($rootPath.StartsWith('\\', [StringComparison]::Ordinal)) {
+        $scanRoot = '\\?\UNC\' + $rootPath.Substring(2)
+    } else {
+        throw 'Test-tree root requires an absolute Windows path.'
+    }
 
     $queue = [System.Collections.Generic.Queue[string]]::new()
-    $queue.Enqueue($rootPath)
+    $queue.Enqueue($scanRoot)
     $bytes = [long]0
     while ($queue.Count -gt 0) {
         $directory = $queue.Dequeue()
         foreach ($path in [IO.Directory]::EnumerateFileSystemEntries($directory)) {
-            if ($directory.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase) -and
+            if ($directory.Equals($scanRoot, [StringComparison]::OrdinalIgnoreCase) -and
                 [IO.Path]::GetFileName($path).Equals('.psp', [StringComparison]::OrdinalIgnoreCase)) {
                 continue
             }

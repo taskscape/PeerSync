@@ -105,6 +105,18 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
     if (([IO.File]::GetAttributes($rootPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw 'Capture root cannot be a reparse point.'
     }
+    # Windows PowerShell 5.1 runs on .NET Framework, where a normal path can
+    # fail at MAX_PATH even though PeerSync has synchronized the file. Keep
+    # the ordinary path for root/output validation and use extended paths for
+    # every traversal and content read.
+    if ($rootPath -match '^[A-Za-z]:\\') {
+        $scanRoot = '\\?\' + $rootPath
+    } elseif ($rootPath.StartsWith('\\', [StringComparison]::Ordinal)) {
+        $scanRoot = '\\?\UNC\' + $rootPath.Substring(2)
+    } else {
+        throw 'Capture requires an absolute Windows path.'
+    }
+    $scanPrefix = $scanRoot + '\'
     $hour = [DateTime]::ParseExact($HourUtc, 'yyyy-MM-ddTHH:mm:ssZ',
         [Globalization.CultureInfo]::InvariantCulture,
         [Globalization.DateTimeStyles]::AssumeUniversal).ToUniversalTime()
@@ -119,12 +131,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
         if ($start.UtcDateTime -lt $hour -or $start.UtcDateTime -ge $hour.AddHours(1)) {
             throw [IO.IOException]::new('The capture started outside its nominated UTC hour.')
         }
-        $entries = Get-Entries $rootPath $prefix
+        $entries = Get-Entries $scanRoot $scanPrefix
         $hasher = [Security.Cryptography.IncrementalHash]::CreateHash(
             [Security.Cryptography.HashAlgorithmName]::SHA256)
         $fileHasher = [Security.Cryptography.SHA256]::Create()
         foreach ($path in $entries) {
-            $relative = $path.Substring($prefix.Length).Replace('\', '/')
+            $relative = $path.Substring($scanPrefix.Length).Replace('\', '/')
             $relativeBytes = [Text.Encoding]::UTF8.GetBytes($relative)
             if ([IO.Directory]::Exists($path)) {
                 Add-Frame $hasher 68 $relativeBytes 0 $null
@@ -150,7 +162,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
             $files++
             $bytes += $beforeSize
         }
-        $afterEntries = Get-Entries $rootPath $prefix
+        $afterEntries = Get-Entries $scanRoot $scanPrefix
         if ($entries.Length -ne $afterEntries.Length) {
             throw [IO.IOException]::new('Tree entry count changed during measurement.')
         }

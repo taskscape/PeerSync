@@ -30,3 +30,16 @@ Gate P2 still requires a 9 GiB physical three-PC convergence run and the
 three-hour LAN operation soak with four real matching hourly comparisons.
 Gate P4 needs its own physical WAN soak, and Gate P5 needs release-candidate
 LAN and WAN soaks. This control closes only the revised-tooling check.
+
+## Long-path regression, 2026-10-27
+
+The third physical PC exposed a Windows PowerShell 5.1 `MAX_PATH` failure in
+the original tree collector. The focused control now creates 24 deep levels
+and a file past 260 characters, then checks both the live content-budget
+walker and real capture. The Windows PowerShell 5.1 run exited 0 with two
+files, 24 directories, the expected bytes and corrected collector SHA-256
+`5C1E27BC7E9E75DA29D062C4D11346D9C294BB7963D9B30337609108D1BDED53`.
+The result is retained at
+`artifacts/field/physical-50k-20261027/soak-control-longpath-budget-20261027/control-result.json`.
+This is a tooling regression check, not a new physical-soak or timed-corpus
+pass.
