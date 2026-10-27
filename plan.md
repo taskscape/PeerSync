@@ -2321,6 +2321,8 @@ Follow-up read-only first-PC evidence found the same direct-child dependency und
 
 Further [read-only live-index evidence](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#rebase-graph-direct-file-dependency-repair-and-10360-deployment) showed reconstruction rebase proofs waiting on authenticated direct file members still blocked by ordinary ancestors. The exact rebase-member guard was added, and the full local Storage 308/308 and Engine 1,052/1,052 suites passed. Development-signed 1.0.36.0 now runs on all three PCs after verified installers with unchanged sentinel hashes. The failed soak remains failed; no full-tree convergence or fresh three-hour soak is claimed from these deployment checks.
 
+The repaired services later [converged the failed run's native operation subtree](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#recovered-operation-subtree-and-fresh-scheduled-attempt): all three PCs had 28 identical files and 1,049,111 bytes with matching per-file SHA-256 at 18:55 UTC. A distinct three-hour attempt is scheduled at 20:00 UTC with four hourly checkpoints, three ready SYSTEM tasks and 10,397,788,703 preflight content bytes per PC. This is a recovery and registration checkpoint, not a full-tree or elapsed-time pass; the physical gate remains unchecked pending the new run's actual results.
+
 ## 9. Phase 3: WPF app and installer (weeks 14-17)
 
 Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
