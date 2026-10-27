@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Security.Authentication;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
@@ -566,7 +567,7 @@ public sealed class Puller : IDisposable
         return result is null ? metadataDue : metadataDue is null ? result : Math.Min(result.Value, metadataDue.Value);
     }
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);
-    private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException
+    private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException or AuthenticationException
         || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 };
     private static int? NativeError(Exception? error) => error switch { Win32Exception native => native.NativeErrorCode, SqliteException database => database.SqliteExtendedErrorCode, _ => null };
     private void Failure(string name, Guid session, Exception error) => journal?.TryWrite(new(name, "pull")

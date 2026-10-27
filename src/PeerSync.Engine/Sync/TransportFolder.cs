@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using PeerSync.Core.Diagnostics;
@@ -173,7 +174,7 @@ public sealed class TransportFolder : IAsyncDisposable
                 return response.ToArray();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-            catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException or CryptographicException
+            catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException or CryptographicException or AuthenticationException
                 || error is OperationCanceledException && !token.IsCancellationRequested)
             {
                 if (error is PeerBlockException { ErrorCode: PeerSync.Protocol.Wire.BlockError.NotFound or PeerSync.Protocol.Wire.BlockError.Forbidden })
@@ -237,7 +238,7 @@ public sealed class TransportFolder : IAsyncDisposable
                         if (unresolved.Count == 0)
                             puller.RecordBlockRoute("transfer.block_endgame_winner", 2, totalBytes, endgamePeers[completedIndex].SharedSessionId);
                     }
-                    catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException or CryptographicException
+                    catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException or CryptographicException or AuthenticationException
                         || error is OperationCanceledException && !token.IsCancellationRequested)
                     {
                         foreach (int index in unresolved) failures[index] = error;
@@ -251,7 +252,7 @@ public sealed class TransportFolder : IAsyncDisposable
                 {
                     try { await attempt.ConfigureAwait(false); }
                     catch (Exception error) when (error is OperationCanceledException or IOException or ObjectDisposedException
-                        or TimeoutException or CryptographicException) { }
+                        or TimeoutException or CryptographicException or AuthenticationException) { }
                 }
             }
             token.ThrowIfCancellationRequested();
@@ -280,7 +281,7 @@ public sealed class TransportFolder : IAsyncDisposable
                     puller.RecordBlockRoute("transfer.block_peer_failover", attempt, pending.Sum(item => item.Length), peer.SharedSessionId);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-            catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException or CryptographicException
+            catch (Exception error) when (error is IOException or ObjectDisposedException or TimeoutException or CryptographicException or AuthenticationException
                 || error is OperationCanceledException && !token.IsCancellationRequested)
             {
                 foreach (int index in pendingIndexes) failures[index] = error;

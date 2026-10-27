@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Authentication;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
@@ -105,6 +106,7 @@ public sealed class RescanScheduler
                     }
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or System.Security.Cryptography.CryptographicException
+                    or AuthenticationException
                     || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 })
                 {
                     errorCode = "scan-unavailable";

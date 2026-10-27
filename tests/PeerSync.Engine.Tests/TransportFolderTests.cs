@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Authentication;
 using System.Threading.Channels;
 using Google.Protobuf;
 using PeerSync.Core.Ignore;
@@ -119,6 +120,41 @@ public sealed class TransportFolderTests : IDisposable
             File.ReadAllBytes(Path.Combine(receiver.Root, $"small-{i:D2}.bin")).ShouldBe(BitConverter.GetBytes(i));
         missingRequests.ShouldBeGreaterThan(0);
         missingRequests.ShouldBeLessThan(4);
+    }
+
+    [Fact]
+    public async Task TransientPeerAuthenticationFailureDefersFileWithoutStoppingTheFolder()
+    {
+        var time = new NodeClock();
+        await using var receiver = await NodeAsync(77, time); await using var source = await NodeAsync(78, time);
+        byte[] contents = "authenticated retry"u8.ToArray();
+        File.WriteAllBytes(Path.Combine(source.Root, "retry.txt"), contents);
+        await Scan(source);
+
+        int requests = 0;
+        var network = new InMemoryNetwork(); var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        network.Register(source.Id, id =>
+        {
+            IPeerRequestHandler inner = source.Engine.CreateHandler(id);
+            return new ControlledHandler(inner)
+            {
+                Block = (hash, length, token) => Interlocked.Increment(ref requests) == 1
+                    ? ValueTask.FromException<ReadOnlyMemory<byte>>(new AuthenticationException("Transient TLS session failure."))
+                    : inner.ReadBlockAsync(hash, length, token)
+            };
+        });
+        await using var fromSource = await receiver.Engine.ConnectAsync(endpoint.Connect(source.Id), Token);
+        await fromSource.SynchronizeAsync(cancellationToken: Token);
+
+        PullPassResult first = await receiver.Engine.RunPassAsync(Token);
+        first.Failed.ShouldBe(1);
+        File.Exists(Path.Combine(receiver.Root, "retry.txt")).ShouldBeFalse();
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        PullPassResult second = await receiver.Engine.RunPassAsync(Token);
+        second.Failed.ShouldBe(0); second.Applied.ShouldBe(1);
+        File.ReadAllBytes(Path.Combine(receiver.Root, "retry.txt")).ShouldBe(contents);
+        requests.ShouldBeGreaterThanOrEqualTo(2);
     }
 
     [Fact]

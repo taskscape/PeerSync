@@ -45,3 +45,18 @@ checks exact native counts and bytes, signals all three full-tree captures
 only after both receivers reach the source totals, and writes its journal and
 terminal result under that ignored evidence directory. A failed or missing
 terminal result must be investigated; interim counts cannot close the gate.
+
+At 06:21:47 UTC the second PC's installed 1.0.31.0 service stopped with
+`AuthenticationException` during a TCP data attach to the third PC. Its
+service journal records `transport.tcp_data_attach_failed`, `assembly.failed`,
+`apply.failed`, `puller.pass_failed` and `service.folder_scheduler_stopped` in
+that order; the exception then reached `service.start_failed`. The second
+native file count stalled at 77,431. The original service journal is
+`\\100.88.55.83\C$\ProgramData\PeerSync\logs\service\ef6ba258f84242ab84c92d121a3d4a85\debug.jsonl`.
+The same installed service was started again at approximately 06:29 UTC
+without restarting the corpus or changing its 07:21:05 UTC deadline. The
+second count resumed, reaching 81,431 by 06:34 UTC; the third reached 45,781.
+This is an intervention and a real availability failure even if the native
+hashes eventually match. The source-side retry repair is recorded in
+[the authentication-recovery note](P2-peer-authentication-recovery-2026-10-27.md);
+it has not been installed on the three field PCs in this run.

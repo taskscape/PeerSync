@@ -1,5 +1,6 @@
 using PeerSync.Crypto;
 using Microsoft.Data.Sqlite;
+using System.Security.Authentication;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Settings;
@@ -247,6 +248,28 @@ public sealed class RescanSchedulerTests : IDisposable
                 json.RootElement.GetProperty("nativeError").GetInt32().ShouldBe(extendedCode);
             }
             found.ShouldBeTrue();
+        }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
+    }
+
+    [Fact]
+    public async Task AuthenticationFailureBacksOffWithoutStoppingTheInstalledScheduler()
+    {
+        string root = Tree("auth-retry");
+        File.WriteAllText(Path.Combine(root, "file"), "content");
+        using var keys = FolderKeys.CreateNew();
+        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "auth-retry.db"), Token);
+        using var scanner = new Scanner(root, index, keys, new byte[32],
+            timeProvider: new CallbackClock(() => throw new AuthenticationException("Peer session failed.")));
+        var scheduler = new RescanScheduler([new(scanner, WatchChanges: false)]);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        Task running = scheduler.RunAsync(stopping.Token);
+        try
+        {
+            ScanOutcome outcome = await Next(scheduler);
+            outcome.ErrorCode.ShouldBe("scan-unavailable");
+            outcome.RetryInSeconds.ShouldBe(10);
+            running.IsCompleted.ShouldBeFalse();
         }
         finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
     }
