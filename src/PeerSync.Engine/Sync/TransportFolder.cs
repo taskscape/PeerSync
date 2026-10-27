@@ -29,6 +29,7 @@ public sealed class TransportFolder : IAsyncDisposable
     private readonly Puller puller;
     private readonly TransferThrottle? uploadThrottle, downloadThrottle;
     private readonly ConcurrentDictionary<string, PeerFolderConnection> peers = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<PeerFolderConnection, ConcurrentDictionary<string, ReplicaCoverage>> replicaCoverage = new();
     private readonly PeerClockStatusLedger clockStatuses = new();
     private readonly TransferScheduler transferScheduler = new();
     private long nextBlockPeer;
@@ -137,22 +138,16 @@ public sealed class TransportFolder : IAsyncDisposable
         if (hash.Length != 32 || length is <= 0 or > 8 * 1024 * 1024)
             throw new ArgumentOutOfRangeException(nameof(length), "Block request is outside the supported bounds.");
 
-        // A signed file record identifies the author, but any authenticated folder
-        // peer can serve a content-addressed block. Rotate the first peer per request
-        // and fall through when that peer lacks the block or cannot serve it.
-        PeerFolderConnection[] candidates = peers.Values
-            .Where(peer => !peer.RemoteDeviceId.AsSpan().SequenceEqual(own))
-            .OrderBy(peer => Convert.ToHexString(peer.RemoteDeviceId), StringComparer.Ordinal)
-            .ToArray();
+        // The record author is the one known holder. Probe other authenticated
+        // replicas, then prefer them only when they actually serve this author's
+        // blocks. A fresh peer must not ask another fresh peer for every chunk.
+        PeerFolderConnection[] candidates = OrderBlockPeers(source);
         if (candidates.Length == 0) throw new IOException("No authenticated folder peer is connected.");
-        int first = (int)((ulong)Interlocked.Increment(ref nextBlockPeer) % (uint)candidates.Length);
-        int preferred = Array.FindIndex(candidates, peer => peer.RemoteDeviceId.AsSpan().SequenceEqual(source.Span));
-        if (preferred >= 0 && candidates.Length > 1 && first == preferred) first = (first + 1) % candidates.Length;
         Exception? lastFailure = null;
         for (int attempt = 0; attempt < candidates.Length; attempt++)
         {
             token.ThrowIfCancellationRequested();
-            PeerFolderConnection peer = candidates[(first + attempt) % candidates.Length];
+            PeerFolderConnection peer = candidates[attempt];
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             TransferScheduler.Lease? windowLease = null;
             try
@@ -171,6 +166,7 @@ public sealed class TransportFolder : IAsyncDisposable
                     Blake3.Hasher.Hash(response.Span).AsSpan(), hash.Span))
                     throw new CryptographicException("Authenticated peer returned a block that failed content verification.");
                 windowLease.Complete(succeeded: true);
+                ObserveReplica(source, peer, found: 1, missing: 0);
                 if (attempt != 0)
                     puller.RecordBlockRoute("transfer.block_peer_failover", attempt, length, peer.SharedSessionId);
                 ReportBytesTransferred(response.Length, download: true);
@@ -184,6 +180,8 @@ public sealed class TransportFolder : IAsyncDisposable
                     windowLease?.CompleteWithoutCongestion();
                 else windowLease?.Complete(succeeded: false);
                 lastFailure = error;
+                if (error is PeerBlockException { ErrorCode: PeerSync.Protocol.Wire.BlockError.NotFound or PeerSync.Protocol.Wire.BlockError.Forbidden })
+                    ObserveReplica(source, peer, found: 0, missing: 1);
                 puller.RecordBlockRoute("transfer.block_peer_unavailable", attempt + 1, length, peer.SharedSessionId, error);
             }
             finally { windowLease?.Dispose(); }
@@ -201,14 +199,8 @@ public sealed class TransportFolder : IAsyncDisposable
         if (totalBytes > TransferScheduler.MaximumWindowBytes)
             throw new ArgumentOutOfRangeException(nameof(requests), "A block batch exceeds the bounded assembly window.");
 
-        PeerFolderConnection[] candidates = peers.Values
-            .Where(peer => !peer.RemoteDeviceId.AsSpan().SequenceEqual(own))
-            .OrderBy(peer => Convert.ToHexString(peer.RemoteDeviceId), StringComparer.Ordinal)
-            .ToArray();
+        PeerFolderConnection[] candidates = OrderBlockPeers(source);
         if (candidates.Length == 0) throw new IOException("No authenticated folder peer is connected.");
-        int first = (int)((ulong)Interlocked.Increment(ref nextBlockPeer) % (uint)candidates.Length);
-        int preferred = Array.FindIndex(candidates, peer => peer.RemoteDeviceId.AsSpan().SequenceEqual(source.Span));
-        if (preferred >= 0 && candidates.Length > 1 && first == preferred) first = (first + 1) % candidates.Length;
 
         var results = new PeerBlockResult?[requests.Count];
         var failures = new Exception?[requests.Count];
@@ -219,7 +211,7 @@ public sealed class TransportFolder : IAsyncDisposable
             fallbackStart = 2;
             PeerBlockRequest[] finalBatch = requests.ToArray();
             using var race = CancellationTokenSource.CreateLinkedTokenSource(token);
-            PeerFolderConnection[] endgamePeers = [candidates[first], candidates[(first + 1) % candidates.Length]];
+            PeerFolderConnection[] endgamePeers = [candidates[0], candidates[1]];
             Task<IReadOnlyList<PeerBlockResult>>[] attempts = endgamePeers
                 .Select(peer => SendBlockBatchAsync(peer, finalBatch, race.Token).AsTask()).ToArray();
             var waiting = new List<int> { 0, 1 };
@@ -235,6 +227,7 @@ public sealed class TransportFolder : IAsyncDisposable
                     {
                         IReadOnlyList<PeerBlockResult> received = await completed.ConfigureAwait(false);
                         if (received.Count != requests.Count) throw new InvalidDataException("Authenticated peer returned the wrong endgame batch size.");
+                        ObserveReplica(source, endgamePeers[completedIndex], received);
                         for (int i = 0; i < received.Count; i++)
                         {
                             if (received[i].ErrorCode is { } code) failures[i] = new PeerBlockException(code);
@@ -268,13 +261,14 @@ public sealed class TransportFolder : IAsyncDisposable
         for (int attempt = fallbackStart; attempt < candidates.Length && unresolved.Count != 0; attempt++)
         {
             token.ThrowIfCancellationRequested();
-            PeerFolderConnection peer = candidates[(first + attempt) % candidates.Length];
+            PeerFolderConnection peer = candidates[attempt];
             int[] pendingIndexes = unresolved.ToArray();
             PeerBlockRequest[] pending = pendingIndexes.Select(index => requests[index]).ToArray();
             try
             {
                 IReadOnlyList<PeerBlockResult> received = await SendBlockBatchAsync(peer, pending, token).ConfigureAwait(false);
                 if (received.Count != pending.Length) throw new InvalidDataException("Authenticated peer returned the wrong block batch size.");
+                ObserveReplica(source, peer, received);
                 for (int i = 0; i < received.Count; i++)
                 {
                     int index = pendingIndexes[i];
@@ -311,6 +305,88 @@ public sealed class TransportFolder : IAsyncDisposable
         foreach (var item in complete)
             if (item.ErrorCode is null) ReportBytesTransferred(item.Data.Length, download: true);
         return complete;
+    }
+
+    private PeerFolderConnection[] OrderBlockPeers(ReadOnlyMemory<byte> source)
+    {
+        PeerFolderConnection[] candidates = peers.Values
+            .Where(peer => !peer.RemoteDeviceId.AsSpan().SequenceEqual(own))
+            .OrderBy(peer => Convert.ToHexString(peer.RemoteDeviceId), StringComparer.Ordinal)
+            .ToArray();
+        if (candidates.Length < 2) return candidates;
+
+        long turn = Interlocked.Increment(ref nextBlockPeer);
+        int author = Array.FindIndex(candidates, peer => peer.RemoteDeviceId.AsSpan().SequenceEqual(source.Span));
+        if (author < 0)
+            return candidates.Skip((int)((ulong)turn % (uint)candidates.Length))
+                .Concat(candidates.Take((int)((ulong)turn % (uint)candidates.Length))).ToArray();
+
+        PeerFolderConnection authorPeer = candidates[author];
+        PeerFolderConnection[] alternatives = candidates.Where((_, index) => index != author).ToArray();
+        int offset = (int)((ulong)turn % (uint)alternatives.Length);
+        PeerFolderConnection candidate = alternatives[offset];
+        bool tryReplicaFirst = CoverageFor(candidate, source)?.ShouldProbe() ?? false;
+        PeerFolderConnection[] ordered = new PeerFolderConnection[candidates.Length];
+        ordered[0] = tryReplicaFirst ? candidate : authorPeer;
+        ordered[1] = tryReplicaFirst ? authorPeer : candidate;
+        for (int i = 1; i < alternatives.Length; i++)
+            ordered[i + 1] = alternatives[(offset + i) % alternatives.Length];
+        return ordered;
+    }
+
+    private ReplicaCoverage? CoverageFor(PeerFolderConnection peer, ReadOnlyMemory<byte> source)
+    {
+        if (peer.RemoteDeviceId.AsSpan().SequenceEqual(source.Span)) return null;
+        var byAuthor = replicaCoverage.GetOrAdd(peer, static _ => new(StringComparer.Ordinal));
+        string author = Convert.ToHexString(source.Span);
+        if (byAuthor.TryGetValue(author, out ReplicaCoverage? known)) return known;
+        // A folder can contain records authored by many offline devices. Bound
+        // routing memory by active peer, and use the known author when full.
+        return byAuthor.Count < 1024 ? byAuthor.GetOrAdd(author, static _ => new()) : null;
+    }
+
+    private void ObserveReplica(ReadOnlyMemory<byte> source, PeerFolderConnection peer, int found, int missing)
+        => CoverageFor(peer, source)?.Observe(found, missing);
+
+    private void ObserveReplica(ReadOnlyMemory<byte> source, PeerFolderConnection peer,
+        IReadOnlyList<PeerBlockResult> received)
+    {
+        int found = 0, missing = 0;
+        foreach (PeerBlockResult block in received)
+        {
+            if (block.ErrorCode is null) found++;
+            else if (block.ErrorCode is PeerSync.Protocol.Wire.BlockError.NotFound or PeerSync.Protocol.Wire.BlockError.Forbidden) missing++;
+        }
+        ObserveReplica(source, peer, found, missing);
+    }
+
+    private sealed class ReplicaCoverage
+    {
+        private long requests;
+        private int recentlyServed;
+        private int missing;
+
+        internal bool ShouldProbe()
+        {
+            long turn = Interlocked.Increment(ref requests);
+            if (turn == 1) return true;
+            if (Volatile.Read(ref missing) != 0) return turn % 64 == 0;
+            return Volatile.Read(ref recentlyServed) != 0 ? turn % 2 == 0 : turn % 16 == 0;
+        }
+
+        internal void Observe(int found, int notFound)
+        {
+            if (notFound > 0 && notFound >= found)
+            {
+                Volatile.Write(ref missing, 1);
+                Volatile.Write(ref recentlyServed, 0);
+            }
+            else if (found > 0)
+            {
+                Volatile.Write(ref missing, 0);
+                Volatile.Write(ref recentlyServed, 1);
+            }
+        }
     }
 
     private void ReportBytesTransferred(long bytes, bool download)
@@ -446,7 +522,10 @@ public sealed class TransportFolder : IAsyncDisposable
         })).ConfigureAwait(false);
     }
     internal void Remove(PeerFolderConnection peer)
-        => peers.TryRemove(new KeyValuePair<string, PeerFolderConnection>(Convert.ToHexString(peer.RemoteDeviceId), peer));
+    {
+        peers.TryRemove(new KeyValuePair<string, PeerFolderConnection>(Convert.ToHexString(peer.RemoteDeviceId), peer));
+        replicaCoverage.TryRemove(peer, out _);
+    }
     internal void RetireClockSession(PeerIndexSession session) => clockStatuses.Retire(session);
 
     public ValueTask DisposeAsync()
