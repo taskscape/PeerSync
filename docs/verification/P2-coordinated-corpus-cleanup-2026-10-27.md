@@ -39,5 +39,30 @@ content is below 10 GiB on every PC, and each service's index no longer has
 live old-run entries before generating a new 50,000-small-file corpus. Any
 reappearing path or over-budget tree fails cleanup and prevents the next run.
 
-The third PC's temporary WinRM window was closed at this checkpoint. The
-coordinated field move, new corpus and physical three-hour gate remain open.
+At that checkpoint the third PC's temporary WinRM window was closed. Remote
+access was later restored. All three PeerSync services were stopped for the
+exact old-run move, then restarted. The first, second and third old-run paths
+were moved outside their joined roots, retaining owner markers and conflict
+copies. A recovered second-PC pending history intent produced one more
+old-run file; it too was archived outside the root.
+
+An exact anchored ignore rule for
+`/PeerSync-GateCorpus/93781174d3fe4effab3396321847784e/` was applied
+offline to all three folders. Source revision
+`d1ae071f79dd7d7386a9328a67b83b065a6a49f2` then repaired inbound
+needed-set selection so an ignored remote path cannot be pulled back in. Its
+direct transport regression and all 1,051 Engine tests passed locally. After
+the signed 1.0.33.0 deployment and removal of temporary PeerSync-only traffic
+blocks, a 10-round, two-minute check found the old run absent on all three
+PCs and disk usage nearly flat. Every joined tree contained 732,843,417
+bytes before the new corpus.
+
+The second PC's three large archives (10,297,354,588, 5,975,736,320 and
+1,195,147,264 bytes) were copied to the first PC. Each full-tree SHA-256
+digest matched source and destination before its second-PC source archive
+was removed while PeerSync was stopped. The copied archives remain on the
+first PC. The guarded report is retained at
+`artifacts/field/current-head-20261027/prune-verified-second-archives-output.jsonl`
+(ignored field evidence). This cleanup is complete for the old run; the new
+[50,000-file retry](P2-three-pc-50k-retry-2026-10-27.md) is separate and
+remains unverified until its terminal three-PC result.
