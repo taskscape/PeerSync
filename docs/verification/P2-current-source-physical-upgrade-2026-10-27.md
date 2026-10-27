@@ -29,7 +29,31 @@ sentinel SHA-256. The task ran from 07:51:27 to 07:51:56 UTC. Its setup log
 and JSON remain on that PC outside the synchronized tree.
 
 The third PC is not yet upgraded in this record. PeerSync 1.0.32.0 has not
-completed the three-PC corpus, post-reboot recovery, or three-hour physical
-soak checks. An SCM `qfailureflag` value alone does not prove automatic
-recovery after a non-crash stop; Windows applies changes to that policy after
-the next boot, so a controlled post-reboot check remains required.
+completed the three-PC corpus or three-hour physical soak. An SCM
+`qfailureflag` value alone does not prove automatic recovery after a
+non-crash stop; Windows applies changes to that policy after the next boot.
+The separate [post-reboot Server 2022 VM check](P3-service-noncrash-recovery-2026-10-27.md)
+now verifies that mechanism, while physical availability must be reassessed
+in the next field run.
+
+## Old corpus cleanup remains blocked
+
+After the exact old run directory was moved outside the first PC's synchronized
+root, a service-index dump showed 100,159 tombstones for that run but 16 live
+large conflict copies. Those copies contained 19,122,356,224 bytes, exceeding
+the user-approved 10 GiB test-content cap before a fresh run could start.
+The second PC's installed 1.0.32.0 service was Running, yet its index still
+showed 96,199 live old-run rows and only 3,978 tombstones; its filesystem
+contained 97,069 old-run files and 19,221,738,496 bytes. Both indexes retained
+the original eight large names as tombstones, while the 16 preserved copies
+had `.sync-conflict-` names. These read-only snapshots were taken around
+08:28–08:30 UTC and retained under ignored
+`artifacts/field/current-head-20261027/`; the second-PC index dump remains at
+`C:\Temp\old-corpus-index-second.tsv` on that PC.
+
+This is an unresolved propagation/cleanup issue, not a passing scale run.
+The conflict copies must be preserved outside synchronized roots on all three
+PCs and the old paths verified absent before generating a new corpus. The
+third PC's temporary remote administration window has expired, so coordinated
+cleanup and its 1.0.32.0 upgrade await renewed access. No additional corpus
+run was started.
