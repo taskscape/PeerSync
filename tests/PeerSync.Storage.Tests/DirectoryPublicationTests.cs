@@ -217,6 +217,29 @@ public sealed class DirectoryPublicationTests : IDisposable
     }
 
     [Fact]
+    public async Task NewRebaseProofWakesOnlyDelayedExactDirectMembersOnce()
+    {
+        await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 2);
+        byte[] fingerprint = new byte[32]; fingerprint[0] = 7;
+        await index.Needed.UpsertAsync([
+            new("topic/0001", new byte[32], 0) { Work = new(0, 0, Now, fingerprint) },
+            new("topic/other", new byte[32], 0) { Work = new(0, 0, Now, fingerprint) }
+        ], Token);
+        await index.RecordPullFailureAsync("topic/0001", Root, fingerprint, Now, Token);
+        await index.RecordPullFailureAsync("topic/other", Root, fingerprint, Now, Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(Now + 10 * TimeSpan.TicksPerSecond);
+
+        await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(Now);
+        index.ReadPullRetry("topic/other")!.NextTicks.ShouldBe(Now + 10 * TimeSpan.TicksPerSecond);
+
+        await index.RecordPullFailureAsync("topic/0001", Root, fingerprint, Now + 1, Token);
+        long retry = index.ReadPullRetry("topic/0001")!.NextTicks;
+        await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(retry);
+    }
+
+    [Fact]
     public async Task RebaseRejectsStaleEpochWrongGraphRootAndIncompleteOrRetiringGraph()
     {
         await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 1);

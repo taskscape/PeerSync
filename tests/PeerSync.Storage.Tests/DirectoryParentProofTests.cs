@@ -43,6 +43,35 @@ public sealed class DirectoryParentProofTests : IDisposable
     }
 
     [Fact]
+    public async Task NewParentRootWitnessWakesOnlyItsUnprovenDirectMemberOnce()
+    {
+        await using var index = await Open(); var (queued, draft) = await Prepare(index);
+        await Graph(index, Source(1), 2);
+        var proof = (await index.BeginDirectoryParentProofAsync(queued, draft, Source(1), Id(9), Now,
+            cancellationToken: Token)).Proof;
+        proof = await Discover(index, queued, draft, proof);
+        byte[] fingerprint = Id(22);
+        await index.Needed.UpsertAsync([
+            new("topic/0001", Id(3), 0) { Work = new(0, 0, Now, fingerprint) },
+            new("topic/other", Id(3), 0) { Work = new(0, 0, Now, fingerprint) }
+        ], Token);
+        await index.RecordPullFailureAsync("topic/0001", Root, fingerprint, Now, Token);
+        await index.RecordPullFailureAsync("topic/other", Root, fingerprint, Now, Token);
+
+        var root = index.ReadNextDirectoryParentRoot(proof)!;
+        root = await index.AdvanceDirectoryParentRootAsync(queued, draft, proof, root,
+            index.ReadDirectoryGraphMemberPage(root.Source.SourceId, limit: 1), Token);
+        root.Cursor.ShouldBe("TOPIC/0000");
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(Now);
+        index.ReadPullRetry("topic/other")!.NextTicks.ShouldBe(Now + 10 * TimeSpan.TicksPerSecond);
+
+        await index.RecordPullFailureAsync("topic/0001", Root, fingerprint, Now + 1, Token);
+        long retry = index.ReadPullRetry("topic/0001")!.NextTicks;
+        await index.AdvanceDirectoryParentRootAsync(queued, draft, proof, root, [], Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(retry);
+    }
+
+    [Fact]
     public async Task ParentRepresentativesAndVerifiedPrefixesSurviveReopenAndVectorOnlyQueueRestaging()
     {
         DirectoryPublication queued; DirectoryCaptureState draft; DirectoryParentProof proof; DirectoryParentRoot root;

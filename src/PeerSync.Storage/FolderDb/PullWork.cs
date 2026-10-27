@@ -188,5 +188,23 @@ public sealed partial class FolderIndex
         }, cancellationToken);
     }
 
+    // A newly authenticated parent graph can make a previously blocked direct
+    // child eligible. Wake only the exact signed work still represented by a
+    // live needed row; the normal applier revalidates every safety condition.
+    // Keep attempts intact so an unrelated persistent failure still backs off.
+    private static void WakeGraphMemberPullRetries(SqliteConnection connection, SqliteTransaction transaction,
+        byte[] rootId, byte[] graphId, string parentKey, string? cursor)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "UPDATE pull_retries SET next_ticks=failed_ticks WHERE root_id=$root AND next_ticks>failed_ticks "
+            + "AND EXISTS(SELECT 1 FROM needed n JOIN directory_graph_members m ON m.graph_id=$graph AND m.path_key=n.path_key "
+            + "WHERE n.path_key=pull_retries.path_key AND n.work_hash=pull_retries.work_hash AND n.work_stage IN (0,1) "
+            + "AND rtrim(rtrim(n.path_key,replace(n.path_key,'/','')),'/')=$parent "
+            + "AND ($cursor IS NULL OR m.path_key>$cursor));";
+        command.Parameters.AddWithValue("$root", rootId); command.Parameters.AddWithValue("$graph", graphId);
+        command.Parameters.AddWithValue("$parent", parentKey); command.Parameters.AddWithValue("$cursor", (object?)cursor ?? DBNull.Value);
+        command.ExecuteNonQuery();
+    }
+
     private static PullRetry ReadRetry(SqliteDataReader reader) => new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetInt32(3), reader.GetInt64(4), reader.GetInt64(5));
 }
