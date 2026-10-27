@@ -2329,6 +2329,8 @@ Development-signed [1.0.38.0 is now installed](docs/verification/P2-three-pc-phy
 
 The [exact second-PC dependency probe](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#exact-missing-tombstone-dependency-and-source-repair) found a complete reconstruction rebase waiting on its authenticated direct member: a missing local regular-file row with a scheduled signed tombstone. The ordinary ancestor publication blocked that deletion. The narrow Engine repair admits only that absent native target and exact unproven graph member under a complete remote range; five focused controls and the full local Release Engine suite pass **1,057/1,057**. Physical deployment, complete three-PC native convergence and a new four-checkpoint, three-hour soak are still required. The two failed attempts remain failed.
 
+The [development-signed 1.0.39.0 field deployment](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#10390-field-deployment-and-exact-dependency-transition) succeeded on all three PCs with Running services and unchanged sentinels. The second PC's exact previously blocked graph-member deletion now has a clean local signed tombstone and no needed row, proving that narrow repair reached the field. Its reconstruction publication and 43 other needed soak rows remained at the bounded read-only check; the third had 29. Full native equality and a new three-hour soak remain open.
+
 ## 9. Phase 3: WPF app and installer (weeks 14-17)
 
 Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
