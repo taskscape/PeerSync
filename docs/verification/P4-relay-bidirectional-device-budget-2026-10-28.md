@@ -30,3 +30,13 @@ Rendezvous service predates this change. Its upgrade, provider-uplink sizing,
 deployed simultaneous-flow measurement, central/client diagnostic correlation,
 and the physical WAN/NAT gates remain open. The ongoing three-PC LAN soak
 must finish before changing the central service used by that run.
+
+The complete Release Rendezvous test project passed **25/25**, zero skipped,
+after the repair. A self-contained, development-signed x64 server installer was
+built from commit `b7e4b67f839d03101f1ac51670f70748d1b46c84` as version
+`1.0.42.0`. Its SHA-256 is
+`3B4A7318706EC3E4F6B168776D2E6795735DBD1DA99CCD97CD0C48A074E0FDEC`,
+matching the adjacent manifest. Authenticode is valid with a timestamp and
+development signer `6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`. The
+manifest marks it `localDevelopmentOnly`; the physical server has not yet been
+upgraded and this does not satisfy a production signing gate.
