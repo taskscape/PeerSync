@@ -33,6 +33,7 @@ $entries = [ordered]@{
     'tools/Invoke-PeerSyncSoakOperations.ps1' = 'build/Invoke-PeerSyncSoakOperations.ps1'
     'tools/Invoke-PeerSyncSoakCaptureLoop.ps1' = 'build/Invoke-PeerSyncSoakCaptureLoop.ps1'
     'tools/Invoke-PeerSyncPhysicalSoak.ps1' = 'build/Invoke-PeerSyncPhysicalSoak.ps1'
+    'tools/Register-PeerSyncPhysicalSoakTask.ps1' = 'build/Register-PeerSyncPhysicalSoakTask.ps1'
     'tools/Start-NativeWanSoakIsolation.ps1' = 'build/field/Start-NativeWanSoakIsolation.ps1'
     'tools/Measure-PeerSyncTree.ps1' = 'build/Measure-PeerSyncTree.ps1'
     'tools/Compare-PeerSyncSoakReports.ps1' = 'build/Compare-PeerSyncSoakReports.ps1'

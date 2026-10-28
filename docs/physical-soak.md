@@ -152,6 +152,18 @@ changes and native route evidence separately. If a machine restarts or a
 scheduled hour is missed, preserve the partial journals and treat that run as
 incomplete.
 
+For unattended physical PCs, an elevated administrator can register the
+packaged `Register-PeerSyncPhysicalSoakTask.ps1` instead of keeping a console
+open. Give every PC the same future UTC hour and run ID, and its own label and
+folder path. The registrar runs the launcher preflight, starts its SYSTEM task
+20 minutes before hour zero, and retains task stdout/stderr and a registration
+receipt outside the share. Register all three before the launch time and
+verify each task is `Ready`. Its 4 h 30 min task limit covers the 20-minute
+lead, three-hour active window and final read-only capture grace. A task
+registration or `Ready` result is not a soak pass; inspect each task result,
+launcher and capture journals, operation logs, physical network/power records,
+and four hourly comparisons after the run.
+
 The manual batch and capture-loop commands below remain available for a
 controlled recovery or focused check. Do not run them concurrently with the
 launcher for the same run and label.
