@@ -28,3 +28,20 @@ LAN soak kit at `C:\PeerSync-Gate-Evidence\20261028-soak-kit` was not replaced.
 
 Staging is preparation only. No native-WAN isolation, NAT matrix, relay load
 or WAN soak was run by this step, and Gate P4 remains open.
+
+## Superseding field guide revision
+
+The initial archive's manual-operation example conflicted with the scheduled
+launcher's scan window. Tracked revision
+`d6ab32528b3b28184c5967fe43eebe1c364ecb7c` aligns the manual example
+with the completed hourly snapshot and the minutes 35–50 operation window.
+The rebuilt archive is `artifacts/deploy/PeerSync-physical-gates-d6ab3252.zip`,
+SHA-256 `494736F215B1EE2B72F92BB42ED48896B2CCEBC49EB8EE83AE22286120424276`.
+At 08:02 UTC on 2026-10-28, this archive and all 11 manifest file hashes
+verified on the same three PCs at
+`C:\PeerSync-Gate-Evidence\20261028-wan-kit-d6ab3252`. The manifest still
+limits content to 10 GiB and active execution to three hours. The prior kit
+remains untouched as historical evidence, and neither kit replaced the
+scheduled LAN soak kit. Use the `d6ab3252` kit for the later WAN run. Its
+machine receipts are retained at
+`artifacts/field/physical-50k-20261027/wan-kit-d6ab3252-stage.json`.
