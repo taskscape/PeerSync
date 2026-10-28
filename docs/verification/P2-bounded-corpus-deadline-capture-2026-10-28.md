@@ -24,9 +24,23 @@ minutes. The comparison writes a terminal JSON report and exits nonzero on
 any mismatch or late capture. The full root must remain below 10 GiB of test
 content during the run.
 
+`build/Invoke-PeerSyncCorpusDeadlineCapture.ps1` is the per-PC launcher. It
+requires the source resume timestamp, run ID, joined root and an existing
+evidence directory outside that root. It measures the exact run subtree, then
+starts a full native tree capture in the current UTC hour. It starts each
+collector as an owned child process, records separate stdout and stderr, stops
+that child if it reaches the three-hour deadline, and writes a terminal
+capture receipt. The three PCs must launch this command close together after
+native run convergence; the comparator checks that their tree capture starts
+are within five minutes. No capture receipt or synthetic check substitutes
+for the physical three-PC reports.
+
 On 2026-10-28, Windows PowerShell 5.1 parsed both scripts. A deep-path fixture
 with 24 nested levels produced a complete run report with the expected two
-files and 176 bytes. Synthetic comparison controls passed: a matching
+files and 176 bytes. The launcher completed both collectors against that
+fixture in Windows PowerShell 5.1, with empty stderr and a complete terminal
+receipt; a launch four hours after source resume exited nonzero with a failed
+receipt. Synthetic comparison controls passed: a matching
 three-PC set exited zero; altered full-tree hash, capture after the deadline,
 and altered run marker each exited nonzero with the expected issue. These
 controls verify the capture logic only. The next fresh physical transfer must
