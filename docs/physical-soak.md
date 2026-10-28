@@ -55,6 +55,9 @@ probe alone does not establish native WAN file transfer; the required hourly
 native-tree and operation evidence still decides the gate. If setup fails,
 the helper removes its rules and task and attempts service recovery. Never
 reuse the run ID for an incomplete test.
+The default cleanup grace is 45 minutes after the three-hour active window;
+the observed 50,000-file third-PC full-tree scan needed about 29 minutes.
+The grace is read-only and keeps PeerSync isolated until that capture finishes.
 
 Before running any packaged unsigned helper, verify its SHA-256 against the
 field-kit README. If local execution policy blocks it, open a new PowerShell

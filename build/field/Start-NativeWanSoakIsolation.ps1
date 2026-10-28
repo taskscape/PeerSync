@@ -9,7 +9,7 @@ param(
     [string]$ExpectedUplinkAlias = 'Wi-Fi',
     [string]$OverlayAlias = 'Tailscale',
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DisallowedUplinkPrefix,
-    [ValidateRange(10, 25)][int]$CaptureGraceMinutes = 20,
+    [ValidateRange(30, 60)][int]$CaptureGraceMinutes = 45,
     [switch]$PreflightOnly
 )
 

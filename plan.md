@@ -2743,6 +2743,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [ ] A three-hour scheduled soak across the WAN with zero data loss and four matching hourly tree comparisons.
   - The same [physical soak procedure](docs/physical-soak.md) can retain hourly WAN comparisons and correlated diagnostic bundles. The local two-guest control does not satisfy this gate.
   - The field kit now includes a [native-WAN isolation helper](build/field/Start-NativeWanSoakIsolation.ps1) with a read-only route/probe preflight, PeerSync-only overlay rules and a scheduled recovery receipt. Its positive and disallowed-LAN preflight controls passed locally; the actual isolation and three-hour physical WAN run remain unverified.
+  - The helper's default read-only recovery grace is 45 minutes after the three-hour active window, exceeding the observed 29-minute 50,000-file scan on the third PC. Native WAN isolation and all four hourly comparisons still require a physical run.
 
 ---
 
