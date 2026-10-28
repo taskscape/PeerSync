@@ -529,6 +529,12 @@ grace and ten-minute shutdown margin). Its revised source SHA-256
 `EB792F12D560405DA4BAC75A91635ED9B859F6805840E68706379A36FFAA1C4B`
 was staged and read back on all three PCs before the 08:00 UTC registration
 task; the previous registrar is preserved outside the shares on each PC.
+At 06:40 UTC the first-PC baseline start task exited zero and wrote a
+`complete` receipt for all three distinct physical hosts. Read-only Task
+Scheduler checks then confirmed each exact 07:00 baseline capture task was
+`Running` under SYSTEM, with PeerSync 1.0.43.0 services Running. The 07:00
+snapshots and later strict comparison are still pending; a running task is
+not a baseline pass.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task
