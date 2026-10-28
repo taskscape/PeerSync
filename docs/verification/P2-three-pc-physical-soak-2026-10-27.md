@@ -223,5 +223,32 @@ The read-only receipt is ignored
 (SHA-256 `F199E6F43424A21E121460BB2176F52BD1190A9BC1D784F88921037D04E0B1F3`).
 The service journal query yielded no matching recovery or rescan event in the
 bounded 01:12–01:18 window, so **the 30-second reconnect/rescan deadline is
-not proven** by this receipt. The 01:32 Wi-Fi transition, three later hourly
-comparisons, operations and final cleanup remain pending.
+not proven** by this receipt. The later Wi-Fi transition is recorded below;
+three later hourly comparisons, operations and final cleanup remain pending.
+
+### Second PC physical Wi-Fi switch and restoration
+
+The exact second-PC SYSTEM switch task exited 0. Its journal recorded the
+switch request at 01:32:02 UTC and Ethernet Disabled with Wi-Fi Up at
+01:32:04. A live read showed the route to the first PC sourced from
+`192.168.10.152` on Wi-Fi while Ethernet was disabled. The service remained
+Running, with production sync available and accepted peer rows. Network-change
+folder scans completed at 01:32:02, less than a second after the request.
+
+The first `service.network_recovery_started` event was at 01:32:02.7259033;
+its `service.network_recovery_complete` event was at 01:32:35.7342733,
+**33.008 seconds later**. The recovery loop reset three active sessions
+sequentially before completing. This exceeds the plan's 30-second recovery
+target on that diagnostic; the receipt does not prove that all peers reconnected
+inside the deadline. Later redundant network-change scans logged three
+`IOException` failures, as well as successful scans. They need correlation
+with the hourly tree comparisons before the gate can be judged.
+
+The restoration task and independent fallback both exited 0. Their journal
+entries show Ethernet Up at 01:36:06 and again at 01:39:00; the route to the
+first PC returned to `192.168.0.183` on Ethernet. At 01:39:42 the 1.0.41.0
+service was Running, production sync was available and eight accepted peer
+status rows were present. The final read-only receipt is ignored
+`artifacts/field/physical-50k-20261027/second-wifi-311fbde49775445997a6f1c1523830a7.json`
+(SHA-256 `77D321D2A37F6DBA2E2B82571533EFA620D1B74ACF3D739F8BA32FA6179C3A40`).
+No installed binaries or active soak tasks were changed during the transition.

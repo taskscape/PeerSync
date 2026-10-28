@@ -671,6 +671,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private async Task RecoverNetworkAsync(string reason, int coalescedRequests)
     {
         CancellationToken token = stopping.Token;
+        var recoveryTimer = Stopwatch.StartNew();
         try
         {
             diagnostics?.TryWrite(new("service.network_recovery_started", reason)
@@ -679,18 +680,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             // refresh endpoints before the immediate reconnect pass.
             await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, token).ConfigureAwait(false);
             KeyValuePair<Guid, IAsyncDisposable>[] activeSessions = sessions.ToArray();
-            foreach (var active in activeSessions)
-            {
-                diagnostics?.TryWrite(new("service.peer_session_reset", "network_recovery")
-                    { SessionId = active.Key, ErrorCode = reason });
-                try { await active.Value.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error)
-                {
-                    diagnostics?.TryWrite(new("service.peer_session_reset_failed", "network_recovery")
-                        { Level = DiagnosticLevel.Warning, SessionId = active.Key,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
-                }
-            }
+            await ResetActiveSessionsAsync(activeSessions, reason, diagnostics).ConfigureAwait(false);
 
             string[] knownPeers = endpoints.KnownPeerKeys();
             foreach (string peerKey in knownPeers)
@@ -699,13 +689,51 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 EnsureMaintainer(peerKey, Convert.FromHexString(peerKey));
             }
             diagnostics?.TryWrite(new("service.network_recovery_complete", reason)
-                { ItemsVisited = knownPeers.Length, ItemsSkipped = coalescedRequests });
+                { ItemsVisited = knownPeers.Length, ItemsSkipped = coalescedRequests,
+                    ElapsedMilliseconds = recoveryTimer.Elapsed.TotalMilliseconds });
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.network_recovery_failed", reason)
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                    ElapsedMilliseconds = recoveryTimer.Elapsed.TotalMilliseconds });
+        }
+    }
+
+    internal static async Task ResetActiveSessionsAsync(
+        IReadOnlyList<KeyValuePair<Guid, IAsyncDisposable>> activeSessions,
+        string reason, DiagnosticJournal? diagnostics)
+    {
+        // Separate sessions can each wait for a stream shutdown. Closing them
+        // one after another makes network recovery exceed the physical 30 s gate.
+        var pending = new Task[activeSessions.Count];
+        for (int index = 0; index < activeSessions.Count; index++)
+        {
+            KeyValuePair<Guid, IAsyncDisposable> active = activeSessions[index];
+            pending[index] = ResetOneAsync(active, reason, diagnostics);
+        }
+        await Task.WhenAll(pending).ConfigureAwait(false);
+    }
+
+    private static async Task ResetOneAsync(KeyValuePair<Guid, IAsyncDisposable> active,
+        string reason, DiagnosticJournal? diagnostics)
+    {
+        var timer = Stopwatch.StartNew();
+        diagnostics?.TryWrite(new("service.peer_session_reset", "network_recovery")
+            { SessionId = active.Key, ErrorCode = reason });
+        try
+        {
+            await active.Value.DisposeAsync().ConfigureAwait(false);
+            diagnostics?.TryWrite(new("service.peer_session_reset_complete", "network_recovery")
+                { SessionId = active.Key, ElapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
+        }
+        catch (Exception error)
+        {
+            diagnostics?.TryWrite(new("service.peer_session_reset_failed", "network_recovery")
+                { Level = DiagnosticLevel.Warning, SessionId = active.Key,
+                    ErrorCode = error.GetType().Name, HResult = error.HResult,
+                    ElapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
         }
     }
 
