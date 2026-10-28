@@ -159,6 +159,14 @@ public sealed class DirectoryPublicationTests : IDisposable
         using (var connection = Connect()) using (var trigger = connection.CreateCommand())
         { trigger.CommandText = "DROP TRIGGER fail_parent_wake;"; trigger.ExecuteNonQuery(); }
 
+        using (var connection = Connect()) using (var trigger = connection.CreateCommand())
+        { trigger.CommandText = "CREATE TRIGGER fail_pull_wake BEFORE UPDATE ON pull_retries WHEN OLD.path_key='TOPIC/CHILD/FILE' BEGIN SELECT RAISE(ABORT,'pull wake rollback'); END;"; trigger.ExecuteNonQuery(); }
+        await Should.ThrowAsync<SqliteException>(() => index.CommitDirectoryPublicationAsync(child, draft, null, Now, Token));
+        index.ReadDirectoryPublication("topic/child").ShouldNotBeNull();
+        index.ReadPullRetry(blockedPath)!.NextTicks.ShouldBeGreaterThan(Now);
+        using (var connection = Connect()) using (var trigger = connection.CreateCommand())
+        { trigger.CommandText = "DROP TRIGGER fail_pull_wake;"; trigger.ExecuteNonQuery(); }
+
         (await index.CommitDirectoryPublicationAsync(child, draft, null, Now, Token)).Changed.ShouldBeFalse();
         index.ReadDirectoryPublication("topic/child").ShouldBeNull();
         var awakened = index.ReadDirectoryPublication("topic")!;
