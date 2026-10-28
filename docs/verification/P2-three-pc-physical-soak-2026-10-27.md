@@ -474,3 +474,14 @@ snapshot with source/destination SHA-256 checks and write an hourly comparison
 and a local collector status receipt. A failed or absent receipt remains a
 failed or incomplete hourly gate; the task schedule alone is not evidence of
 successful collection.
+An exact one-time task using the same interactive elevated principal passed
+before launch: it decrypted the locally protected third-PC credential and
+authenticated to both remote Windows identities at 05:37 UTC, with task
+result zero. Its task was removed; the sanitized readiness receipt remains
+under ignored `artifacts/field/physical-50k-20261027/soak-collector-principal-143.json`.
+At that check, all three services were Running and C: free space was about
+181 GB, 17.6 GB and 102 GB on the first, second and third PCs. The workload
+script remeasures content before each five-operation batch and reserves the
+maximum simultaneous growth of all three hosts; the starting content leaves
+about 338 MB below the 10 GiB cap. These preflights do not prove that the
+scheduled hourly collectors will succeed.
