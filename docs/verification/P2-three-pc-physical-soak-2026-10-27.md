@@ -513,6 +513,14 @@ passing. Its AC wake-timer setting was still `1` after the aborted run's
 tasks were disabled. At 06:30 UTC, with zero old-run tasks enabled, the
 original `0` value was restored and read back. The new run's guarded
 sleep/wake registration can now perform its own enable/restore sequence.
+An exact final collector is scheduled for 12:58 UTC, after the hour-three
+snapshots and before the third PC's temporary WinRM cleanup. It copies each
+run-specific native snapshot, launcher/capture/operation journal and physical
+action record from all three PCs into separate local evidence directories,
+verifying each copied file's SHA-256 against its source. Its `complete`
+status means only that collection succeeded; the four hourly comparisons,
+operation results, physical transitions and cleanup must still be audited
+before a gate can pass.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task
