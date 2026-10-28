@@ -252,3 +252,16 @@ status rows were present. The final read-only receipt is ignored
 `artifacts/field/physical-50k-20261027/second-wifi-311fbde49775445997a6f1c1523830a7.json`
 (SHA-256 `77D321D2A37F6DBA2E2B82571533EFA620D1B74ACF3D739F8BA32FA6179C3A40`).
 No installed binaries or active soak tasks were changed during the transition.
+
+The concurrent-session recovery change was packaged after this observation as
+development-signed client installer **1.0.42.0** from source revision
+`e500ea653f04a71963d72f4d7b9aadfb0cdd3b70`. Local SHA-256 of
+`artifacts/installer/PeerSync-Setup-1.0.42.0-x64.exe` matches its manifest:
+`876C4B7D9393049E07607E66CAE70242ECE6EBC0F731C586A72DD0FFC56FA694`.
+Authenticode is `Valid`, signer thumbprint is
+`6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`, and the staged service
+file version is 1.0.42.0. Its manifest is `localDevelopmentOnly: true`;
+this is **not** a public release signature. The package has **not** been
+installed on any of the three PCs during this run. Parser-checked remote
+upgrade runners are prepared as ignored field artifacts, pending the final
+01:00–04:00 run evidence and failure inventory.
