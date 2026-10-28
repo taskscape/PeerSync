@@ -480,6 +480,8 @@ successful collection.
 The 06:00 UTC run `3f81e62b8aad49048073be5801d2622c` did not start on
 all three machines. The first and second launchers recorded `start`, but the
 third scheduled task exited 1 before writing its first launcher journal row.
+Task Scheduler on that PC reports an exact 05:55:00 UTC start and result 1;
+its Operational log has no matching event in the 05:50–06:10 window.
 The original scheduled action discarded standard error, so the exact
 pre-journal exception is unknown. A separate read-only content scan on the
 third PC succeeded with 10,399,184,958 bytes in 86.392 seconds. The first
