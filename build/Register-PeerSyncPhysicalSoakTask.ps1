@@ -76,7 +76,9 @@ $receipt.actionCommandSha256 = [BitConverter]::ToString(
     [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::Unicode.GetBytes($command))).Replace('-','')
 $action = New-ScheduledTaskAction -Execute $powershell -Argument $args -WorkingDirectory $kit
 $trigger = New-ScheduledTaskTrigger -Once -At $launchUtc.ToLocalTime()
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 4 -Minutes 10) `
+# Twenty-minute preflight lead + three-hour operation window + one-hour final
+# read-only capture grace, with ten minutes for task shutdown and reporting.
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 4 -Minutes 30) `
     -MultipleInstances IgnoreNew -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal

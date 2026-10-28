@@ -521,6 +521,14 @@ verifying each copied file's SHA-256 against its source. Its `complete`
 status means only that collection succeeded; the four hourly comparisons,
 operation results, physical transitions and cleanup must still be audited
 before a gate can pass.
+The 20-minute launch lead exposed a task-lifetime mismatch: the previous
+4 h 10 min Task Scheduler limit could stop a launcher ten minutes before its
+one-hour final read-only capture grace ended. The registrar now grants
+4 h 30 min (20-minute lead, three-hour active window, one-hour capture
+grace and ten-minute shutdown margin). Its revised source SHA-256
+`EB792F12D560405DA4BAC75A91635ED9B859F6805840E68706379A36FFAA1C4B`
+was staged and read back on all three PCs before the 08:00 UTC registration
+task; the previous registrar is preserved outside the shares on each PC.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task
