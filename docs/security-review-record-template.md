@@ -9,7 +9,7 @@ explicit rationale and the installed-host boundary has been checked.
 | --- | --- |
 | Reviewer and independent role | Pending |
 | Review start/end UTC | Pending |
-| Exact Git commit and signed package hashes | Pending |
+| Exact client/server source revisions, clean-tree provenance and signed package hashes | Pending |
 | Installed client/server versions and Windows builds | Pending |
 | Hosts and network topology actually examined | Pending |
 | Evidence archive location and access owner | Pending |
@@ -55,6 +55,13 @@ Test signed-update trust with the actual release signer and installed helper:
 current trusted signer, unrelated trusted signer, revoked non-root signer,
 unreachable revocation service, changed publisher pin and safe rotation. Note
 any test that cannot be performed and keep its release condition open.
+
+For each reviewed installer, compare its manifest, source commit and payload
+hashes with the installed files. If the manifest records a dirty working tree,
+identify and retain that exact source delta before claiming the package is
+reproducible. Review the client and Rendezvous builds as separate revisions;
+the development-signed field builds in the [handoff snapshot](security-review-package.md#current-handoff-snapshot-2026-10-28)
+are not release candidates.
 
 | Finding ID | Severity | Reproduction and evidence | Fix commit or accepted rationale | Retest result |
 | --- | --- | --- | --- | --- |
