@@ -190,27 +190,42 @@ this metadata preflight, so the hourly full-content tree capture remains the
 authoritative 10 GiB assertion.
 
 From each physical PC, use the same run GUID but a distinct machine label.
-This example runs repeated short batches through the final capture hour while
-its PowerShell session remains open. Create the log directory first and use
-the same `$run` as in the hourly capture commands below:
+This manual example runs short batches only after the current hour's full-tree
+capture has completed, and only during minutes 35–50 of each active hour.
+The packaged launcher above supplies the required process deadline and is the
+authoritative unattended path. Create the report and log directories first and
+use the same `$run` as in the hourly capture commands below:
 
 ```powershell
 $run = [guid]'11111111-2222-3333-4444-555555555555' # replace once per soak
 $first = '2026-10-23T11:00:00Z' # same future UTC hour used by the capture loop
 $label = 'pc-a' # pc-b and pc-c on the other machines
 $root = 'C:\PeerSync-Test\Share'
+$reports = 'C:\Temp\PeerSync-soak'
 $logDirectory = 'C:\Temp\PeerSync-soak-operations'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
 $end = [DateTime]::Parse($first).ToUniversalTime().AddHours(3)
 while ((Get-Date).ToUniversalTime() -lt $end) {
   $minute = (Get-Date).ToUniversalTime().Minute
-  if ($minute -lt 15 -or $minute -ge 55) {
+  if ($minute -lt 35 -or $minute -ge 42) {
     Start-Sleep -Seconds 60 # shared quiet window for hourly hashing
     continue
+  }
+  $hour = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHH')
+  $snapshot = Join-Path $reports "snapshot-$($run.ToString('N'))-$label-$hour.json"
+  if (-not (Test-Path -LiteralPath $snapshot)) {
+    Start-Sleep -Seconds 60 # wait for this PC's full-tree capture
+    continue
+  }
+  if ((Get-Content -LiteralPath $snapshot -Raw | ConvertFrom-Json).status -ne 'complete') {
+    throw 'Current hourly capture failed; retain its report.'
   }
   & .\tools\Invoke-PeerSyncSoakOperations.ps1 -Root $root -RunId $run `
     -MachineLabel $label -LogDirectory $logDirectory -Count 5
   if ($LASTEXITCODE -ne 0) { throw 'Operation batch failed; retain its JSONL.' }
+  if ((Get-Date).ToUniversalTime().Minute -ge 50) {
+    throw 'Manual batch crossed the operation window; retain this incomplete run.'
+  }
   Start-Sleep -Seconds 300
 }
 ```
@@ -220,9 +235,10 @@ root, and retain all batch logs; record the downtime. The script does not
 perform sleep/resume, Wi-Fi switches or permission changes. Do those
 deliberately and record their UTC times and outcomes separately. An
 unattended loop that stops or loses hours cannot by itself pass the gate.
-If hashing the full corpus takes longer than 15 minutes on any peer, reduce
-the workload within the 10 GiB ceiling and restart the timed gate. Every
-capture must start within 15 minutes of its nominated UTC hour.
+If hashing the full corpus takes longer than 35 minutes on any peer, there is
+no guaranteed operation window for that hour. Reduce the workload within the
+10 GiB ceiling and restart the timed gate. Every capture must start within 15
+minutes of its nominated UTC hour; the scan may finish later.
 
 ## Capture each hour
 
