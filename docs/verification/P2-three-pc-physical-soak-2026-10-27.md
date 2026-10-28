@@ -206,3 +206,22 @@ SHA-256 is `FCBBDCED9C1BF23A609FF21A783EE9448CB35F0857B07736122BE051DBBA6116`.
 This is **one of four** required physical checkpoints. The 02:00, 03:00 and
 04:00 comparisons, random operation batches, actual sleep/resume and Wi-Fi
 transition, service recovery and cleanup remain unverified; Gate P2 stays open.
+
+### Second PC physical suspend and resume
+
+For the same run, `DESKTOP-BN535U0` recorded a suspend request at 01:12:01 UTC,
+the suspend call returning at 01:14:51, and its scheduled wake task firing at
+01:15:02. Windows Kernel-Power events 42 and 107 corroborate the power
+transition. The three exact SYSTEM tasks for suspend, wake and AC wake-policy
+restoration each report result 0. At 01:18:00 the restoration journal recorded
+the original AC wake-timer value `0`; an independent `powercfg /qh` readback
+confirmed `0x00000000`. At 01:24:24 the 1.0.41.0 PeerSync service was Running,
+Ethernet was Up, and `psp status` reported production sync available with
+accepted peer rows. The Tailscale management route returned after the wake.
+The read-only receipt is ignored
+`artifacts/field/physical-50k-20261027/second-resume-311fbde49775445997a6f1c1523830a7.json`
+(SHA-256 `F199E6F43424A21E121460BB2176F52BD1190A9BC1D784F88921037D04E0B1F3`).
+The service journal query yielded no matching recovery or rescan event in the
+bounded 01:12–01:18 window, so **the 30-second reconnect/rescan deadline is
+not proven** by this receipt. The 01:32 Wi-Fi transition, three later hourly
+comparisons, operations and final cleanup remain pending.
