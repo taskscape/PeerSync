@@ -507,6 +507,12 @@ and new-run registration retain their original triggers and principals, now
 capture separate task stdout/stderr files, and passed decoded-action syntax
 and Task Scheduler trigger read-back. This closes the previous blind spot for
 errors before a field wrapper can write its own status receipt.
+The second PC was live and reachable at 06:27 UTC with 1.0.43.0 Running,
+Ethernet and Wi-Fi both Up, and a source-bound Wi-Fi ping to the first PC
+passing. Its AC wake-timer setting was still `1` after the aborted run's
+tasks were disabled. At 06:30 UTC, with zero old-run tasks enabled, the
+original `0` value was restored and read back. The new run's guarded
+sleep/wake registration can now perform its own enable/restore sequence.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task
