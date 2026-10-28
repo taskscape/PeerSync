@@ -42,6 +42,21 @@ verified on the same three PCs at
 `C:\PeerSync-Gate-Evidence\20261028-wan-kit-d6ab3252`. The manifest still
 limits content to 10 GiB and active execution to three hours. The prior kit
 remains untouched as historical evidence, and neither kit replaced the
-scheduled LAN soak kit. Use the `d6ab3252` kit for the later WAN run. Its
+scheduled LAN soak kit. The `d6ab3252` kit was prepared for the later WAN run;
+it is superseded by the source guard below. Its
 machine receipts are retained at
 `artifacts/field/physical-50k-20261027/wan-kit-d6ab3252-stage.json`.
+
+The tracked helper has since gained a stricter physical-path preflight:
+only the expected physical uplink may be Up, and routes to the nominated peer
+LAN addresses are checked before and after the PeerSync restart. The staged
+`d6ab3252` archive predates this change and must not be used for the WAN gate.
+After the live LAN run finishes, rebuild and hash-check a replacement kit on
+the test PCs before any native-WAN run. Keep the old kit as historical staging
+evidence.
+
+The updated guard parsed under Windows PowerShell 5.1. A read-only live route
+control on the first PC accepted its sole Ethernet hardware uplink, then
+rejected its forbidden source prefix. Isolated controls rejected a second Up
+physical adapter and a peer LAN route through an unapproved adapter. These
+checks do not substitute for the outside-PC preflight or a physical WAN soak.

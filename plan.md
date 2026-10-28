@@ -2748,6 +2748,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
   - The field kit now includes a [native-WAN isolation helper](build/field/Start-NativeWanSoakIsolation.ps1) with a read-only route/probe preflight, PeerSync-only overlay rules and a scheduled recovery receipt. Its positive and disallowed-LAN preflight controls passed locally; the actual isolation and three-hour physical WAN run remain unverified.
   - The helper's default read-only recovery grace is 45 minutes after the three-hour active window, exceeding the observed 29-minute 50,000-file scan on the third PC. Native WAN isolation and all four hourly comparisons still require a physical run.
   - The [revision-pinned WAN field kit](docs/verification/P4-native-wan-kit-staging-2026-10-28.md) is staged with matching archive and 11 file hashes on all three physical PCs, separately from the scheduled LAN soak kit. This is preparation, not a WAN gate pass.
+  - A later source guard requires the outside PC's hotspot to be its only Up physical adapter and checks routes to the nominated peer LAN addresses before and after PeerSync restart. It parsed under Windows PowerShell 5.1; a read-only live route check and isolated forbidden-prefix, second-adapter and alternate-peer-route controls passed. The previously staged WAN kit predates this guard; rebuild and verify its replacement after the active LAN run before claiming native-WAN evidence. No WAN soak is credited yet.
 
 ---
 

@@ -25,8 +25,12 @@ management while blocking **only** the installed PeerSync service on that
 adapter. Use a fresh run GUID, an existing joined folder and evidence directory,
 and the same UTC first hour as the scheduled soak launchers. Run its
 `-PreflightOnly` check before scheduling any work. Set
-`-DisallowedUplinkPrefix` to the LAN prefix the PC is leaving; if the physical
-route still uses that LAN, preflight fails. It also requires a hardware uplink,
+`-DisallowedUplinkPrefix` to the LAN prefix the PC is leaving and pass every
+other participating PC's physical LAN IPv4 address in `-PeerLanAddresses`.
+Disconnect Ethernet and any other physical adapter before preflight; the
+selected hotspot uplink must be the only Up physical adapter. The helper
+checks its IPv4 addresses, the public rendezvous route and routes to those
+peer LAN addresses before and after the service restart. It also requires a
 running service, a test tree within 10 GiB, and correlated TCP/UDP 99 probes.
 After the soak tasks are staged, run the helper elevated **2–10 minutes before**
 hour 0, without `-PreflightOnly`, and retain its JSON report:
@@ -40,7 +44,8 @@ $reports = 'C:\PeerSync-Gate-Evidence\soak' # existing; outside the share
 & "$kit\Start-NativeWanSoakIsolation.ps1" -RunId $run `
   -FirstHourUtc $first -Root $root -OutputDirectory $reports `
   -KitDirectory $kit -ExpectedUplinkAlias 'Wi-Fi' `
-  -DisallowedUplinkPrefix '192.168.0.' -PreflightOnly
+  -DisallowedUplinkPrefix '192.168.0.' `
+  -PeerLanAddresses @('192.168.0.176','192.168.0.164') -PreflightOnly
 # Once the other peers' soak tasks are registered and the first hour is near,
 # rerun the same command elevated without -PreflightOnly.
 ```
@@ -52,7 +57,10 @@ Recovery removes the two rules after the final read-only capture grace period,
 restarts PeerSync and writes a separate recovery JSON. Check both reports,
 the task exit, selected transport and service logs. A successful setup or
 probe alone does not establish native WAN file transfer; the required hourly
-native-tree and operation evidence still decides the gate. If setup fails,
+native-tree, per-hour adapter/route state, selected transport and operation
+evidence still decide the gate. If another physical adapter comes Up later,
+the run cannot be credited as native WAN without evidence that PeerSync stayed
+off that adapter. If setup fails,
 the helper removes its rules and task and attempts service recovery. Never
 reuse the run ID for an incomplete test.
 The default cleanup grace is 45 minutes after the three-hour active window;

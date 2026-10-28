@@ -9,6 +9,7 @@ param(
     [string]$ExpectedUplinkAlias = 'Wi-Fi',
     [string]$OverlayAlias = 'Tailscale',
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DisallowedUplinkPrefix,
+    [Parameter(Mandatory)][ValidateCount(1, 16)][string[]]$PeerLanAddresses,
     [ValidateRange(30, 60)][int]$CaptureGraceMinutes = 45,
     [switch]$PreflightOnly
 )
@@ -59,22 +60,56 @@ if ($command -match '^"([^\"]+\.exe)"') {
 } else { throw 'Cannot resolve the installed service executable.' }
 if (-not [IO.File]::Exists($serviceExe)) { throw 'Installed service executable is missing.' }
 
-$overlay = Get-NetAdapter -Name $OverlayAlias -ErrorAction Stop
-$uplink = Get-NetAdapter -Name $ExpectedUplinkAlias -ErrorAction Stop
-if ($overlay.Status -ne 'Up') { throw 'Management overlay must remain connected.' }
-if ($uplink.Status -ne 'Up' -or -not $uplink.HardwareInterface) {
-    throw 'The expected physical uplink must be connected.'
+foreach ($address in $PeerLanAddresses) {
+    $parsed = $null
+    if (-not [Net.IPAddress]::TryParse($address, [ref]$parsed) -or
+        $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+        throw 'Every peer LAN address must be a valid IPv4 address.'
+    }
 }
+
+function Assert-NativeWanPath {
+    param([Parameter(Mandatory)][string]$RendezvousAddress)
+
+    $overlay = Get-NetAdapter -Name $OverlayAlias -ErrorAction Stop
+    $uplink = Get-NetAdapter -Name $ExpectedUplinkAlias -ErrorAction Stop
+    if ($overlay.Status -ne 'Up') { throw 'Management overlay must remain connected.' }
+    if ($uplink.Status -ne 'Up' -or -not $uplink.HardwareInterface) {
+        throw 'The expected physical uplink must be connected.'
+    }
+    $upPhysical = @(Get-NetAdapter -ErrorAction Stop |
+        Where-Object { $_.Status -eq 'Up' -and $_.HardwareInterface })
+    if ($upPhysical.Count -ne 1 -or $upPhysical[0].Name -ne $ExpectedUplinkAlias) {
+        throw 'Disconnect other physical network adapters before native-WAN testing.'
+    }
+    $uplinkAddresses = @(Get-NetIPAddress -InterfaceIndex $uplink.InterfaceIndex `
+        -AddressFamily IPv4 -ErrorAction Stop | Where-Object IPAddress)
+    if (-not $uplinkAddresses.Count -or
+        @($uplinkAddresses | Where-Object {
+            $_.IPAddress -like ($DisallowedUplinkPrefix + '*')
+        }).Count) {
+        throw 'The physical uplink has no usable IPv4 address or still has a disallowed LAN address.'
+    }
+
+    $serverRoute = Find-NetRoute -RemoteIPAddress $RendezvousAddress |
+        Select-Object -First 1
+    if (-not $serverRoute -or $serverRoute.InterfaceAlias -ne $ExpectedUplinkAlias -or
+        [string]$serverRoute.IPAddress -like ($DisallowedUplinkPrefix + '*')) {
+        throw 'Rendezvous traffic is not routed through the expected physical uplink.'
+    }
+    foreach ($peerAddress in $PeerLanAddresses) {
+        $peerRoute = Find-NetRoute -RemoteIPAddress $peerAddress | Select-Object -First 1
+        if (-not $peerRoute -or $peerRoute.InterfaceAlias -notin @($ExpectedUplinkAlias,$OverlayAlias)) {
+            throw 'A peer LAN address has a route outside the physical uplink and blocked overlay.'
+        }
+    }
+    return $serverRoute
+}
+
 $serverAddress = Resolve-DnsName sync.taskscape.com -Type A -ErrorAction Stop |
     Where-Object IPAddress | Select-Object -First 1 -ExpandProperty IPAddress
 if (-not $serverAddress) { throw 'Rendezvous IPv4 address was not resolved.' }
-$route = Find-NetRoute -RemoteIPAddress $serverAddress | Select-Object -First 1
-if (-not $route -or $route.InterfaceAlias -ne $ExpectedUplinkAlias) {
-    throw 'Rendezvous traffic is not routed through the expected physical uplink.'
-}
-if ([string]$route.IPAddress -like ($DisallowedUplinkPrefix + '*')) {
-    throw 'The physical uplink still has a disallowed LAN address.'
-}
+$route = Assert-NativeWanPath -RendezvousAddress $serverAddress
 $cli = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($serviceExe))) 'cli\psp.exe'
 if (-not [IO.File]::Exists($cli)) { throw 'Installed PeerSync CLI is missing.' }
 $probeText = & $cli probe 'sync.taskscape.com:99'
@@ -94,6 +129,7 @@ $report = [ordered]@{
     serviceVersion=(Get-Item -LiteralPath $serviceExe).VersionInfo.FileVersion;
     uplinkAlias=$route.InterfaceAlias;uplinkAddress=$route.IPAddress;
     disallowedUplinkPrefix=$DisallowedUplinkPrefix;
+    peerLanAddressCount=$PeerLanAddresses.Count;
     overlayAlias=$OverlayAlias;serverAddress=$serverAddress;
     probeSessionId=$probe.sessionId;probeTcp=$probe.tcp.reachable;probeUdp=$probe.udp.reachable;
     launcherSha256=(Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash;
@@ -201,12 +237,7 @@ if (-not $rulesRemoved -or -not $running -or $issue) { exit 1 }
     }
     $serviceTouched = $true
     Restart-PeerSyncAfterExit
-    $finalRoute = Find-NetRoute -RemoteIPAddress $serverAddress | Select-Object -First 1
-    if (-not $finalRoute -or $finalRoute.InterfaceAlias -ne $ExpectedUplinkAlias -or
-        [string]$finalRoute.IPAddress -like ($DisallowedUplinkPrefix + '*') -or
-        (Get-NetAdapter -Name $OverlayAlias).Status -ne 'Up') {
-        throw 'The physical route or management overlay changed during service restart.'
-    }
+    $null = Assert-NativeWanPath -RendezvousAddress $serverAddress
     $report.status = 'active'
     $report.startedUtc = [DateTime]::UtcNow.ToString('o')
     $report.rules = @($inRule,$outRule)
