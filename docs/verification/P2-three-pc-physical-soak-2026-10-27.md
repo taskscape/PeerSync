@@ -613,8 +613,9 @@ at 10:32:04.544 UTC, Wi-Fi `192.168.10.152` Up and PeerSync Running. A
 read-only remote check during the interval found the route to the first PC's
 `192.168.0.176` through Wi-Fi. The scheduled restore task exited zero;
 Ethernet was Up again at 10:34:05.185 UTC, with PeerSync still Running.
-The fallback remains scheduled separately. The second-PC recovery-timing
-collector is due at 10:55 UTC and the formal hourly comparisons are pending.
+The fallback task also exited zero at 10:36 UTC, leaving Ethernet Up. The
+second-PC recovery-timing collector is due at 10:55 UTC and the later formal
+hourly comparisons are pending.
 
 The first PC's installed-service journal records an authenticated QUIC
 candidate to the second PC's Tailscale address `100.88.55.83` at
@@ -627,3 +628,58 @@ the observed first-to-second session during the switch used the overlay. It
 does not establish authenticated sync over the physical Wi-Fi path. Keep the
 Wi-Fi recovery subcheck and Gate P2 open pending a separately isolated
 physical-path check and the complete four-checkpoint soak audit.
+
+The recovery-timing collector initially selected only `debug.jsonl`, while
+the installed journal rotates into `debug.*.jsonl` during this active run.
+Before its scheduled 10:55 UTC execution, the exact registered second-PC
+script was backed up with its original SHA-256
+`8811479093E0B2B0DF68D508FB4431F775CC07FFDD3554C0FDA9D6FCBE5D735D`
+and replaced with a PowerShell 5.1 parse-checked version that reads all
+`debug*.jsonl` segments touched by the observation window. The remote file
+read back SHA-256
+`ACB247A349B9C0AC08E3075B1A96E08B5473C83287E4B98639A1292948EE79F2`,
+and the same scheduled task remained `Ready`. The pending report, rather than
+this staging receipt, determines whether a recovery deadline was met.
+
+The exact hour-one collector task exited zero at 10:50:07 UTC. Its
+`compare-hour-1.json` accepts three native snapshots captured at 10:00 UTC:
+each has 50,167 files, 223 directories, 10,399,485,686 bytes and full-tree
+SHA-256 `81D9BD7B67C9205C515D7DF84A7345FC9ADF32035378A278E46CDE102D4ECD3A`.
+The comparison has `match=true` and no issues. Hour two, hour three and the
+final operation/cleanup audit remain pending; one
+matching hourly checkpoint does not pass the full soak.
+
+The corrected second-PC recovery collector executed at 10:55 UTC with exit
+zero. It scanned four retained service-journal segments, parsed 25 network
+events with zero invalid lines, found six completed recovery passes and zero
+failed passes. Its report SHA-256 is
+`FD8E2A392E99CF9CA4C1EFD4DE731A36BB5F32F3C6E0FDEADEBA138EF47718F1`.
+The one-off collector projected the wrong duration field name; the installed
+safe journal uses `elapsedMs`. A separate read-only extraction of the original
+journal events preserves that field in ignored
+`artifacts/field/physical-50k-20261027/second-recovery-timeline-f899ccb822fd4298ab08b68f6bf743c4.json`
+(SHA-256 `6A8CB7D2D5191BF34ED69753C490DA20A00561A000279FFAD78B0BF91E6489B6`).
+
+The second PC's Windows wake event was at 09:33:50.991 UTC. Its first
+post-wake folder rescan completed at 09:33:59.615, network recovery completed
+at 09:34:04.671, and it selected an authenticated direct LAN QUIC candidate
+to the first PC at 09:34:07.269: 16.278 seconds after wake. The long first
+pass began before sleep and includes suspended time; its 126,024 ms diagnostic
+is not a post-wake reconnect duration. At the 10:32 Ethernet-to-Wi-Fi switch,
+the first recovery pass completed in 17,018 ms, a queued second pass in 1,111
+ms, and an authenticated candidate to the third PC's Tailscale address was
+selected by 10:32:24.984. A physical Wi-Fi endpoint and reconnection to all
+peers within 30 seconds are not established. P2.5.5 remains open for that
+separate physical-path check.
+
+The operator requested that the second PC remain awake for the rest of field
+testing. At 11:00:41 UTC, a guarded WinRM action set AC and battery idle
+standby, idle hibernate, unattended sleep, and lid-close sleep action to zero
+in its active power scheme, then read back every setting as zero. The exact
+old unattended-sleep restoration task scheduled for 12:45 UTC was disabled;
+PeerSync stayed Running. The pre-change values, task identity and read-back are
+retained in ignored `second-no-sleep-20261028.json` (SHA-256
+`024D6A0BA51777BFC908973A7FB4676E1292F5EA0A7D3E25586FE789824C7C0E`).
+This setting change prevents another automatic sleep during LAN collection
+and the later hotspot test; it does not alter the already observed physical
+sleep/wake evidence.
