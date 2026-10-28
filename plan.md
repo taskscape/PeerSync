@@ -67,6 +67,10 @@ and report passed, failed and unverified gates separately. Keep any unmet
 physical NAT, throughput, independent security review, hosted CI and release
 signing requirements open; do not claim a beta or v1.0 release. See the
 [closeout requirement](docs/requirements/field-campaign-closeout-2026-10-28.md).
+The [final field handoff](docs/verification/field-campaign-closeout-2026-10-28.md)
+records the passed, failed and open checks and the cleanup state. The hourly
+physical-gate follow-up is paused; no further test is scheduled in this
+campaign.
 
 ---
 

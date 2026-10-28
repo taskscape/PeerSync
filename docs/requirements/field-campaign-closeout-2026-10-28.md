@@ -17,7 +17,7 @@ This calendar limit ends the current field campaign. It does **not** turn a
 a short WAN observation into the three-hour P4 or P5 scheduled soak, and it
 does not waive the full P0 NAT matrix, three-PC corpus convergence time,
 installed-service LAN throughput, unassisted installation, independent
-security review, hosted CI or release-signing requirements. At 15:00, report
+security review, hosted CI or release-signing requirements. By 15:00, report
 each as passed, failed or unverified from actual evidence. Keep the unchecked
 plan boxes open and do not label an incomplete build as beta or v1.0 shipped.
 Future work requires a separately scheduled campaign or an explicit new

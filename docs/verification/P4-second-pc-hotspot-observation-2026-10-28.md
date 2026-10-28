@@ -8,8 +8,7 @@ All three clients used installed version 1.0.43.0. The first PC stayed on
 its original network; the second PC's Ethernet was disabled for the test.
 Its only active physical adapter was Wi-Fi (`ZAG6`, `192.168.10.152`), its
 route to the rendezvous server `45.11.63.194` selected Wi-Fi, and Tailscale
-remained available for management. The first and second PCs had distinct
-observed public egress addresses (`45.11.63.194` and `45.11.60.181`).
+remained available for management.
 
 The tracked `Test-NativeWanWithoutOverlay.ps1` helper was staged on the
 second PC with matching SHA-256
