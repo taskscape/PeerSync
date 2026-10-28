@@ -535,6 +535,13 @@ Scheduler checks then confirmed each exact 07:00 baseline capture task was
 `Running` under SYSTEM, with PeerSync 1.0.43.0 services Running. The 07:00
 snapshots and later strict comparison are still pending; a running task is
 not a baseline pass.
+A read-only second-PC timing collector is staged with SHA-256
+`F88DF08114D3BFC10E190C2B8C746E119197C7F6E133BAC53BA6E92EC78F81C2`
+and scheduled under SYSTEM at 10:55 UTC. It will select service network
+change/recovery events from 09:35–10:50 UTC into a sanitized local report
+after the sleep/wake and Wi-Fi transition windows. Its output is timing
+evidence to review against the 30-second recovery requirement; registration
+alone does not verify recovery.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task

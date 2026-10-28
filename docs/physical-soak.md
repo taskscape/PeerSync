@@ -63,10 +63,11 @@ session; do not change machine-wide execution policy.
 
 ## Create the mixed LAN corpus
 
-On the first physical PC, use a test folder with at least 25 GiB free on its
-volume; the script checks room for both native content and PeerSync's local
-blocks, plus a 5 GiB reserve. The other two PCs also need room for native and
-block copies. The generator creates 9 GiB of random file content: 50,000
+On the first physical PC, the default 9 GiB corpus requires at least 23 GiB
+free on its volume: 9 GiB for native content, 9 GiB for PeerSync's local
+blocks, and 5 GiB of headroom. The generator checks the exact available bytes;
+the other two PCs also need room for native and block copies. The generator
+creates 9 GiB of random file content: 50,000
 small files, 24 nested levels with a file at each level, and eight large
 files. Its small local JSON report counts content bytes and files; the
 run-specific `owner.json` marker adds a little metadata outside that total.
