@@ -79,8 +79,10 @@ scheduled hours 0, 1, 2 and 3. Follow docs/physical-soak.md for the exact
 three-PC LAN, WAN and report-comparison steps. The scripts refuse reused
 corpus/report paths and do not delete synchronized data.
 For native WAN, the optional isolation helper blocks only the installed
-PeerSync service on Tailscale. It requires a physical WAN route and a working
-TCP/UDP rendezvous probe; retain its local report and cleanup receipt.
+PeerSync service on Tailscale. It requires the intended WAN uplink to be the
+only active physical adapter, checks routes to the nominated peer LAN addresses
+and requires a working TCP/UDP rendezvous probe. Retain its local report and
+cleanup receipt; inspect adapter state and selected transport each hour.
 
 manifest.json lists the SHA-256 of every script and document. Confirm the
 archive's externally supplied SHA-256 first; the manifest alone cannot
