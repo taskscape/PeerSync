@@ -73,3 +73,20 @@ had no configured values. The read-only JSON is under
 `artifacts/field/client-1.0.31.0-third-20261027/crash-policy.json`.
 These are point-in-time policy observations; physical Rendezvous server,
 privileged dump handling and independent review remain open.
+
+On 2026-10-28 UTC, the installed **1.0.41.0** audit ran read-only on the first,
+second and third physical LAN clients while their services were Running. Each
+installed `Audit-CrashPolicy.ps1` matched source SHA-256
+`EAE210F9D4F5D152A2ECAC3771A3B255C99E7D842B847D05DA7522CB5A71AB56`.
+Each 64-bit machine-policy result reports automatic WER exclusion and PeerSync
+installer ownership for all three client executables, with no configured global
+or per-executable LocalDumps values. The source-verified JSON files are retained
+under ignored `artifacts/field/physical-50k-20261027/client-1.0.41-crash-policy/`:
+first SHA-256 `6DFCDC081CFBC02FF17EB36ED256F639C1723EFE5B398E221E8296F52ED5DE67`,
+second `AD7458A8DCDC6342622EFD84C4A5D51DC76B4C321C23E62F5663ADF053CC6A12`,
+third `46A7AA5AB8EB01CFBDB93E660F736CE4F24B59F8FAA9BD789F97077AA11C357C`.
+The first client was checked locally and the other two through authenticated
+temporary WinRM sessions; the first PC's WinRM and TrustedHosts settings were
+restored afterward. This covers current installed client policies, not the
+physical Rendezvous server, privileged administrator-created dumps or the
+required independent threat review.
