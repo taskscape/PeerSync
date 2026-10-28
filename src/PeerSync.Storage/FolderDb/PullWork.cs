@@ -206,5 +206,25 @@ public sealed partial class FolderIndex
         command.ExecuteNonQuery();
     }
 
+    // Releasing a directory publication can unblock its path, descendants or
+    // an ancestor directory. Only wake retries for the same signed work; the
+    // applier still rechecks every publication and native guard.
+    private static void WakePublicationBlockedPullRetries(SqliteConnection connection, SqliteTransaction transaction,
+        byte[] rootId, string pathKey)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "WITH RECURSIVE ancestors(key) AS (VALUES($path) "
+            + "UNION ALL SELECT rtrim(rtrim(key,replace(key,'/','')),'/') FROM ancestors WHERE instr(key,'/')>0) "
+            + "UPDATE pull_retries SET next_ticks=failed_ticks WHERE root_id=$root AND next_ticks>failed_ticks "
+            + "AND (path_key IN (SELECT key FROM ancestors) OR (path_key >= $low AND path_key < $high)) "
+            + "AND EXISTS(SELECT 1 FROM needed n WHERE n.path_key=pull_retries.path_key "
+            + "AND n.work_hash=pull_retries.work_hash AND n.work_stage IS NOT NULL);";
+        command.Parameters.AddWithValue("$root", rootId);
+        command.Parameters.AddWithValue("$path", pathKey);
+        command.Parameters.AddWithValue("$low", pathKey + '/');
+        command.Parameters.AddWithValue("$high", pathKey + '0');
+        command.ExecuteNonQuery();
+    }
+
     private static PullRetry ReadRetry(SqliteDataReader reader) => new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetInt32(3), reader.GetInt64(4), reader.GetInt64(5));
 }

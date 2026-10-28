@@ -74,6 +74,7 @@ public sealed partial class FolderIndex
             // Release and wake in one transaction so it can recheck the now
             // satisfied dependency without waiting for exponential backoff.
             WakeWaitingParentPublication(connection, transaction, key);
+            WakePublicationBlockedPullRetries(connection, transaction, queued.RootId, key);
             return new DirectoryPublicationCommit(current, row is not null);
 
             LocalFileRow? ReadCurrent()

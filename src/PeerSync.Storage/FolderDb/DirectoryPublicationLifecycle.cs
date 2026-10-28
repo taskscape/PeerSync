@@ -28,6 +28,7 @@ public sealed partial class FolderIndex
             command.Parameters.AddWithValue("$key", key); command.Parameters.AddWithValue("$root", row.RootId);
             command.Parameters.AddWithValue("$version", row.Version.ToString("N")); command.ExecuteNonQuery();
             WakeWaitingParentPublication(connection, transaction, key);
+            WakePublicationBlockedPullRetries(connection, transaction, row.RootId, key);
             return 0;
         }, cancellationToken);
     }

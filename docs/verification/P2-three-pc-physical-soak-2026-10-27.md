@@ -345,3 +345,32 @@ passing tree comparison. A separate three-machine baseline capture is queued
 for 03:00 UTC under run `bfb1bf59e40a4cc4b6a11094901d04cf`. The new
 three-hour soak will start only after the baseline and installed-version
 preflight establish an acceptable initial state. Gate P2 remains unchecked.
+
+### 03:00 baseline failure and publication-retry diagnosis
+
+The 03:00 UTC baseline did **not** pass, and no new three-hour soak was
+registered. The first and second SYSTEM collectors completed with 50,154 and
+50,151 files, respectively, and different native tree hashes. The third
+collector failed at 03:04:25 UTC while re-enumerating because its tree entry
+count changed during measurement. Its task exit was 1; the other two task
+exits were 0. The three reports and hash-checked transfer receipt are retained
+under ignored `artifacts/field/physical-50k-20261027/baseline-142-bfb1bf59e40a4cc4b6a11094901d04cf-preserved2`.
+The comparator reports `match:false`, including `snapshot-invalid` and
+`tree-mismatch`; its SHA-256 is
+`029F056A91C892670B39A2AFF3609C37A2002B9BDE64556A7C03D3D163219ADE`.
+
+A read-only native subtree inspection after the failure found 20, 21 and 19
+files on the first, second and third PCs, with seven differing relative paths.
+The third PC's local index retained an older 14,148-byte version of one file
+whose current 27,389-byte version was present in both other indexes. A
+read-only SQLite probe found all advertised remote index ranges complete on
+the third PC, but 13 needed rows and 27 directory publications under the
+failed run. The same probe found pending work on the other PCs. The observed
+lag is therefore in apply/publication work after index receipt, not evidence
+of a missing index page. Several retries had reached the ten-minute cap while
+ordinary directory publications were pending. A source repair now wakes only
+matching signed pull retries in the affected path branch when a publication
+commits or is discarded; the normal applier still validates all guards. The
+transactional commit rollback and literal sibling boundary cases pass focused
+storage tests locally. This source repair has **not** yet been deployed or
+physically verified. Gate P2 remains unchecked.
