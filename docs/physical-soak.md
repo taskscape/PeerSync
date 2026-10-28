@@ -143,7 +143,8 @@ $reports = 'C:\PeerSync-Gate-Evidence\soak' # outside the share; create first
 The launcher records its own SHA-256 and companion-tool hashes in a unique
 JSONL journal, keeps child stdout/stderr outside the share, and refuses a
 duplicate run/label journal. It starts four hourly snapshots at hours 0–3,
-runs random batches only during minutes 20–45 of each active hour, and stops
+runs random batches only during minutes 35–50 of each active hour, after the
+hourly scans finish, and stops
 operations at hour 3. Each batch has a 15-minute or remaining-window bound;
 failure stops its exact child process and retains the log. The final read-only
 hour-3 capture can finish after operations stop. A `complete` launcher record

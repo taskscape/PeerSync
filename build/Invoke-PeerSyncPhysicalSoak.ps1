@@ -66,6 +66,7 @@ $writer.AutoFlush = $true
 $captureProcess = $null
 $operationProcess = $null
 $batches = 0
+$operationHours = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $status = 'failed'
 $issue = $null
 $captureReadyHours = [System.Collections.Generic.HashSet[string]]::new(
@@ -140,7 +141,12 @@ try {
     Write-Record ([ordered]@{ schema='peersync-physical-soak-launcher-v1'; kind='capture-start';
         utc=[DateTimeOffset]::UtcNow.ToString('O'); processId=$captureProcess.Id })
 
-    $nextBatch = $first.AddMinutes(20)
+    # Physical peers may need almost 30 minutes to hash the 50,000-file tree.
+    # Keep mutations outside all hourly capture windows and leave ten minutes
+    # for the last batch to converge before the next top-of-hour snapshot.
+    $operationStartMinute = 35
+    $operationEndMinute = 50
+    $nextBatch = $first.AddMinutes($operationStartMinute)
     while ([DateTime]::UtcNow -lt $end) {
         $now = [DateTime]::UtcNow
         $captureProcess.Refresh()
@@ -157,14 +163,19 @@ try {
             $now.Hour, 0, 0, [DateTimeKind]::Utc)
         $hourName = $currentHour.ToString('yyyyMMddTHH')
         $snapshot = Join-Path $output "snapshot-$run-$MachineLabel-$hourName.json"
-        if ($now -ge $first -and $hour -ge 45 -and
+        if ($now -ge $first -and $hour -ge $operationEndMinute -and
             -not [IO.File]::Exists($snapshot)) {
             throw "Hourly capture did not finish before the operation window closed: $hourName."
         }
-        if ($hour -lt 20 -or $hour -ge 45) {
-            $candidate = [DateTime]::new($now.Year, $now.Month, $now.Day, $now.Hour, 20, 0, [DateTimeKind]::Utc)
-            if ($hour -ge 45) { $candidate = $candidate.AddHours(1) }
+        if ($hour -lt $operationStartMinute -or $hour -ge $operationEndMinute) {
+            $candidate = [DateTime]::new($now.Year, $now.Month, $now.Day, $now.Hour, $operationStartMinute, 0, [DateTimeKind]::Utc)
+            if ($hour -ge $operationEndMinute) { $candidate = $candidate.AddHours(1) }
             $nextBatch = $candidate
+            continue
+        }
+        $windowEnd = $currentHour.AddMinutes($operationEndMinute)
+        if (($windowEnd - $now).TotalMinutes -lt 8) {
+            $nextBatch = $currentHour.AddHours(1).AddMinutes($operationStartMinute)
             continue
         }
         if (-not [IO.File]::Exists($snapshot)) {
@@ -202,6 +213,7 @@ try {
         $operationErr = Join-Path $output ("soak-operations-$run-$MachineLabel-{0:D3}-stderr.txt" -f $batches)
         $operationProcess = Start-RedirectedPowerShell $operationCommand $operationOut $operationErr
         $batchDeadline = [DateTime]::UtcNow.AddMinutes(15)
+        if ($batchDeadline -gt $windowEnd) { $batchDeadline = $windowEnd }
         if ($batchDeadline -gt $end) { $batchDeadline = $end }
         while ($true) {
             $operationProcess.Refresh()
@@ -217,10 +229,18 @@ try {
             utc=[DateTimeOffset]::UtcNow.ToString('O'); batch=$batches;
             exitCode=$operationExitCode; stdout=$operationOut; stderr=$operationErr })
         if ($operationExitCode -ne 0) { throw "Operation batch $batches failed." }
+        [void]$operationHours.Add($hourName)
         $operationProcess.Dispose()
         $operationProcess = $null
         if ([DateTime]::UtcNow -gt $end) { throw 'An operation batch exceeded the three-hour active window.' }
         $nextBatch = [DateTime]::UtcNow.AddSeconds($BatchIntervalSeconds)
+    }
+
+    for ($index = 0; $index -lt 3; $index++) {
+        $requiredHour = $first.AddHours($index).ToString('yyyyMMddTHH')
+        if (-not $operationHours.Contains($requiredHour)) {
+            throw "No completed random-operation batch in active hour $requiredHour."
+        }
     }
 
     $captureDeadline = $end.AddHours(1)

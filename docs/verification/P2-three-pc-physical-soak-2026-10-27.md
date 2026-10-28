@@ -553,3 +553,44 @@ script remeasures content before each five-operation batch and reserves the
 maximum simultaneous growth of all three hosts; the starting content leaves
 about 338 MB below the 10 GiB cap. These preflights do not prove that the
 scheduled hourly collectors will succeed.
+
+### 07:00 baseline recovery and 09:00 soak registration
+
+The 07:00 UTC baseline capture completed on all three physical PCs running
+1.0.43.0. The third PC needed 29 minutes 11 seconds for its 50,154-file
+scan, finishing at 07:29:24 UTC. The scheduled first-PC collector had run at
+07:28 and failed because that snapshot did not yet exist. Its failed status
+and partial copies remain preserved. A separate strict comparator copied the
+three unchanged 07:00 snapshot files, checked transfer hashes and task exit
+codes, and returned `match: true` with no issues: each snapshot reports
+50,154 files, 195 directories and 10,399,184,958 native bytes, with full
+tree SHA-256
+`70F8577BF8775D14D240B1A6EEA4255D1869690216C9258106931BB667927FC3`.
+The supplemental receipt is under ignored
+`artifacts/field/physical-50k-20261027/baseline-143-08c8a8e8facf40228fc0737e961b13b0-supplemental/`.
+
+Run `18ae0e008618401d80953797ae6703b4` was canceled before launch
+because its 20–45-minute operation window would overlap the observed slow
+scan. Its registration and final-collector tasks on the first PC and the
+second-PC recovery-timing task were disabled. A first replacement registration
+`64b268c301794be78cd711a10ca2db58` failed before creating any launcher
+task because the field registrar copy had an older SHA-256 than the staged
+canonical source. Its failed receipt is retained. The canonical registrar
+SHA-256 `EB792F12D560405DA4BAC75A91635ED9B859F6805840E68706379A36FFAA1C4B`
+was then staged and checked on all three hosts.
+
+The launcher now limits random-operation starts to minutes 35–50 of each
+active hour, requires a completed batch in each of those hours, and bounds
+each batch by minute 50. This leaves the first 35 minutes for native scans
+and ten minutes for convergence before the next top-of-hour capture. The
+changed launcher SHA-256
+`DE0B79D616A5FE6ACA1B4198BF23918940A9C103E090C1B08BCFA1E65DC1BB07`
+was staged and read back on all three PCs. The distinct 09:00–12:00 UTC run
+`f899ccb822fd4298ab08b68f6bf743c4` is registered with four hourly
+comparators at minute 50, a first-PC permission check, second-PC sleep/wake
+and Ethernet/Wi-Fi switch tasks, a second-PC network-recovery timing report,
+third-PC evidence forwarding and a 12:58 UTC final collector. All exact
+run tasks read back `Ready` and all services read back `Running`; this is
+registration evidence, not a soak result. Gate P2 remains unchecked pending
+all four hourly comparisons, the native operation journals and physical
+transition/recovery evidence.
