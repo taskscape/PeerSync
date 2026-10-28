@@ -168,7 +168,7 @@ A **new** run `311fbde49775445997a6f1c1523830a7` was registered for launch at 00
 
 On the second PC, the AC wake timer started at its original value `0`. The new run's SYSTEM tasks are registered for suspend at **01:12**, wake at **01:15**, and wake-policy restoration at **01:18 UTC**, then Ethernet-to-Wi-Fi switch at **01:32**, Ethernet restoration at **01:36**, and independent restoration fallback at **01:39 UTC**. The source-bound Wi-Fi route to the first PC passed before registration. A read-back of all six triggers, SYSTEM principals, `WakeToRun` settings and exact run-specific script actions passed; the AC wake timer is now `1` until its restoration task. Receipts are in ignored `soak-resume-registration-...json`, `soak-resume-action-repair-...json`, `soak-wifi-registration-...json` and `second-scheduled-actions-141.json`. The second PC's preexisting temporary unattended-sleep override remains 14,400 seconds and has a verified SYSTEM restoration trigger at **04:30 UTC**, after the final checkpoint. The tasks have not yet executed; neither physical transition nor recovery has passed from registration alone.
 
-All earlier failed hourly attempts remain failed. This latest attempt has **no hourly pass yet**. Gate P2 requires four in-window three-way native comparisons, successful bounded operation batches, the actual sleep/resume and Wi-Fi transition journals, service recovery and restoration evidence. The WAN soak, independent security review and release signing remain open.
+All earlier failed hourly attempts remain failed. At registration, this latest attempt had **no hourly pass yet**; its first passing checkpoint is recorded below. Gate P2 requires four in-window three-way native comparisons, successful bounded operation batches, the actual sleep/resume and Wi-Fi transition journals, service recovery and restoration evidence. The WAN soak, independent security review and release signing remain open.
 
 On 2026-10-28 at 00:38 UTC, a read-only third-PC task audit found the temporary
 WinRM cleanup set for 01:10 UTC, during this run. The existing SYSTEM cleanup
@@ -185,3 +185,24 @@ devices. Missing remote collection alone will not be classified as data loss;
 the second PC's locally timed captures must be inspected when access returns.
 
 An unattended first-PC collector is live as process **12384** (`pwsh.exe`, script SHA-256 `F683FA728BFC6F7FB414AF323BD23D410020316589E259816FF591C10C0E5355`). It will begin read-only collection ten minutes after each nominated hour, copy the first and second snapshots with SHA-256 verification, read the third snapshot forwarded by Taildrop, then write the exact three-PC comparison. Its process receipt and JSONL journal are ignored artifacts named `soak-collector-311fbde49775445997a6f1c1523830a7.*`. At 23:59:29 UTC the exact process was live with a `start` journal and empty stderr. An initial Windows PowerShell 5.1 collector launch ended before collection because that child environment did not resolve `Get-FileHash`; its preserved `.first-launch-failed` logs are separate, and the current PowerShell 7 process started successfully. This collector only preserves and compares evidence; it cannot turn a failed hourly capture into a pass.
+
+### 01:00 UTC checkpoint of the new run
+
+The first, second and third SYSTEM launchers entered `Running` for the exact
+`311fbde49775445997a6f1c1523830a7` run. Their hour-zero snapshots all
+report `complete`, **50,132 files**, **167 directories** and **10,398,480,862
+content bytes**. Each has tree SHA-256
+`1CA9FCD7148A0963F16C5645E15ED5A5B5504D4C761FAC7DB1E383D261AF1FA1`.
+The first capture ended at 01:00:19 UTC, the second at 01:02:05, and the third
+at 01:10:27, all within the fifteen-minute hourly capture window. The third
+snapshot's SHA-256 on LARKBOX-X-1 and after Taildrop to the first PC both equal
+`A7870B24FC6F8A456985E9388AE2DE42A626657A8BEDC5E693E09B35839EADE5`.
+
+The unattended collector initially retried because the third capture was still
+running. At 01:11:39 UTC it wrote
+`soak-311fbde49775445997a6f1c1523830a7/hour-0/compare-hour-0.json`,
+with `machineCount: 3`, `match: true` and no issues. The comparison file's
+SHA-256 is `FCBBDCED9C1BF23A609FF21A783EE9448CB35F0857B07736122BE051DBBA6116`.
+This is **one of four** required physical checkpoints. The 02:00, 03:00 and
+04:00 comparisons, random operation batches, actual sleep/resume and Wi-Fi
+transition, service recovery and cleanup remain unverified; Gate P2 stays open.
