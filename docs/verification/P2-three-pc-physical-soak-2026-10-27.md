@@ -372,5 +372,29 @@ ordinary directory publications were pending. A source repair now wakes only
 matching signed pull retries in the affected path branch when a publication
 commits or is discarded; the normal applier still validates all guards. The
 transactional commit rollback and literal sibling boundary cases pass focused
-storage tests locally. This source repair has **not** yet been deployed or
-physically verified. Gate P2 remains unchecked.
+storage tests locally. Gate P2 remains unchecked.
+
+### 1.0.43.0 publication-retry deployment and convergence checkpoint
+
+The development-signed 1.0.43.0 client installer carries source revision
+`b0a57a69f1af6ca424ff2150cd555e6a3669a2b3` and SHA-256
+`3C30FE8072CA5CDD7D3F6EAAC6AD8DE7E1EE9EF270F56FEDA9A7087A32E2F271`.
+The third, second and first PCs each verified the staged hash, manifest and
+development Authenticode signer, then completed setup with exit zero. Their
+installed services report 1.0.43.0 Running, and each preserved sentinel's
+native SHA-256 stayed unchanged. The three setup reports, copied with matching
+source/destination hashes, are under ignored
+`artifacts/field/physical-50k-20261027/upgrade-143-evidence/`. The third-PC
+report is SHA-256 `896732DEC0AA7ADD39E49265B1884BC8E5844D530A52519D565EEE2EA83DF4D7`;
+the second is `887E3CF944C36A75322477CD9910C344A5C980AA4B1C879BDA9B1A07A37FE8DE`;
+the first is `78A3ECE1ADA0214472CB6E278BE9694A7BFB313373CAF2A411A93F82D269CB58`.
+
+This is a deployment check, not a convergence pass. At approximately 03:34
+UTC, read-only index probes found the failed-run needed and publication queues
+empty on the first and second PCs, but the third still held seven needed rows
+and 27 directory publications. Two needed regular files under `SECOND/02` and
+`SECOND/03` were still absent from the third native subtree. All advertised
+remote index ranges were received. The third service journal showed continuing
+bounded directory-capture passes; a fresh three-machine baseline is required
+after the queues settle. No new three-hour soak was registered at this
+checkpoint, and Gate P2 remains unchecked.
