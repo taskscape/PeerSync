@@ -2754,6 +2754,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
   - A later source guard requires the outside PC's hotspot to be its only Up physical adapter and checks routes to the nominated peer LAN addresses before and after PeerSync restart. It parsed under Windows PowerShell 5.1; a read-only live route check and isolated forbidden-prefix, second-adapter and alternate-peer-route controls passed. The previously staged WAN kit predates this guard; transfer and verify the replacement after the active LAN run before claiming native-WAN evidence. No WAN soak is credited yet.
   - The replacement scripts-only ZIP was built locally from tracked `12417b9` with all 11 manifest hashes matching; its 10 GiB/three-hour caps remain intact. It has not been staged to physical PCs or run, so the P4 WAN gate remains open.
   - A later source correction validates both the selected source-address and actual route objects returned by `Find-NetRoute`, including agreeing interface indexes, before accepting a native-WAN path. The local `12417b9` ZIP is superseded before deployment; rebuild and verify from the corrected commit, then stage after the LAN soak.
+  - The corrected local field ZIP from tracked `78bb4ae8` reopened with all 11 manifest hashes matching and the 10 GiB/three-hour caps intact. It is not yet staged to the physical PCs; native-WAN isolation and the three-hour WAN soak remain unverified.
 
 ---
 

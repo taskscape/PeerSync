@@ -79,3 +79,12 @@ parsed the update and a read-only live route control passed. The local
 `12417b91` ZIP predates this correction and is superseded before field use;
 a new source-pinned ZIP must be built and verified after this source change is
 committed.
+
+The corrected, locally built package is
+`artifacts/deploy/PeerSync-physical-gates-78bb4ae8.zip` from tracked
+`78bb4ae8ecffcdb0b638154c42c686e449fa80e3`: 39,238 bytes, SHA-256
+`06818BAF58D259F46A4D1924079CBA5A88A82D443C54850715BBBE3303CACF5F`.
+It reopened with 13 entries and all 11 manifest hashes matching; the manifest
+still caps content at 10 GiB and active execution at three hours. This is the
+replacement to stage on the physical PCs after the live LAN soak. It has not
+been transferred or executed, and the native-WAN gate remains open.
