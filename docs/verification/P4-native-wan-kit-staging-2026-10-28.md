@@ -69,3 +69,13 @@ The archive reopened with all 13 entries and all 11 manifest file hashes
 matching; its manifest retains the 10 GiB content and three-hour active caps.
 The package is local only. Copying it to the physical PCs and verifying its
 external hash there remain pending until the active LAN run has finished.
+
+A subsequent route inspection found that Windows `Find-NetRoute` emits the
+selected source-address object and the route object separately. The native-WAN
+helper now checks that both objects select the same interface and that the
+actual route uses the expected uplink for rendezvous and the allowed uplink or
+blocked overlay for nominated peer LAN addresses. Windows PowerShell 5.1
+parsed the update and a read-only live route control passed. The local
+`12417b91` ZIP predates this correction and is superseded before field use;
+a new source-pinned ZIP must be built and verified after this source change is
+committed.

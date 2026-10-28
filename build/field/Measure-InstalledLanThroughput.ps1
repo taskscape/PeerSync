@@ -75,9 +75,14 @@ if (@($localStatus.peers | Where-Object {
 }).Count -eq 0) {
     throw 'The source folder has no live clock-accepted session to its pinned peer.'
 }
-$route = Find-NetRoute -RemoteIPAddress $RemoteLanAddress.ToString() | Select-Object -First 1
-if (-not $route -or -not $route.IPAddress -or
-    ($route.NextHop -and $route.NextHop -ne '0.0.0.0')) {
+$routeParts = @(Find-NetRoute -RemoteIPAddress $RemoteLanAddress.ToString())
+$route = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetIPAddress' } |
+    Select-Object -First 1
+$networkRoute = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetRoute' } |
+    Select-Object -First 1
+if (-not $route -or -not $route.IPAddress -or -not $networkRoute -or
+    $networkRoute.InterfaceIndex -ne $route.InterfaceIndex -or
+    $networkRoute.NextHop -ne '0.0.0.0') {
     throw 'The remote LAN endpoint is not on an on-link route.'
 }
 $sourceLanAddress = [string]$route.IPAddress
@@ -126,9 +131,14 @@ $remote = Invoke-Command -ComputerName $RemoteComputer -Authentication Negotiate
     }).Count -eq 0) {
         throw 'The destination folder has no live clock-accepted session to its pinned peer.'
     }
-    $route = Find-NetRoute -RemoteIPAddress $firstLan | Select-Object -First 1
+    $routeParts = @(Find-NetRoute -RemoteIPAddress $firstLan)
+    $route = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetIPAddress' } |
+        Select-Object -First 1
+    $networkRoute = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetRoute' } |
+        Select-Object -First 1
     if (-not $route -or [string]$route.IPAddress -ne $expectedRemoteLan -or
-        ($route.NextHop -and $route.NextHop -ne '0.0.0.0')) {
+        -not $networkRoute -or $networkRoute.InterfaceIndex -ne $route.InterfaceIndex -or
+        $networkRoute.NextHop -ne '0.0.0.0') {
         throw 'The destination LAN source does not match the on-link route to the first PC.'
     }
     $adapter = Get-NetAdapter -Name $route.InterfaceAlias -ErrorAction Stop

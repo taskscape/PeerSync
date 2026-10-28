@@ -604,3 +604,26 @@ scheduled sleep/wake and Wi-Fi switch/restore tasks were `Ready`. The third
 PC's read-only check used its existing temporary WinRM credential and restored
 the first PC's previous WinRM and TrustedHosts state afterward. This confirms
 the second PC is available before launch; no soak result is inferred.
+
+### 10:32 UTC physical Wi-Fi switch and route limitation
+
+For run `f899ccb822fd4298ab08b68f6bf743c4`, the second PC's scheduled
+switch task exited zero at 10:32 UTC. Its journal records Ethernet disabled
+at 10:32:04.544 UTC, Wi-Fi `192.168.10.152` Up and PeerSync Running. A
+read-only remote check during the interval found the route to the first PC's
+`192.168.0.176` through Wi-Fi. The scheduled restore task exited zero;
+Ethernet was Up again at 10:34:05.185 UTC, with PeerSync still Running.
+The fallback remains scheduled separately. The second-PC recovery-timing
+collector is due at 10:55 UTC and the formal hourly comparisons are pending.
+
+The first PC's installed-service journal records an authenticated QUIC
+candidate to the second PC's Tailscale address `100.88.55.83` at
+10:33:12.160 UTC during the Wi-Fi-only interval, followed by direct LAN QUIC
+to `192.168.0.183` at 10:34:50.242 UTC after Ethernet returned. A
+source-bound first-to-second Wi-Fi ping timed out twice, although the
+second-to-first source-bound Wi-Fi preflight had passed before the switch.
+This run proves the physical adapter transition and service continuity, but
+the observed first-to-second session during the switch used the overlay. It
+does not establish authenticated sync over the physical Wi-Fi path. Keep the
+Wi-Fi recovery subcheck and Gate P2 open pending a separately isolated
+physical-path check and the complete four-checkpoint soak audit.

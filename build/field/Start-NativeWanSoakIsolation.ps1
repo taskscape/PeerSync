@@ -91,19 +91,34 @@ function Assert-NativeWanPath {
         throw 'The physical uplink has no usable IPv4 address or still has a disallowed LAN address.'
     }
 
-    $serverRoute = Find-NetRoute -RemoteIPAddress $RendezvousAddress |
-        Select-Object -First 1
-    if (-not $serverRoute -or $serverRoute.InterfaceAlias -ne $ExpectedUplinkAlias -or
-        [string]$serverRoute.IPAddress -like ($DisallowedUplinkPrefix + '*')) {
+    $serverParts = @(Find-NetRoute -RemoteIPAddress $RendezvousAddress)
+    $serverSource = $serverParts | Where-Object {
+        $_.CimClass.CimClassName -eq 'MSFT_NetIPAddress'
+    } | Select-Object -First 1
+    $serverRoute = $serverParts | Where-Object {
+        $_.CimClass.CimClassName -eq 'MSFT_NetRoute'
+    } | Select-Object -First 1
+    if (-not $serverSource -or -not $serverRoute -or
+        $serverSource.InterfaceIndex -ne $serverRoute.InterfaceIndex -or
+        $serverRoute.InterfaceAlias -ne $ExpectedUplinkAlias -or
+        [string]$serverSource.IPAddress -like ($DisallowedUplinkPrefix + '*')) {
         throw 'Rendezvous traffic is not routed through the expected physical uplink.'
     }
     foreach ($peerAddress in $PeerLanAddresses) {
-        $peerRoute = Find-NetRoute -RemoteIPAddress $peerAddress | Select-Object -First 1
-        if (-not $peerRoute -or $peerRoute.InterfaceAlias -notin @($ExpectedUplinkAlias,$OverlayAlias)) {
+        $peerParts = @(Find-NetRoute -RemoteIPAddress $peerAddress)
+        $peerSource = $peerParts | Where-Object {
+            $_.CimClass.CimClassName -eq 'MSFT_NetIPAddress'
+        } | Select-Object -First 1
+        $peerRoute = $peerParts | Where-Object {
+            $_.CimClass.CimClassName -eq 'MSFT_NetRoute'
+        } | Select-Object -First 1
+        if (-not $peerSource -or -not $peerRoute -or
+            $peerSource.InterfaceIndex -ne $peerRoute.InterfaceIndex -or
+            $peerRoute.InterfaceAlias -notin @($ExpectedUplinkAlias,$OverlayAlias)) {
             throw 'A peer LAN address has a route outside the physical uplink and blocked overlay.'
         }
     }
-    return $serverRoute
+    return $serverSource
 }
 
 $serverAddress = Resolve-DnsName sync.taskscape.com -Type A -ErrorAction Stop |

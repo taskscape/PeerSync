@@ -67,3 +67,15 @@ clean the test folder only after saving the evidence. **No throughput result
 is claimed by this preparation.** The separate native multicast,
 sleep/recovery and three-PC soak requirements stay open until their own
 physical evidence is complete.
+
+## On-link route guard correction
+
+`Find-NetRoute` returns a selected `MSFT_NetIPAddress` followed by an
+`MSFT_NetRoute`. The first throughput-kit draft inspected only the address
+object, whose `NextHop` is empty, so it could incorrectly accept a routed
+path. Preparation and measurement now require both objects to agree on the
+interface index and require the route object's `NextHop` to be `0.0.0.0` on
+both PCs. A Windows PowerShell 5.1 read-only control classified the first PC's
+route to `192.168.0.183` as on-link and its route to `192.168.10.152` as
+routed via `192.168.0.1`; all changed scripts parsed. The installed-service
+throughput run remains unperformed.

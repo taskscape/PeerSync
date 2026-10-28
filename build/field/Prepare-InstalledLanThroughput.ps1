@@ -55,9 +55,14 @@ if (-not [IO.File]::Exists($cli) -or (Get-Service PeerSync).Status -ne 'Running'
     throw 'The installed PeerSync CLI and a running service are required.'
 }
 $version = (Get-Item 'C:\Program Files\PeerSync\service\PeerSync.Service.exe').VersionInfo.FileVersion
-$route = Find-NetRoute -RemoteIPAddress $RemoteLanAddress.ToString() | Select-Object -First 1
-if (-not $route -or -not $route.IPAddress -or
-    ($route.NextHop -and $route.NextHop -ne '0.0.0.0')) {
+$routeParts = @(Find-NetRoute -RemoteIPAddress $RemoteLanAddress.ToString())
+$route = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetIPAddress' } |
+    Select-Object -First 1
+$networkRoute = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetRoute' } |
+    Select-Object -First 1
+if (-not $route -or -not $route.IPAddress -or -not $networkRoute -or
+    $networkRoute.InterfaceIndex -ne $route.InterfaceIndex -or
+    $networkRoute.NextHop -ne '0.0.0.0') {
     throw 'The destination LAN address is not on-link from this PC.'
 }
 $sourceLanAddress = [string]$route.IPAddress
@@ -86,9 +91,14 @@ $remote = Invoke-Command -ComputerName $RemoteComputer -Authentication Negotiate
         (Get-Item 'C:\Program Files\PeerSync\service\PeerSync.Service.exe').VersionInfo.FileVersion -ne $expectedVersion) {
         throw 'The remote service is stopped or has a different version.'
     }
-    $route = Find-NetRoute -RemoteIPAddress $firstLan | Select-Object -First 1
+    $routeParts = @(Find-NetRoute -RemoteIPAddress $firstLan)
+    $route = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetIPAddress' } |
+        Select-Object -First 1
+    $networkRoute = $routeParts | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetRoute' } |
+        Select-Object -First 1
     if (-not $route -or [string]$route.IPAddress -ne $expectedLan -or
-        ($route.NextHop -and $route.NextHop -ne '0.0.0.0')) {
+        -not $networkRoute -or $networkRoute.InterfaceIndex -ne $route.InterfaceIndex -or
+        $networkRoute.NextHop -ne '0.0.0.0') {
         throw 'The remote physical LAN route does not point back to the source.'
     }
     $adapter = Get-NetAdapter -Name $route.InterfaceAlias -ErrorAction Stop
