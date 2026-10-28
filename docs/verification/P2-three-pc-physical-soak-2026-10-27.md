@@ -170,4 +170,18 @@ On the second PC, the AC wake timer started at its original value `0`. The new r
 
 All earlier failed hourly attempts remain failed. This latest attempt has **no hourly pass yet**. Gate P2 requires four in-window three-way native comparisons, successful bounded operation batches, the actual sleep/resume and Wi-Fi transition journals, service recovery and restoration evidence. The WAN soak, independent security review and release signing remain open.
 
+On 2026-10-28 at 00:38 UTC, a read-only third-PC task audit found the temporary
+WinRM cleanup set for 01:10 UTC, during this run. The existing SYSTEM cleanup
+task and Tailscale-only TCP 5985 rule were verified, then only the cleanup
+trigger was moved to **05:00 UTC**, after the final evidence collection and
+within the user-approved six-hour management window. Trigger and next-run
+read-back matched; WinRM remained Running. The ignored exact-run receipt is
+`artifacts/field/physical-50k-20261027/third-remoting-soak141-extension.json`
+(SHA-256 `56CE86C51BE3D5EA06922AE4C2667D5540174634DECB86B8BE74862F2437EE66`).
+This change does not affect PeerSync service or the soak tasks. The second
+PC's Tailscale management channel still reported offline at that time, although
+its LAN neighbor was reachable and the first client reported two connected
+devices. Missing remote collection alone will not be classified as data loss;
+the second PC's locally timed captures must be inspected when access returns.
+
 An unattended first-PC collector is live as process **12384** (`pwsh.exe`, script SHA-256 `F683FA728BFC6F7FB414AF323BD23D410020316589E259816FF591C10C0E5355`). It will begin read-only collection ten minutes after each nominated hour, copy the first and second snapshots with SHA-256 verification, read the third snapshot forwarded by Taildrop, then write the exact three-PC comparison. Its process receipt and JSONL journal are ignored artifacts named `soak-collector-311fbde49775445997a6f1c1523830a7.*`. At 23:59:29 UTC the exact process was live with a `start` journal and empty stderr. An initial Windows PowerShell 5.1 collector launch ended before collection because that child environment did not resolve `Get-FileHash`; its preserved `.first-launch-failed` logs are separate, and the current PowerShell 7 process started successfully. This collector only preserves and compares evidence; it cannot turn a failed hourly capture into a pass.
