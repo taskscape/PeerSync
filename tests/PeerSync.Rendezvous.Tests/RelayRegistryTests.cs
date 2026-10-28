@@ -139,6 +139,30 @@ public sealed class RelayRegistryTests
         registry.Leave(secondPartner);
     }
 
+    [Fact]
+    public async Task DeviceRateBudgetIsSharedAcrossBothRelayDirections()
+    {
+        using var registry = new RelayRegistry(new RendezvousOptions
+        { RelayPerDeviceBytesPerSecond = 64 * 1024, RelayTotalBytesPerSecond = 256 * 1024 });
+        PresenceSession first = Session(1), second = Session(2);
+        registry.TryOffer(first, second).ShouldBeTrue();
+        RelayOffer offer = Offer(first);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<RelayRegistry.RelayJoin> firstJoin = registry.JoinAsync(offer.Token.Memory,
+            first.DeviceId, new TestWriter(), timeout.Token).AsTask();
+        RelayRegistry.RelayJoin secondJoin = await registry.JoinAsync(offer.Token.Memory,
+            second.DeviceId, new TestWriter(), timeout.Token);
+        RelayRegistry.RelayJoin connectedFirst = await firstJoin;
+
+        await registry.ThrottleAsync(connectedFirst, 64 * 1024, timeout.Token);
+        Task reverse = registry.ThrottleAsync(secondJoin, 64 * 1024, timeout.Token).AsTask();
+        await Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        reverse.IsCompleted.ShouldBeFalse();
+        await timeout.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await reverse);
+        registry.Leave(connectedFirst);
+    }
+
     private static PresenceSession Session(byte marker)
         => new(Id(marker), new IPEndPoint(IPAddress.Parse("203.0.113.1"), 52000));
 
