@@ -130,11 +130,11 @@ public sealed class TcpPeerSessionTests
         {
             try
             {
-                // Let Windows choose an available UDP port first and keep it reserved
-                // while binding TCP. Either protocol's port-zero allocator can choose
-                // a number excluded by the other protocol's native port reservations.
-                using var udpProbe = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
-                int port = ((IPEndPoint)udpProbe.Client.LocalEndPoint!).Port;
+                // Pick outside Windows' dynamic port range. Port-zero UDP allocation
+                // can walk a long consecutive span reserved by TCP, making even
+                // hundreds of retries fail despite free ports elsewhere.
+                int port = RandomNumberGenerator.GetInt32(20_000, 49_152);
+                using var udpProbe = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
                 await using var tcp = TcpPeerListener.Listen(new IPEndPoint(IPAddress.Loopback, port), Options(certificate, deviceId));
                 udpProbe.Dispose();
                 await using var quic = await QuicPeerListener.ListenAsync(new IPEndPoint(IPAddress.Loopback, port),
@@ -159,7 +159,7 @@ public sealed class TcpPeerSessionTests
                 // A separate process can claim the probed port before QUIC binds it.
             }
         }
-        throw new InvalidOperationException("Could not obtain an ephemeral port available to both TCP and QUIC after eight attempts.");
+        throw new InvalidOperationException("Could not obtain a port available to both TCP and QUIC after 256 attempts.");
     }
 
     private static TcpPeerOptions Options(X509Certificate2 certificate, byte[] pin,
