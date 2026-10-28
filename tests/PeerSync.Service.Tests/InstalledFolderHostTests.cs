@@ -468,13 +468,16 @@ public sealed class InstalledFolderHostTests
                 && ReadDiagnosticLog(Path.Combine(leftLogs, "debug.jsonl"))
                     .Split("\"eventName\":\"service.resume_scan_complete\"", StringSplitOptions.None).Length >= 3,
                 timeout.Token);
+            // A connected clock row can be published before the folder transport
+            // finishes joining. The readiness assertion belongs inside the same
+            // bounded recovery window, not at an arbitrary instant after the scan.
+            await UntilAsync(() => leftStatus.ReadStatus().ProductionSyncAvailable
+                && rightStatus.ReadStatus().ProductionSyncAvailable, timeout.Token);
             resumeTimer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
             string recoveredLog = ReadDiagnosticLog(Path.Combine(leftLogs, "debug.jsonl"));
             recoveredLog.ShouldContain("\"eventName\":\"service.peer_session_reset\"");
             recoveredLog.ShouldContain("\"eventName\":\"service.network_recovery_complete\"");
             recoveredLog.ShouldContain("\"itemsSkipped\":1");
-            leftStatus.ReadStatus().ProductionSyncAvailable.ShouldBeTrue();
-            rightStatus.ReadStatus().ProductionSyncAvailable.ShouldBeTrue();
             var stopTimer = System.Diagnostics.Stopwatch.StartNew();
             await left.DisposeAsync(); await right.DisposeAsync();
             stopTimer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));

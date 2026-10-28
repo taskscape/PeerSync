@@ -594,3 +594,13 @@ run tasks read back `Ready` and all services read back `Running`; this is
 registration evidence, not a soak result. Gate P2 remains unchecked pending
 all four hourly comparisons, the native operation journals and physical
 transition/recovery evidence.
+
+At 08:17–08:32 UTC on 2026-10-28, read-only checks found all three physical
+PCs online: `R5-7600X`, `DESKTOP-BN535U0` and `LARKBOX-X-1` each reported
+PeerSync 1.0.43.0 `Running`, `productionSyncAvailable=true`, connected peers
+and its exact `f899ccb822fd4298ab08b68f6bf743c4` launcher task `Ready` for
+08:40 UTC. The second PC's Ethernet and Wi-Fi adapters were both `Up`; its
+scheduled sleep/wake and Wi-Fi switch/restore tasks were `Ready`. The third
+PC's read-only check used its existing temporary WinRM credential and restored
+the first PC's previous WinRM and TrustedHosts state afterward. This confirms
+the second PC is available before launch; no soak result is inferred.
