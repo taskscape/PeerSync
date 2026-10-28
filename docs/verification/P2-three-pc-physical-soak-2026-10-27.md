@@ -502,6 +502,11 @@ only if that baseline passes. Registration, hourly comparison, operations
 and cleanup remain unverified. The second-PC temporary sleep policy has an
 automatic restore at 12:45 UTC, and third-PC temporary WinRM has automatic
 cleanup at 13:15 UTC.
+The three first-PC scheduling actions for baseline start, baseline collection
+and new-run registration retain their original triggers and principals, now
+capture separate task stdout/stderr files, and passed decoded-action syntax
+and Task Scheduler trigger read-back. This closes the previous blind spot for
+errors before a field wrapper can write its own status receipt.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task
