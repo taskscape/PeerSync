@@ -18,6 +18,44 @@ native NAT result. Keep full local logs and share only the sanitized evidence
 bundle after review. Gate P5 needs the release candidate on physical LAN and
 WAN; development-signed packages cannot close it.
 
+For a native WAN run, first place the outside PC on its independent physical
+uplink and verify its public rendezvous route. The packaged
+`tools/Start-NativeWanSoakIsolation.ps1` can keep Tailscale available for
+management while blocking **only** the installed PeerSync service on that
+adapter. Use a fresh run GUID, an existing joined folder and evidence directory,
+and the same UTC first hour as the scheduled soak launchers. Run its
+`-PreflightOnly` check before scheduling any work. Set
+`-DisallowedUplinkPrefix` to the LAN prefix the PC is leaving; if the physical
+route still uses that LAN, preflight fails. It also requires a hardware uplink,
+running service, a test tree within 10 GiB, and correlated TCP/UDP 99 probes.
+After the soak tasks are staged, run the helper elevated **2–10 minutes before**
+hour 0, without `-PreflightOnly`, and retain its JSON report:
+
+```powershell
+$run = [guid]'11111111-2222-3333-4444-555555555555' # same soak run ID
+$first = '2026-10-27T13:00:00Z' # same future first capture hour
+$root = 'C:\PeerSync-Test\Share' # outside PC's joined folder
+$kit = 'C:\PeerSync-Gate-Evidence\soak-kit\tools'
+$reports = 'C:\PeerSync-Gate-Evidence\soak' # existing; outside the share
+& "$kit\Start-NativeWanSoakIsolation.ps1" -RunId $run `
+  -FirstHourUtc $first -Root $root -OutputDirectory $reports `
+  -KitDirectory $kit -ExpectedUplinkAlias 'Wi-Fi' `
+  -DisallowedUplinkPrefix '192.168.0.' -PreflightOnly
+# Once the other peers' soak tasks are registered and the first hour is near,
+# rerun the same command elevated without -PreflightOnly.
+```
+
+The helper installs two run-specific firewall rules, restarts PeerSync to
+drain earlier overlay sessions, checks the rules and physical route, and
+registers a SYSTEM recovery task. The active workload still stops at hour 3.
+Recovery removes the two rules after the final read-only capture grace period,
+restarts PeerSync and writes a separate recovery JSON. Check both reports,
+the task exit, selected transport and service logs. A successful setup or
+probe alone does not establish native WAN file transfer; the required hourly
+native-tree and operation evidence still decides the gate. If setup fails,
+the helper removes its rules and task and attempts service recovery. Never
+reuse the run ID for an incomplete test.
+
 Before running any packaged unsigned helper, verify its SHA-256 against the
 field-kit README. If local execution policy blocks it, open a new PowerShell
 process with `powershell.exe -NoProfile -ExecutionPolicy Bypass` for this test

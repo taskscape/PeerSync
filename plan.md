@@ -2731,6 +2731,7 @@ checks below remain mandatory before any WAN beta or v1.0 release.
 - [x] UDP 99 verified end to end from a separate mobile-hotspot network: the [third-PC probe](docs/verification/P4-mobile-hotspot-probe-2026-10-24.md) completed correlated HTTP/3 and HTTP/2 admission with exit 0.
 - [ ] A three-hour scheduled soak across the WAN with zero data loss and four matching hourly tree comparisons.
   - The same [physical soak procedure](docs/physical-soak.md) can retain hourly WAN comparisons and correlated diagnostic bundles. The local two-guest control does not satisfy this gate.
+  - The field kit now includes a [native-WAN isolation helper](build/field/Start-NativeWanSoakIsolation.ps1) with a read-only route/probe preflight, PeerSync-only overlay rules and a scheduled recovery receipt. Its positive and disallowed-LAN preflight controls passed locally; the actual isolation and three-hour physical WAN run remain unverified.
 
 ---
 

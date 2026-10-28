@@ -32,6 +32,8 @@ $entries = [ordered]@{
     'tools/New-PeerSyncGateCorpus.ps1' = 'build/New-PeerSyncGateCorpus.ps1'
     'tools/Invoke-PeerSyncSoakOperations.ps1' = 'build/Invoke-PeerSyncSoakOperations.ps1'
     'tools/Invoke-PeerSyncSoakCaptureLoop.ps1' = 'build/Invoke-PeerSyncSoakCaptureLoop.ps1'
+    'tools/Invoke-PeerSyncPhysicalSoak.ps1' = 'build/Invoke-PeerSyncPhysicalSoak.ps1'
+    'tools/Start-NativeWanSoakIsolation.ps1' = 'build/field/Start-NativeWanSoakIsolation.ps1'
     'tools/Measure-PeerSyncTree.ps1' = 'build/Measure-PeerSyncTree.ps1'
     'tools/Compare-PeerSyncSoakReports.ps1' = 'build/Compare-PeerSyncSoakReports.ps1'
     'docs/physical-soak.md' = 'docs/physical-soak.md'
@@ -75,6 +77,9 @@ The required active window is three hours, with matching tree captures at
 scheduled hours 0, 1, 2 and 3. Follow docs/physical-soak.md for the exact
 three-PC LAN, WAN and report-comparison steps. The scripts refuse reused
 corpus/report paths and do not delete synchronized data.
+For native WAN, the optional isolation helper blocks only the installed
+PeerSync service on Tailscale. It requires a physical WAN route and a working
+TCP/UDP rendezvous probe; retain its local report and cleanup receipt.
 
 manifest.json lists the SHA-256 of every script and document. Confirm the
 archive's externally supplied SHA-256 first; the manifest alone cannot
