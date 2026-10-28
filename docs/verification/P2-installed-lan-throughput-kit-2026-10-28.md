@@ -26,31 +26,44 @@ responses from the first PC's physical LAN address during the transfer. It
 records the aggregate bytes, request count, transport and session IDs without
 writing the folder key or file contents to the report.
 
-After the soak, create and authorize a **new empty** shared test folder on
-the first and second PCs. Keep the existing 9 GiB soak corpus in place. Use a
-new run ID and an evidence directory on the source's volume, outside the
-shared folder. Run a read-only `-PreflightOnly` pass, then execute the same
-command without that switch. A typical invocation from the first PC is:
+After the soak's final evidence collection and launcher exit, use
+`Prepare-InstalledLanThroughput.ps1` to create a **new empty** shared test
+folder on the first and second PCs. It checks both installed services,
+1 Gbit/s on-link routes, spare space and the absence of a running physical
+soak before changing folder membership. It transfers the disposable share key
+only through encrypted Windows remoting, never writes it
+to a report, and waits for an authenticated peer. The destination and source
+folder paths may be the same string because they are on different PCs. Keep
+the existing 9 GiB soak corpus in place. Use a new run ID and an evidence
+directory on the source's volume, outside the shared folder. Run the
+preparation's read-only `-PreflightOnly` pass, then run it without that switch.
+Use the same parameters for the measurement, first with `-PreflightOnly` and
+then without. A typical invocation from the first PC is:
 
 ```powershell
+$run = [guid]::NewGuid()
 $throughputParams = @{
-    SourceRoot = 'C:\PeerSync-Gate-Evidence\lan-throughput-source'
-    DestinationRoot = 'C:\PeerSync-Gate-Evidence\lan-throughput-destination'
+    SourceRoot = "C:\PeerSync-Gate-Evidence\lan-throughput-$($run.ToString('N'))"
+    DestinationRoot = "C:\PeerSync-Gate-Evidence\lan-throughput-$($run.ToString('N'))"
     RemoteComputer = '100.88.55.83'
     RemoteLanAddress = '192.168.0.183'
-    OutputDirectory = 'C:\PeerSync-Gate-Evidence\lan-throughput-reports'
+    OutputDirectory = 'C:\PeerSync-Gate-Evidence'
+    RunId = $run
     FileBytes = 4GB
-    TimeoutSeconds = 10800
 }
+& .\build\field\Prepare-InstalledLanThroughput.ps1 @throughputParams -PreflightOnly
+& .\build\field\Prepare-InstalledLanThroughput.ps1 @throughputParams
 & .\build\field\Measure-InstalledLanThroughput.ps1 @throughputParams -PreflightOnly
 & .\build\field\Measure-InstalledLanThroughput.ps1 @throughputParams
 ```
 
 The addresses above are an example from the earlier physical LAN check; use
-the actual on-link address at execution time. The preflight and run do not
-create or share the folder and do not approve a device. The run removes only
-its own incomplete staging file on failure and leaves the synchronized test
-file and JSON report for audit; clean the test folder only after saving the
-evidence. **No throughput result is claimed by this preparation.** The
-separate native multicast, sleep/recovery and three-PC soak requirements stay
-open until their own physical evidence is complete.
+the actual on-link address at execution time. The preparation leaves its new
+folders in place if join or authentication fails, so inspect them before a
+new attempt. The measurement preflight and run do not create or share the
+folder. The measurement removes only its own incomplete staging file on
+failure and leaves the synchronized test file and JSON report for audit;
+clean the test folder only after saving the evidence. **No throughput result
+is claimed by this preparation.** The separate native multicast,
+sleep/recovery and three-PC soak requirements stay open until their own
+physical evidence is complete.
