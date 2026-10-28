@@ -398,3 +398,71 @@ remote index ranges were received. The third service journal showed continuing
 bounded directory-capture passes; a fresh three-machine baseline is required
 after the queues settle. No new three-hour soak was registered at this
 checkpoint, and Gate P2 remains unchecked.
+
+### 04:00 equal native trees and capture-timing retry
+
+The 04:00 UTC baseline run `d96780a173a5415fad677ae95a2cf280` found
+the same 50,154 files, 195 directories, 10,399,184,958 native content bytes
+and full tree SHA-256
+`70F8577BF8775D14D240B1A6EEA4255D1869690216C9258106931BB667927FC3`
+on all three installed 1.0.43.0 PCs. This establishes a native-content
+convergence observation below the 10 GiB content cap. It does **not** pass the
+strict baseline comparator: the third collector's scheduled task started at
+03:45 UTC, waited until 04:00, and its 30-minute task lifetime stopped the
+scan around 04:15 before it wrote a snapshot. Its journal had only a start
+record, no snapshot, and Task Scheduler reported `267014`. The task action
+and service were unchanged. A bounded rerun extended only that exact task's
+lifetime to 65 minutes and completed at 04:31 UTC; the first and second
+snapshots were refreshed concurrently. Their original successful snapshots
+were preserved under `*-original.json` with verified SHA-256. All three retry
+snapshots completed with exit zero and identical native tree hashes.
+
+The comparator still correctly returned `match:false`, with three
+`capture-time-invalid` issues: all retry scans started after the required
+first 15 minutes of the nominated 04:00 hour. The hash-checked snapshots,
+`compare.json` and receipt remain under ignored
+`artifacts/field/physical-50k-20261027/baseline-143-d96780a173a5415fad677ae95a2cf280-preserved2`.
+No soak was registered against that invalid receipt. A distinct 05:00 UTC
+baseline run `2295504e687f4bf2b545025d9dca1e32` is registered on all
+three PCs with the corrected 65-minute task limit. The third PC's existing
+Tailscale-only WinRM cleanup is scheduled for 09:45 UTC, and the second PC's
+temporary unattended-sleep setting is scheduled to restore at 09:30 UTC.
+Those temporary management and power changes do not count as a baseline or
+soak pass. The next three-hour soak may be registered only if the 05:00
+snapshots pass the strict three-machine comparator.
+
+### 05:00 strict baseline pass and 06:00 soak registration
+
+Run `2295504e687f4bf2b545025d9dca1e32` passed the strict 05:00 UTC
+three-PC comparator. All three installed 1.0.43.0 collectors started within
+seven seconds of 05:00, exited zero, and reported 50,154 files, 195
+directories, 10,399,184,958 native content bytes and the same full tree
+SHA-256 `70F8577BF8775D14D240B1A6EEA4255D1869690216C9258106931BB667927FC3`.
+The third scan ended at 05:19:31 UTC, within its corrected 65-minute task
+lifetime. The comparator returned `match:true`, `issues:[]` and exit zero;
+its SHA-256 is
+`E0E26CDF1F0C00893626A6DE123B40CAF5CC4E45F7C822E2A76803D8087C5D00`.
+The three snapshots, comparison and hash-checked transfer receipt are under
+ignored `artifacts/field/physical-50k-20261027/baseline-143-2295504e687f4bf2b545025d9dca1e32-preserved2`.
+This proves a common starting tree; it does not establish the original
+corpus's fresh-peer convergence time.
+
+The second PC unexpectedly entered sleep at 05:15:14 UTC after its baseline
+capture, despite AC standby being disabled and a four-hour temporary
+unattended-sleep setting. Power events show a wake at 05:17:59 UTC; a bounded
+Wake-on-LAN recovery also reached it. A PeerSync scheduled-task inventory
+found no task nominated for 05:15. The installed PeerSync service was Running after
+wake. Its saved `Zag` Wi-Fi profile was unavailable at this location; the
+available saved `ZAG6` profile connected with Wi-Fi address
+`192.168.10.152`, and a source-bound ping to the first PC succeeded twice.
+The unexplained sleep remains an observed availability incident and must be
+accounted for in the soak outcome.
+
+Against the passing receipt, run `3f81e62b8aad49048073be5801d2622c`
+registered the 06:00–09:00 UTC three-PC physical soak tasks with the same
+10,399,184,958-byte starting content on each PC. The third-PC hourly
+forwarder, first-PC 06:30 permission mutation, second-PC 06:15/06:17
+sleep/wake sequence and second-PC 07:32–07:38 Ethernet/Wi-Fi switch and
+restore tasks are registered. These are scheduled operations, not a soak
+pass. The pending hourly snapshots, native-byte evidence, service uptime,
+cleanup results and final full-tree comparisons determine the gate.
