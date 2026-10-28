@@ -51,12 +51,21 @@ The tracked helper has since gained a stricter physical-path preflight:
 only the expected physical uplink may be Up, and routes to the nominated peer
 LAN addresses are checked before and after the PeerSync restart. The staged
 `d6ab3252` archive predates this change and must not be used for the WAN gate.
-After the live LAN run finishes, rebuild and hash-check a replacement kit on
-the test PCs before any native-WAN run. Keep the old kit as historical staging
-evidence.
+After the live LAN run finishes, transfer and hash-check the replacement kit
+below on the test PCs before any native-WAN run. Keep the old kit as historical
+staging evidence.
 
 The updated guard parsed under Windows PowerShell 5.1. A read-only live route
 control on the first PC accepted its sole Ethernet hardware uplink, then
 rejected its forbidden source prefix. Isolated controls rejected a second Up
 physical adapter and a peer LAN route through an unapproved adapter. These
 checks do not substitute for the outside-PC preflight or a physical WAN soak.
+
+The replacement ZIP has now been built locally from tracked source revision
+`12417b919a2cfb99e4f77bf312a8f3c37b90dd68` at
+`artifacts/deploy/PeerSync-physical-gates-12417b91.zip` (39,127 bytes,
+SHA-256 `8ED8348D45F2FFF063906C8B40E052A39780B401B3094E91F95919EE31B0B78B`).
+The archive reopened with all 13 entries and all 11 manifest file hashes
+matching; its manifest retains the 10 GiB content and three-hour active caps.
+The package is local only. Copying it to the physical PCs and verifying its
+external hash there remain pending until the active LAN run has finished.
