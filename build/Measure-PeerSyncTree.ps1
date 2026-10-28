@@ -127,16 +127,20 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
     $bytes = 0L
     $hasher = $null
     $fileHasher = $null
+    $failureStage = 'start'
+    $currentRelative = $null
     try {
         if ($start.UtcDateTime -lt $hour -or $start.UtcDateTime -ge $hour.AddHours(1)) {
             throw [IO.IOException]::new('The capture started outside its nominated UTC hour.')
         }
+        $failureStage = 'enumerate'
         $entries = Get-Entries $scanRoot $scanPrefix
         $hasher = [Security.Cryptography.IncrementalHash]::CreateHash(
             [Security.Cryptography.HashAlgorithmName]::SHA256)
         $fileHasher = [Security.Cryptography.SHA256]::Create()
         foreach ($path in $entries) {
             $relative = $path.Substring($scanPrefix.Length).Replace('\', '/')
+            $currentRelative = $relative
             $relativeBytes = [Text.Encoding]::UTF8.GetBytes($relative)
             if ([IO.Directory]::Exists($path)) {
                 Add-Frame $hasher 68 $relativeBytes 0 $null
@@ -150,9 +154,16 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
             }
             $beforeTicks = $before.LastWriteTimeUtc.Ticks
             $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
-            $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+            $failureStage = 'hash-file'
+            # SHA256.ComputeHash reads in small chunks. A larger FileStream
+            # buffer keeps those calls from becoming millions of small disk
+            # reads on a slower physical peer.
+            $stream = [IO.FileStream]::new($path, [IO.FileMode]::Open,
+                [IO.FileAccess]::Read, $share, 1048576,
+                [IO.FileOptions]::SequentialScan)
             try { $contentHash = $fileHasher.ComputeHash($stream) }
             finally { $stream.Dispose() }
+            $failureStage = 'verify-file'
             $after = [IO.FileInfo]::new($path)
             if (-not $after.Exists -or $after.Length -ne $beforeSize -or
                 $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
@@ -162,6 +173,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
             $files++
             $bytes += $beforeSize
         }
+        $currentRelative = $null
+        $failureStage = 're-enumerate'
         $afterEntries = Get-Entries $scanRoot $scanPrefix
         if ($entries.Length -ne $afterEntries.Length) {
             throw [IO.IOException]::new('Tree entry count changed during measurement.')
@@ -171,6 +184,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
                 throw [IO.IOException]::new('Tree entries changed during measurement.')
             }
         }
+        $failureStage = 'finalize'
         $digest = [BitConverter]::ToString($hasher.GetHashAndReset()).Replace('-', '')
         $report = [ordered]@{
             schema = 'peersync-tree-snapshot-v1'; status = 'complete'
@@ -183,12 +197,25 @@ if ($PSCmdlet.ParameterSetName -eq 'Capture') {
         }
         Save-Report $report
     } catch {
+        $rootCause = $_.Exception.GetBaseException()
+        $pathHash = if ($currentRelative) {
+            $pathBytes = [Text.Encoding]::UTF8.GetBytes($currentRelative)
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { [BitConverter]::ToString($sha.ComputeHash($pathBytes)).Replace('-', '') }
+            finally { $sha.Dispose() }
+        } else { $null }
         $report = [ordered]@{
             schema = 'peersync-tree-snapshot-v1'; status = 'failed'
             runId = $RunId.ToString('N'); machineLabel = $MachineLabel
             hourUtc = $normalizedHour; startedUtc = $start.ToString('O')
             endedUtc = [DateTimeOffset]::UtcNow.ToString('O')
             errorType = $_.Exception.GetType().Name
+            rootErrorType = $rootCause.GetType().Name
+            rootHResult = ('0x{0:X8}' -f ($rootCause.HResult -band 0xFFFFFFFF))
+            failureStage = $failureStage
+            relativePathSha256 = $pathHash
+            errorMessage = $rootCause.Message.Replace($rootPath, '[ROOT]').
+                Replace($scanRoot, '[ROOT]')
         }
         Save-Report $report
         exit 1

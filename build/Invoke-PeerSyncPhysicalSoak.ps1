@@ -68,6 +68,9 @@ $operationProcess = $null
 $batches = 0
 $status = 'failed'
 $issue = $null
+$captureReadyHours = [System.Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal)
+$capturePendingHour = $null
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
 function Write-Record([object]$record) {
@@ -150,11 +153,45 @@ try {
             continue
         }
         $hour = $now.Minute
+        $currentHour = [DateTime]::new($now.Year, $now.Month, $now.Day,
+            $now.Hour, 0, 0, [DateTimeKind]::Utc)
+        $hourName = $currentHour.ToString('yyyyMMddTHH')
+        $snapshot = Join-Path $output "snapshot-$run-$MachineLabel-$hourName.json"
+        if ($now -ge $first -and $hour -ge 45 -and
+            -not [IO.File]::Exists($snapshot)) {
+            throw "Hourly capture did not finish before the operation window closed: $hourName."
+        }
         if ($hour -lt 20 -or $hour -ge 45) {
             $candidate = [DateTime]::new($now.Year, $now.Month, $now.Day, $now.Hour, 20, 0, [DateTimeKind]::Utc)
             if ($hour -ge 45) { $candidate = $candidate.AddHours(1) }
             $nextBatch = $candidate
             continue
+        }
+        if (-not [IO.File]::Exists($snapshot)) {
+            if ($capturePendingHour -ne $hourName) {
+                Write-Record ([ordered]@{
+                    schema='peersync-physical-soak-launcher-v1'; kind='capture-pending'
+                    utc=[DateTimeOffset]::UtcNow.ToString('O'); hourUtc=$currentHour.ToString('O')
+                    snapshot=$snapshot })
+                $capturePendingHour = $hourName
+            }
+            $nextBatch = $now.AddSeconds(10)
+            Start-Sleep -Seconds 10
+            continue
+        }
+        $captureReport = Get-Content -LiteralPath $snapshot -Raw | ConvertFrom-Json
+        if ($captureReport.status -ne 'complete' -or
+            $captureReport.runId -ne $run -or
+            $captureReport.machineLabel -ne $MachineLabel -or
+            ([DateTime]$captureReport.hourUtc).ToUniversalTime() -ne $currentHour) {
+            throw "Hourly capture failed or has the wrong identity: $hourName."
+        }
+        if ($captureReadyHours.Add($hourName)) {
+            Write-Record ([ordered]@{
+                schema='peersync-physical-soak-launcher-v1'; kind='capture-ready'
+                utc=[DateTimeOffset]::UtcNow.ToString('O'); hourUtc=$currentHour.ToString('O')
+                snapshot=$snapshot; treeSha256=$captureReport.treeSha256
+                files=$captureReport.files; bytes=$captureReport.bytes })
         }
         Require-ToolsUnchanged
         $batches++

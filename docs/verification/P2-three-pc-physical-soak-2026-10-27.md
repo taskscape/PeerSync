@@ -265,3 +265,44 @@ this is **not** a public release signature. The package has **not** been
 installed on any of the three PCs during this run. Parser-checked remote
 upgrade runners are prepared as ignored field artifacts, pending the final
 01:00–04:00 run evidence and failure inventory.
+
+### 02:00 UTC capture failure and guarded stop
+
+This exact attempt **failed** at hour one. The first and second PCs completed
+their 02:00 snapshots at 02:00:18 and 02:02:11 UTC: both report 50,146 files,
+186 directories, 10,398,907,208 content bytes and full-tree SHA-256
+`1AD670D3C02F45FFCC12282DACD372DBE48C018A50D356118D475C0D0CD46FC8`.
+The third PC started at 02:00:21, but its full native-byte scan took until
+02:28:39 and wrote `status: failed`, `errorType: MethodInvocationException`.
+The installed 1.0.41.0 collector recorded only that wrapper type, so the
+underlying file or I/O cause cannot be established from this report. Its
+capture loop ended after one of four requested hours, and the 02:25 unattended
+collector deadline independently recorded `hour-missing`. No hour-one
+three-PC match or later-hour result is claimed. The 01:20–01:45 random
+operation batches on all three PCs had exited 0; a third-PC 02:20 batch also
+completed while its scan was still running, so scan/workload overlap is a
+possible contributor, not a proven root cause.
+
+After verifying the exact failed third snapshot, the collector's missed-hour
+entry, the first and second complete snapshots, and each run-specific encoded
+capture command, only the first and second capture-loop processes and the
+unattended collector were stopped. Their launchers recorded failed endings;
+the third launcher had already failed. All three installed PeerSync services
+remained Running. The ignored stop receipt is
+`artifacts/field/physical-50k-20261027/stopped-after-hour1-311fbde49775445997a6f1c1523830a7.json`
+(SHA-256 `9493FC7ED17A9ACD517B09D56CAF70E333D3DF50FD70B9AF3C3FC30593AEDA8A`).
+The collector journal SHA-256 is
+`458E156CAF12F8FC9980483D150DCDBBCAF2496EF52C7F3ED71F50D2AD7D691B`;
+the third failed snapshot SHA-256 is
+`A208C97C04DCCEBF2C720D717E5AC4B9A7CDBAD7CDD77426477ABBB4C1155F45`.
+
+The next-source collector now records the scan stage, root exception type,
+HRESULT and a hash of the affected relative path. It uses a 1 MiB buffered
+sequential file stream for the full native hash. The launcher waits for its
+own completed hourly capture before beginning that hour’s random operations
+and fails explicitly if the capture misses the operation window. A real
+Windows PowerShell 5.1 long-path control and the positive/negative three-hour
+report controls passed locally; an exclusive-file negative control produced
+`hash-file`, root `IOException`, `0x80070020` and a path hash. These are
+local harness checks. A new full physical run and the 1.0.42.0 installed
+recovery check remain required; Gate P2 stays open.
