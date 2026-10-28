@@ -474,6 +474,32 @@ snapshot with source/destination SHA-256 checks and write an hourly comparison
 and a local collector status receipt. A failed or absent receipt remains a
 failed or incomplete hourly gate; the task schedule alone is not evidence of
 successful collection.
+
+### Aborted 06:00 run and fresh 09:00 attempt
+
+The 06:00 UTC run `3f81e62b8aad49048073be5801d2622c` did not start on
+all three machines. The first and second launchers recorded `start`, but the
+third scheduled task exited 1 before writing its first launcher journal row.
+The original scheduled action discarded standard error, so the exact
+pre-journal exception is unknown. A separate read-only content scan on the
+third PC succeeded with 10,399,184,958 bytes in 86.392 seconds. The first
+and second capture loops were stopped before hour zero, after checking their
+exact run identity; they recorded zero operation batches. Every remaining
+task for this run, including second-PC power and network changes, was
+disabled and archived with its definition. This run does not count toward
+the physical soak gate.
+
+The task registrar now schedules launch 20 minutes before hour zero and
+captures task-level stdout, stderr and pre-journal exceptions. Its
+`-PreflightOnly` path passed on a disposable fixture. The revised registrar
+was staged with a matching SHA-256 on all three PCs. Run
+`08c8a8e8facf40228fc0737e961b13b0` is scheduled for a fresh strict
+07:00 UTC baseline; a distinct three-hour run
+`18ae0e008618401d80953797ae6703b4` is reserved for 09:00–12:00 UTC
+only if that baseline passes. Registration, hourly comparison, operations
+and cleanup remain unverified. The second-PC temporary sleep policy has an
+automatic restore at 12:45 UTC, and third-PC temporary WinRM has automatic
+cleanup at 13:15 UTC.
 An exact one-time task using the same interactive elevated principal passed
 before launch: it decrypted the locally protected third-PC credential and
 authenticated to both remote Windows identities at 05:37 UTC, with task

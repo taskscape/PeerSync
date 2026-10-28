@@ -2344,6 +2344,8 @@ The 03:00 UTC 1.0.42.0 baseline failed: the first and second complete native tre
 
 The [05:00 UTC strict 1.0.43.0 baseline](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#0500-strict-baseline-pass-and-0600-soak-registration) then passed: all three PCs returned 50,154 files, 195 directories, 10,399,184,958 native bytes and the same full tree SHA-256 within the required capture window. The 06:00–09:00 UTC three-PC soak, hourly forwarder, permission change, second-PC sleep/wake and Ethernet/Wi-Fi switch are registered and pending actual field results. An unexplained second-PC sleep after the baseline was recovered and retained as availability evidence. No soak or Gate P2 pass is claimed before all hourly comparisons, native operation evidence and cleanup complete; physical WAN soak, hosted CI, independent security review and release signing remain open.
 
+The 06:00 run [aborted before hour zero](docs/verification/P2-three-pc-physical-soak-2026-10-27.md#aborted-0600-run-and-fresh-0900-attempt): the third-PC task exited before its first journal row, while the first two had started capture loops but performed zero operation batches. Its original action did not retain stderr, so the exact cause is unknown. The remaining tasks were disabled and archived. A fresh 07:00 strict baseline and distinct 09:00–12:00 UTC run are scheduled with a 20-minute launcher lead and task stdout/stderr capture. No physical soak gate is credited before those snapshots, operations, comparisons and cleanup pass; WAN soak, hosted CI, independent review and release signing remain open.
+
 ## 9. Phase 3: WPF app and installer (weeks 14-17)
 
 Goal: a non-developer can install PeerSync and sync two PCs in under 10 minutes.
