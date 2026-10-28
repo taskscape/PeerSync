@@ -306,3 +306,42 @@ report controls passed locally; an exclusive-file negative control produced
 `hash-file`, root `IOException`, `0x80070020` and a path hash. These are
 local harness checks. A new full physical run and the 1.0.42.0 installed
 recovery check remain required; Gate P2 stays open.
+
+### Buffered collector diagnostic and installed 1.0.42.0 recovery build
+
+Before restarting the gate, a one-time SYSTEM task on LARKBOX-X-1 ran the
+new collector against the full physical tree. Its exact tool SHA-256 was
+`E8A692957A2D0A37996B43409170FCA4AC7AC91F612ECDC67487DEB90FE2CF37`.
+The report for diagnostic run `5bad7d57a91c49c39e4e90b4904357c3` is
+`complete`: 50,145 files, 195 directories, 10,398,885,709 content bytes,
+tree SHA-256 `805BB8D74D7322A067781E958356A4F72AD95D0549819DEFFF53AF0A163CF54F`.
+It ran from 02:37:35 to 02:42:47 UTC, about 5 minutes 12 seconds. The task
+result was zero and the task was removed. The report, failed prior report and
+prior capture journal are preserved under ignored
+`artifacts/field/physical-50k-20261027/third-capture-preserved-20261028`;
+the new report's SHA-256 is
+`945507BDC1979497EC2539C17CB707A96C766B8C0841BB2C3ADADEE7365D1968`.
+This single-machine diagnostic shows the revised collector finished within
+the hourly capture window. It does not establish three-way equality.
+
+The development-signed 1.0.42.0 client installer was then applied on
+R5-7600X, DESKTOP-BN535U0 and LARKBOX-X-1. Each host's setup exited zero,
+the installed service file reports 1.0.42.0, PeerSync is Running and its
+pre/post-upgrade sentinel SHA-256 is unchanged. The LARKBOX-X-1 setup report
+records 02:46:51–02:47:41 UTC, `status: ready`, valid signer
+`6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`, and installer SHA-256
+`876C4B7D9393049E07607E66CAE70242ECE6EBC0F731C586A72DD0FFC56FA694`.
+Its one-time upgrade task was removed. The first-PC report is at
+`C:\Temp\PeerSync-1.0.42.0\result.json`; each remote PC retains the same
+path locally. No fresh physical Wi-Fi or suspend-recovery timing has been
+measured on 1.0.42.0 yet.
+
+The updated seven-file soak kit is SHA-256-verified outside the synchronized
+roots on all three hosts at `C:\PeerSync-Gate-Evidence\20261028-soak-kit`.
+An initial content-budget preflight found 10,398,979,724 bytes on the first
+and second hosts, and 10,398,879,379 on the third. All are below 10 GiB, but
+the third differs by 100,345 bytes; this is a preflight observation, not a
+passing tree comparison. A separate three-machine baseline capture is queued
+for 03:00 UTC under run `bfb1bf59e40a4cc4b6a11094901d04cf`. The new
+three-hour soak will start only after the baseline and installed-version
+preflight establish an acceptable initial state. Gate P2 remains unchecked.
