@@ -449,9 +449,11 @@ corpus's fresh-peer convergence time.
 
 The second PC unexpectedly entered sleep at 05:15:14 UTC after its baseline
 capture, despite AC standby being disabled and a four-hour temporary
-unattended-sleep setting. Power events show a wake at 05:17:59 UTC; a bounded
-Wake-on-LAN recovery also reached it. A PeerSync scheduled-task inventory
-found no task nominated for 05:15. The installed PeerSync service was Running after
+unattended-sleep setting. Kernel-Power event 42 identifies the reason as
+`System Idle`; Power-Troubleshooter event 1 reports an unknown wake source
+at 05:17:59 UTC. A bounded Wake-on-LAN recovery also reached it. A PeerSync
+scheduled-task inventory found no task nominated for 05:15. The installed
+PeerSync service was Running after
 wake. Its saved `Zag` Wi-Fi profile was unavailable at this location; the
 available saved `ZAG6` profile connected with Wi-Fi address
 `192.168.10.152`, and a source-bound ping to the first PC succeeded twice.
@@ -466,3 +468,9 @@ sleep/wake sequence and second-PC 07:32–07:38 Ethernet/Wi-Fi switch and
 restore tasks are registered. These are scheduled operations, not a soak
 pass. The pending hourly snapshots, native-byte evidence, service uptime,
 cleanup results and final full-tree comparisons determine the gate.
+Four first-PC collectors are also scheduled for 06:25, 07:25, 08:25 and
+09:25 UTC under the logged-on administrator account. They copy each host's
+snapshot with source/destination SHA-256 checks and write an hourly comparison
+and a local collector status receipt. A failed or absent receipt remains a
+failed or incomplete hourly gate; the task schedule alone is not evidence of
+successful collection.
