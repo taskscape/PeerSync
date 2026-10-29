@@ -10,3 +10,4 @@ TestResults/
 *.key
 BenchmarkDotNet.Artifacts/
 __pycache__/
+*.tmp

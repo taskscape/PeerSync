@@ -32,6 +32,18 @@ build/publish jobs report `fuzzSeconds: 0` and do not substitute for that job.
 The default local `Verify.ps1` still includes fuzzing. `Run-Fuzz.ps1` runs the
 same target independently.
 
+Every push to `main` builds the client installers (x64 and Arm64) and the
+optional Windows Server Rendezvous/relay installer (x64). New pushes leave
+earlier `main` builds running; superseded pull request runs are canceled.
+Download the `PeerSync-client-win-x64-<commit>`,
+`PeerSync-client-win-arm64-<commit>` or
+`PeerSync-rendezvous-win-x64-<commit>` artifact from the
+[CI run](https://github.com/taskscape/PeerSync/actions/workflows/ci.yml).
+Artifacts are retained for 14 days and contain the setup EXE, source/hash
+manifest and public development signing certificate. These are experimental
+CI packages signed with a temporary test identity, not public release packages.
+The optional server is built on every run; installing it is optional.
+
 Folder capabilities use HKDF-SHA256 and Ed25519 with explicit RW/RO/F text
 exports. Key objects redact string/JSON diagnostics and clear owned secrets
 when disposed. The checked-in public synthetic vectors are generated

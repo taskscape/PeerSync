@@ -7,8 +7,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep every main push, including queued runs. Only superseded PR runs share a group.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build:
     strategy:
@@ -180,6 +181,7 @@ jobs:
             artifacts/p0/
             artifacts/tests/native-engine/
   installer:
+    name: Client and optional Windows Server installers
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -192,6 +194,30 @@ jobs:
       - name: Build and verify signed development installers
         shell: pwsh
         run: ./build/Run-InstallerCi.ps1
+      - name: Upload Windows x64 client installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: PeerSync-client-win-x64-${{ github.sha }}
+          path: artifacts/installer/PeerSync-Setup-*-x64.exe*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Upload Windows Arm64 client installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: PeerSync-client-win-arm64-${{ github.sha }}
+          path: artifacts/installer/PeerSync-Setup-*-arm64.exe*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Upload optional Windows Server Rendezvous installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: PeerSync-rendezvous-win-x64-${{ github.sha }}
+          path: artifacts/installer/PeerSync-Rendezvous-Setup-*-x64.exe*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
       - name: Upload installer build evidence
         if: always()
         uses: actions/upload-artifact@v7
