@@ -1302,6 +1302,7 @@ All randomness comes from `RandomNumberGenerator`. No home-made ciphers: the onl
 | Hostile paths in records | Reject `..`, absolute or UNC paths, drive letters, `:` (alternate streams), reserved names (`CON`, `NUL`...), trailing dots and spaces. Fuzz-test this check. |
 | Oversized or flooding input | Max frame 16 MiB, max 1,000 records per batch, per-peer request quotas, and a connection limit per IP. |
 | Local user abuses the control pipe | The pipe ACL allows only Administrators and a local `PeerSync Users` group the installer creates. |
+| Automatic crash reporting captures live folder keys | Installed PeerSync executables opt out of automatic Windows Error Reporting. PeerSync creates no dumps and excludes them from logs and support bundles. Administrators audit global and per-executable `LocalDumps` before deployment; any configured or manually captured dump is privileged secret material. A running process necessarily holds keys, so an administrator-created full/live dump is outside the application's key-confidentiality guarantee. Independent review verifies this boundary on an installed candidate. |
 
 ### Encrypted (untrusted) peers, phase 6
 
@@ -1733,14 +1734,22 @@ PR/main CI remains required for the tooling change. See
 | --- | --- | --- |
 | Unit | Key chain and checksums, version-vector comparison, ignore matcher, path rules, FastCDC boundaries, conflict naming | `xunit.v3` with fixed test vectors |
 | Property-based | Convergence: after random edits, renames and deletes on 3–7 nodes with random partitions, all trees end up identical. No loss: every overwritten version survives in the archive or as a conflict copy. | `CsCheck` generators over the in-memory transport, thousands of seeds in CI |
-| Integration | Real service processes (3–5 on one machine, separate data folders) over loopback QUIC: rename storms, 50 GB files, 1M small files, offline edits, delete-versus-edit races | Scenario scripts driving `psp.exe` |
+| Integration | Real service processes (3–5 on one machine, separate data folders) over loopback QUIC: rename storms, test content up to 10 GiB, large small-file sets, offline edits, delete-versus-edit races | Scenario scripts driving `psp.exe` |
 | Network conditions | Latency, loss, full-cone versus symmetric NAT, CGNAT, relay fallback | Hyper-V VMs behind a Linux router VM (iptables NAT, `tc netem` for 100 ms RTT and 2% loss) |
 | File system edge cases | Office lock files, files changing during hashing, long paths, case-only renames, read-only attributes, exFAT USB drives (no stable file IDs), sleep in the middle of a write | Dedicated tests on real NTFS and exFAT volumes |
 | Security | A MITM proxy with its own certificate must fail. Forged records from a read-only peer are dropped. Tampered relay bytes are detected. Hostile paths are rejected. | Attack harness plus `SharpFuzz` on the frame decoder, message validation, path rules and the ignore parser |
 | Performance | Hashing, chunking, index throughput, LAN transfer rate | `BenchmarkDotNet`, plus timed runs on reference hardware |
-| Soak | 72 h of random operations on 3 physical PCs, with sleep, resume and network switches. A checker compares trees and hashes every hour. | Run before each phase gate |
+| Soak | At most 3 h of random operations on 3 physical PCs, with sleep, resume and network switches. A checker compares trees and hashes at hours 0, 1, 2 and 3; final read-only reporting may finish afterward. | Run before each phase gate |
 
-**Performance targets (to confirm in phase 0):** hashing at least 1 GB/s on NVMe, LAN transfer at 80% or more of 1 Gbit/s line rate, first index of 1M files within 20 min on an SSD, idle CPU under 1%, and memory under 300 MB with 1M files.
+The 2026-10-26 test-budget change caps new required gate corpora at 10 GiB of
+content and each active verification execution at three hours. It changes test
+scope, not production file-size support, data-retention windows, or historical
+evidence. A test that cannot meet its acceptance condition within the cap
+fails; a smaller or shorter run is not an automatic pass. The two-date P1 CI
+campaign is historical evidence from two separate executions, not one
+continuous test. See `docs/requirements/three-hour-ten-gib-test-budget.md`.
+
+**Performance targets:** hashing at least 1 GB/s on NVMe, LAN transfer at 80% or more of 1 Gbit/s line rate, first index of 100,000 files within 20 min on an SSD, idle CPU under 1%, and observed peak working set plus sampled private memory under 300 MB with 100,000 files. Exact native-byte fresh-peer convergence for all 100,000 files must complete within the three-hour end-to-end benchmark cap. The former million-file measurements are retained as historical stress evidence.
 
 P0.2.4 local measurement (2026-10-18): a sequential 10 GiB file pass performing FastCDC plus both chunk and whole-file BLAKE3 reached 1.051 decimal GB/s with `Blake3.Native` 3.0.2, versus 0.887 GB/s with managed `Blake3`, on the recorded Ryzen 7600X / Crucial NVMe workstation after reducing buffer copies. Hashes matched across both implementations. This is a warm-cache, repeated-4-MiB-block corpus; it does not establish cold-disk, other hardware or LAN throughput. The 1 GB/s target is retained; see `docs/spikes/P0.2.4-chunking-hashing.md`.
 

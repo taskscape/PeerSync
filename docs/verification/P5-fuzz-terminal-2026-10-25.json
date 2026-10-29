@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "startedUtc": "2026-10-24T09:05:58.0245472Z",
+  "endedUtc": "2026-10-25T09:05:58.3807220Z",
+  "requestedSeconds": 86400,
+  "exitCode": 0,
+  "result": {
+    "target": "FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText",
+    "seeds": 31235254,
+    "seconds": 86400.0013553,
+    "crashes": 0
+  },
+  "stderrBytes": 0,
+  "crashFiles": 0,
+  "exeSha256": "E69FD6DFECDA3DB9E891B4EEE8D3A275BA2D9CF36D30C019977973F870D333BD"
+}

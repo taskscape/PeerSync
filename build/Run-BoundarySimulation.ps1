@@ -149,7 +149,7 @@ try {
     $result = $null
     if ($Cohort -in @('all','baseline')) {
         $result = ($workers | Where-Object name -EQ fuzz).stdout.GetAwaiter().GetResult() | ConvertFrom-Json
-        if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec' -or $result.seconds -lt $FuzzSeconds -or $result.crashes -ne 0 -or $result.seeds -le 0) { throw 'Boundary fuzz result does not prove the requested duration and targets' }
+        if ($result.target -ne 'FastCDC,PathRules,VersionVector,IgnoreMatcher,FrameCodec,MessageValidator,KeyText' -or $result.seconds -lt $FuzzSeconds -or $result.crashes -ne 0 -or $result.seeds -le 0) { throw 'Boundary fuzz result does not prove the requested duration and targets' }
     }
     foreach ($file in $hashes) {
         if ((Get-FileHash -LiteralPath $file.path -Algorithm SHA256).Hash -ne $file.sha256) { throw 'A worker build output changed during verification' }

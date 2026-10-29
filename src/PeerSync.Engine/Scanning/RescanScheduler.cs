@@ -1,13 +1,19 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Authentication;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Engine.Sync;
 
 namespace PeerSync.Engine.Scanning;
 
-public sealed record ScheduledFolder(Scanner Scanner, int RescanIntervalSeconds = 600, bool WatchChanges = true);
-public sealed record ScanOutcome(Scanner Scanner, ScanResult? Result, string? ErrorCode, int RetryInSeconds);
+public sealed record ScheduledFolder(Scanner Scanner, int RescanIntervalSeconds = 600, bool WatchChanges = true,
+    TransportFolder? Coordinator = null);
+public sealed record ScanOutcome(Scanner Scanner, ScanResult? Result, string? ErrorCode, int RetryInSeconds)
+{
+    public PullPassResult? Pass { get; init; }
+}
 
 /// <summary>The caller owns scanners, keys and indexes. Cancel and await RunAsync before disposing them.</summary>
 public sealed class RescanScheduler
@@ -31,6 +37,8 @@ public sealed class RescanScheduler
             ArgumentNullException.ThrowIfNull(folder.Scanner);
             if (!unique.Add(folder.Scanner)) throw new ArgumentException("Duplicate scanner registration.", nameof(folders));
             if (folder.RescanIntervalSeconds is < 1 or > 86400) throw new ArgumentOutOfRangeException(nameof(folders));
+            if (folder.Coordinator is not null && !ReferenceEquals(folder.Scanner, folder.Coordinator.Scanner))
+                throw new ArgumentException("Coordinator must own the scheduled scanner.", nameof(folders));
         }
         clock = timeProvider ?? TimeProvider.System;
         this.journal = journal;
@@ -71,17 +79,34 @@ public sealed class RescanScheduler
             await foreach (bool _ in requests.Reader.ReadAllAsync(stopped.Token).ConfigureAwait(false))
             {
                 ScanResult? result = null;
+                PullPassResult? pass = null;
                 string? errorCode = null;
-                var scanLease = await FolderScanBudget.AcquireAsync(stopped.Token).ConfigureAwait(false);
+                bool more = false;
+                // A coordinator takes the global scan budget inside its own
+                // scan path; holding it here would deadlock that nested pass.
+                IDisposable? scanLease = folder.Coordinator is null
+                    ? await FolderScanBudget.AcquireAsync(stopped.Token).ConfigureAwait(false) : null;
                 using var activity = new Activity("PeerSync.ScheduledScan").SetIdFormat(ActivityIdFormat.W3C).Start();
                 try
                 {
-                    journal?.TryWrite(new("scheduler.scan_start", "rescan") { SessionId = session });
-                    result = await folder.Scanner.ScanAsync(stopped.Token).ConfigureAwait(false);
-                    if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed"))
-                        errorCode = "scan-deferred";
+                    journal?.TryWrite(new(folder.Coordinator is null ? "scheduler.scan_start" : "scheduler.pass_start", "rescan") { SessionId = session });
+                    if (folder.Coordinator is null)
+                    {
+                        result = await folder.Scanner.ScanAsync(stopped.Token).ConfigureAwait(false);
+                        if (result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed" or "problem-overflow"))
+                            errorCode = "scan-deferred";
+                    }
+                    else
+                    {
+                        pass = await folder.Coordinator.RunPassAsync(stopped.Token).ConfigureAwait(false);
+                        more = pass.MoreWork;
+                        journal?.TryWrite(new("scheduler.pass_complete", "rescan") { SessionId = session,
+                            Level = DiagnosticLevel.Debug, ItemsVisited = pass.ScannedEntries,
+                            ItemsChanged = pass.Applied, ItemsDeferred = pass.ScanProblems + pass.Deferred + pass.Failed });
+                    }
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or System.Security.Cryptography.CryptographicException
+                    or AuthenticationException
                     || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 })
                 {
                     errorCode = "scan-unavailable";
@@ -98,12 +123,12 @@ public sealed class RescanScheduler
                             _ => null,
                         } });
                 }
-                finally { scanLease.Dispose(); }
+                finally { scanLease?.Dispose(); }
                 if (errorCode is null) attempt = 0;
                 int retry = errorCode is null ? 0 : BackoffSeconds(attempt);
                 if (errorCode is not null) attempt = Math.Min(attempt + 1, 6);
-                outcomes.Writer.TryWrite(new(folder.Scanner, result, errorCode, retry));
-                if (result?.RequiresFollowupScan == true) requests.Writer.TryWrite(true);
+                outcomes.Writer.TryWrite(new(folder.Scanner, result, errorCode, retry) { Pass = pass });
+                if (result?.RequiresFollowupScan == true || more) requests.Writer.TryWrite(true);
                 if (retry == 0) continue;
                 journal?.TryWrite(new("scheduler.retry", "rescan")
                 { SessionId = session, Level = DiagnosticLevel.Debug, ErrorCode = errorCode, RetryInMilliseconds = retry * 1000 });
@@ -115,7 +140,8 @@ public sealed class RescanScheduler
         async Task PeriodicLoop()
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(folder.RescanIntervalSeconds), clock);
-            while (await timer.WaitForNextTickAsync(stopped.Token).ConfigureAwait(false)) requests.Writer.TryWrite(true);
+            while (await timer.WaitForNextTickAsync(stopped.Token).ConfigureAwait(false))
+            { folder.Coordinator?.RequestScan(); requests.Writer.TryWrite(true); }
         }
 
         async Task WatchLoop()
@@ -129,6 +155,7 @@ public sealed class RescanScheduler
                     requests.Writer.TryWrite(true); // Covers changes while a failed watcher was being recreated.
                     await foreach (var batch in watcher.ReadyBatchesAsync(stopped.Token).ConfigureAwait(false))
                     {
+                        folder.Coordinator?.RequestWatcherScan(batch);
                         requests.Writer.TryWrite(true);
                         if (batch.FullScan && batch.Reason == "watcher-overflow") break; // Recreate a failed native subscription.
                     }

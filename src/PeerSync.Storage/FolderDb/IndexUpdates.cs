@@ -85,7 +85,22 @@ public sealed partial class FolderIndex
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(paths); ArgumentNullException.ThrowIfNull(resolver);
+        // Freeze caller-owned incremental inputs before awaiting the writer.
+        // Scanner-scale rebuilds take the streamed index path below.
         string[] unique = paths.Select(PathRules.Key).Distinct(StringComparer.Ordinal).ToArray();
+        return await RecomputeNeededCoreAsync(unique, resolver, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<int> RecomputeAllNeededAsync(Func<FolderPathSnapshot, NeededRow?> resolver,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        return RecomputeNeededCoreAsync(ReadAllNeededPathKeys(), resolver, cancellationToken);
+    }
+
+    private async Task<int> RecomputeNeededCoreAsync(IEnumerable<string> unique, Func<FolderPathSnapshot, NeededRow?> resolver,
+        CancellationToken cancellationToken)
+    {
         int count = 0;
         foreach (var batch in unique.Chunk(1000))
         {

@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using Shouldly;
@@ -20,6 +21,7 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
             {
                 SessionId = Guid.Parse("479407df-d4d0-4cae-9e9b-454add07b31a"),
                 Transport = DiagnosticTransport.Quic, Bytes = 4096, ElapsedMilliseconds = 125.5,
+                WorkingSetBytes = 375_000_000, PrivateBytes = 340_000_000, ManagedHeapBytes = 299_000_000,
                 RemoteAddress = IPAddress.Parse("203.0.113.8"), RemotePort = 47821,
             });
         File.AppendAllText(Path.Combine(logs, "debug.jsonl"),
@@ -34,6 +36,9 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
         using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
         string bundleLog = reader.ReadToEnd();
         bundleLog.ShouldContain("transport.request_complete"); bundleLog.ShouldContain("479407df-d4d0-4cae-9e9b-454add07b31a");
+        bundleLog.ShouldContain("\"workingSetBytes\":375000000");
+        bundleLog.ShouldContain("\"privateBytes\":340000000");
+        bundleLog.ShouldContain("\"managedHeapBytes\":299000000");
         bundleLog.ShouldNotContain("203.0.113.8"); bundleLog.ShouldNotContain("47821"); bundleLog.ShouldNotContain("folder-secret");
         bundleLog.ShouldNotContain("private.txt"); bundleLog.ShouldNotContain("private-body");
         using var environment = JsonDocument.Parse(new StreamReader(archive.GetEntry("environment.json")!.Open()).ReadToEnd());
@@ -74,6 +79,37 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
         string existing = Path.Combine(directory, "existing.zip"); File.WriteAllText(existing, "keep");
         Should.Throw<IOException>(() => DiagnosticBundleCollector.Collect(logs, existing));
         File.ReadAllText(existing).ShouldBe("keep");
+    }
+
+    [Fact]
+    public void BusyJournalKeepsRecentEventsAndOlderFailuresWithExplicitOmissionCount()
+    {
+        string logs = Path.Combine(directory, "busy"); Directory.CreateDirectory(logs);
+        string source = Path.Combine(logs, "debug.jsonl");
+        string when = DateTimeOffset.UtcNow.AddHours(-1).ToString("O");
+        using (var writer = new StreamWriter(source, append: false, new UTF8Encoding(false)))
+        {
+            writer.WriteLine("{\"timestampUtc\":\"" + when
+                + "\",\"component\":\"service\",\"level\":\"Warning\",\"eventName\":\"network.failure\",\"operation\":\"connect\",\"errorCode\":\"SocketException\"}");
+            string prefix = "{\"timestampUtc\":\"" + when
+                + "\",\"component\":\"service\",\"level\":\"Information\",\"eventName\":\"scan.pass\",\"operation\":\"scan\",\"itemsVisited\":";
+            for (int i = 0; i <= 100_000; i++) writer.WriteLine(prefix + i + "}");
+        }
+
+        string destination = Path.Combine(directory, "busy.zip");
+        DiagnosticBundleResult result = DiagnosticBundleCollector.Collect(logs, destination);
+        result.EventsIncluded.ShouldBe(100_000);
+        result.EventsOmitted.ShouldBe(2);
+        result.FilesIncluded.ShouldBe(1);
+        using ZipArchive archive = ZipFile.OpenRead(destination);
+        using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
+        string events = reader.ReadToEnd();
+        events.ShouldContain("\"eventName\":\"network.failure\"");
+        events.ShouldNotContain("\"itemsVisited\":0}");
+        events.ShouldContain("\"itemsVisited\":100000}");
+        using var environment = JsonDocument.Parse(archive.GetEntry("environment.json")!.Open());
+        environment.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        environment.RootElement.GetProperty("eventsOmitted").GetInt64().ShouldBe(2);
     }
 
     public void Dispose()

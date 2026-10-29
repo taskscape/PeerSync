@@ -1,5 +1,6 @@
+using System.Diagnostics;
 using System.Net;
-using System.Threading.Channels;
+using System.Net.Sockets;
 using Google.Protobuf;
 using Grpc.Core;
 using PeerSync.Core.Diagnostics;
@@ -28,6 +29,7 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         IPEndPoint observed = new(context.GetHttpContext().Connection.RemoteIpAddress ?? IPAddress.None,
             context.GetHttpContext().Connection.RemotePort);
         PresenceSession session = presence.Open(deviceId, observed);
+        var elapsed = Stopwatch.StartNew();
         RendezvousMetrics.TrackerSessions.Add(1);
         RendezvousMetrics.ActiveTrackerSessions.Add(1);
         diagnostics.TryWrite(new("rendezvous.session_opened", "tracker")
@@ -43,7 +45,7 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         });
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken,
             session.Lifetime.Token);
-        Task writer = WriteLoopAsync(session.Outgoing.Reader, responses, linked.Token);
+        Task writer = WriteLoopAsync(session, responses, linked.Token);
         try
         {
             bool first = true;
@@ -108,7 +110,28 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                 }
             }
         }
-        catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            diagnostics.TryWrite(new("rendezvous.session_cancelled", "tracker")
+            { SessionId = session.SessionId, Level = DiagnosticLevel.Debug, Transport = Transport(context),
+                ErrorCode = context.CancellationToken.IsCancellationRequested ? "client-cancelled" : "presence-ended" });
+        }
+        catch (RpcException error)
+        {
+            diagnostics.TryWrite(new("rendezvous.session_failed", "tracker")
+            { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
+                ErrorCode = error.StatusCode.ToString(), HResult = error.HResult,
+                NativeError = NativeSocketError(error), ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
+            throw;
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException)
+        {
+            diagnostics.TryWrite(new("rendezvous.transport_failed", "tracker")
+            { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
+                ErrorCode = error.GetType().Name, HResult = error.HResult,
+                NativeError = NativeSocketError(error), ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
+            throw;
+        }
         finally
         {
             RendezvousMetrics.ActiveTrackerSessions.Add(-1);
@@ -116,18 +139,36 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
             await linked.CancelAsync().ConfigureAwait(false);
             try { await writer.ConfigureAwait(false); }
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            catch (Exception error) when (error is RpcException or IOException or InvalidOperationException)
+            {
+                diagnostics.TryWrite(new("rendezvous.transport_failed", "tracker")
+                { SessionId = session.SessionId, Level = DiagnosticLevel.Warning, Transport = Transport(context),
+                    ErrorCode = error is RpcException rpc ? rpc.StatusCode.ToString() : error.GetType().Name,
+                    HResult = error.HResult, NativeError = NativeSocketError(error),
+                    ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
+            }
             session.Lifetime.Dispose();
-            diagnostics.TryWrite(new("rendezvous.session_closed", "tracker") { SessionId = session.SessionId });
+            diagnostics.TryWrite(new("rendezvous.session_closed", "tracker")
+            { SessionId = session.SessionId, ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
         }
     }
 
-    private static async Task WriteLoopAsync(ChannelReader<ServerMessage> messages,
+    private async Task WriteLoopAsync(PresenceSession session,
         IServerStreamWriter<ServerMessage> responses, CancellationToken cancellationToken)
     {
-        await foreach (ServerMessage message in messages.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            await responses.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+        await foreach (ServerMessage queued in session.Outgoing.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            if (presence.TryMaterialize(session, queued, out ServerMessage? message))
+                await responses.WriteAsync(message!, cancellationToken).ConfigureAwait(false);
     }
 
     private static DiagnosticTransport Transport(ServerCallContext context)
         => context.GetHttpContext().Request.Protocol == "HTTP/3" ? DiagnosticTransport.Http3 : DiagnosticTransport.Http2;
+
+    private static int? NativeSocketError(Exception error)
+    {
+        for (Exception? current = error is RpcException rpc ? rpc.Status.DebugException ?? error : error;
+             current is not null; current = current.InnerException)
+            if (current is SocketException socket) return socket.NativeErrorCode;
+        return null;
+    }
 }

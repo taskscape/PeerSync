@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Quic;
@@ -32,6 +33,8 @@ namespace PeerSync.Service.Hosting;
 internal sealed class PeerNetworkRuntime : IAsyncDisposable
 {
     private static readonly TimeSpan SyncInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ListenerBindRetryWindow = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ListenerBindRetryDelay = TimeSpan.FromMilliseconds(250);
     private readonly X509Certificate2 certificate;
     private readonly byte[] localDeviceId;
     private readonly Func<IReadOnlyList<InstalledFolderHost.FolderRuntime>> getFolders;
@@ -122,9 +125,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 throw new PlatformNotSupportedException("The installed service requires Windows QUIC support.");
             }
 
-            runtime.listener = await QuicPeerListener.ListenAsync(new IPEndPoint(IPAddress.Any, deviceSettings.ListenPort),
-                runtime.options, cancellationToken).ConfigureAwait(false);
-            runtime.tcpListener = TcpPeerListener.Listen(new IPEndPoint(IPAddress.Any, deviceSettings.ListenPort), runtime.tcpOptions);
+            (runtime.listener, runtime.tcpListener) = await BindListenersAsync(deviceSettings.ListenPort,
+                runtime.options, runtime.tcpOptions, diagnostics, cancellationToken).ConfigureAwait(false);
             runtime.acceptTask = Task.WhenAll(runtime.AcceptQuicLoopAsync(runtime.stopping.Token),
                 runtime.AcceptTcpLoopAsync(runtime.stopping.Token));
             diagnostics?.TryWrite(new("service.quic_listener_ready", "peer_network")
@@ -132,29 +134,14 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             diagnostics?.TryWrite(new("service.tcp_listener_ready", "peer_network")
                 { Transport = DiagnosticTransport.Tcp, ItemsChanged = deviceSettings.ListenPort });
 
-            if (deviceSettings.LanDiscovery && getFolders().Any(folder => folder.Settings.UseLan))
-            {
-                try
-                {
-                    runtime.discovery = new LanDiscovery(deviceId, deviceSettings.ListenPort,
-                        () => getFolders().Where(folder => folder.Settings.UseLan)
-                            .Select(folder => (ReadOnlyMemory<byte>)folder.Keys.FolderId()).ToArray(), diagnostics);
-                    runtime.discovery.PeerDiscovered += runtime.OnLanPeerDiscovered;
-                    runtime.discovery.Start();
-                }
-                catch (Exception error) when (error is SocketException or InvalidOperationException or PlatformNotSupportedException)
-                {
-                    diagnostics?.TryWrite(new("service.lan_discovery_unavailable", "peer_network")
-                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
-                }
-            }
+            await runtime.RefreshLanDiscoveryAsync(deviceSettings, cancellationToken).ConfigureAwait(false);
 
             runtime.predefinedHosts = new PredefinedHosts(() => getFolders().SelectMany(folder => folder.Settings.PredefinedHosts)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), runtime.DialPredefinedHostAsync, diagnostics);
             runtime.predefinedHosts.Start();
             if (deviceSettings.UsePortMapping)
             {
-                runtime.portMapper = new PortMapper(deviceSettings.ListenPort, diagnostics);
+                runtime.portMapper = new PortMapper(deviceSettings.ListenPort, diagnostics, runtime.timeProvider);
                 runtime.portMapper.MappingsChanged += runtime.RefreshTrackerAnnouncements;
                 runtime.portMapper.Start();
             }
@@ -186,6 +173,46 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         {
             await runtime.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task<(QuicPeerListener Quic, TcpPeerListener Tcp)> BindListenersAsync(int port,
+        QuicPeerOptions quicOptions, TcpPeerOptions tcpOptions, DiagnosticJournal? diagnostics,
+        CancellationToken cancellationToken)
+    {
+        long started = Stopwatch.GetTimestamp();
+        int retries = 0;
+        var endpoint = new IPEndPoint(IPAddress.Any, port);
+        while (true)
+        {
+            QuicPeerListener? quic = null;
+            TcpPeerListener? tcp = null;
+            try
+            {
+                quic = await QuicPeerListener.ListenAsync(endpoint, quicOptions, cancellationToken).ConfigureAwait(false);
+                tcp = TcpPeerListener.Listen(endpoint, tcpOptions);
+                if (retries != 0)
+                    diagnostics?.TryWrite(new("service.listener_bind_recovered", "peer_network")
+                    { ItemsVisited = retries, ElapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds });
+                return (quic, tcp);
+            }
+            catch (SocketException error) when (error.SocketErrorCode == SocketError.AddressAlreadyInUse
+                && Stopwatch.GetElapsedTime(started) < ListenerBindRetryWindow)
+            {
+                if (tcp is not null) await tcp.DisposeAsync().ConfigureAwait(false);
+                if (quic is not null) await quic.DisposeAsync().ConfigureAwait(false);
+                if (++retries == 1)
+                    diagnostics?.TryWrite(new("service.listener_bind_retry", "peer_network")
+                    { Level = DiagnosticLevel.Warning, ErrorCode = "address_in_use", NativeError = error.NativeErrorCode,
+                        RetryInMilliseconds = (int)ListenerBindRetryDelay.TotalMilliseconds });
+                await Task.Delay(ListenerBindRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (tcp is not null) await tcp.DisposeAsync().ConfigureAwait(false);
+                if (quic is not null) await quic.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
     }
 
@@ -321,9 +348,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
                 .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
                 .Select(unicast => unicast.Address)
-                .Where(address => !IPAddress.IsLoopback(address) && !address.Equals(IPAddress.Any)
-                    && !address.Equals(IPAddress.IPv6Any) && !address.IsIPv6LinkLocal
-                    && !address.IsIPv6SiteLocal && !address.IsIPv6Multicast)
+                .Where(IsDialableUnicast)
                 .DistinctBy(address => address.ToString()).Take(4))
                 announce.LocalEndpoints.Add(new RendezvousEndpoint { Address = address.ToString(), Port = (uint)port });
         }
@@ -333,7 +358,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
         }
         if (portMapper is not null)
-            foreach (IPEndPoint endpoint in portMapper.PublicEndpoints.Take(4))
+            foreach (IPEndPoint endpoint in portMapper.PublicEndpoints.Where(endpoint =>
+                IsDialableUnicast(endpoint.Address)).Take(4))
                 announce.LocalEndpoints.Add(new RendezvousEndpoint
                 { Address = endpoint.Address.ToString(), Port = (uint)endpoint.Port });
         return announce;
@@ -375,9 +401,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     foreach (RendezvousEndpoint endpoint in peer.Endpoints.Take(16))
                     {
                         if (!IPAddress.TryParse(endpoint.Address, out IPAddress? address)
-                            || endpoint.Port is < 1 or > 65535 || address.Equals(IPAddress.Any)
-                            || address.Equals(IPAddress.IPv6Any) || IPAddress.IsLoopback(address)
-                            || address.IsIPv6Multicast) continue;
+                            || endpoint.Port is < 1 or > 65535 || !IsDialableUnicast(address)) continue;
+                        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
                         RememberEndpoint(key, new IPEndPoint(address, (int)endpoint.Port), ConnectionSource.Public);
                         accepted++;
                     }
@@ -402,6 +427,16 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 break;
         }
         return ValueTask.CompletedTask;
+    }
+
+    internal static bool IsDialableUnicast(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)) return false;
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+            return address.GetAddressBytes()[0] is > 0 and < 224;
+        return !address.IsIPv6Multicast && !address.IsIPv6LinkLocal && !address.IsIPv6SiteLocal;
     }
 
     private ValueTask OnTrackerMessageFromServerAsync(Uri server, ServerMessage message,
@@ -536,6 +571,51 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         => (predefinedHosts ?? throw new InvalidOperationException("Predefined host resolver is not running."))
             .RefreshNowAsync(cancellationToken);
 
+    internal async Task<bool> RefreshFolderPolicyAsync(DeviceSettings deviceSettings, CancellationToken cancellationToken)
+    {
+        bool lanAvailable = await RefreshLanDiscoveryAsync(deviceSettings, cancellationToken).ConfigureAwait(false);
+        foreach (TrackerClient tracker in trackers) tracker.Refresh();
+        await RefreshPredefinedHostsAsync(cancellationToken).ConfigureAwait(false);
+        RequestNetworkRecovery("folder_policy_change");
+        return lanAvailable;
+    }
+
+    private async Task<bool> RefreshLanDiscoveryAsync(DeviceSettings deviceSettings, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        bool wanted = deviceSettings.LanDiscovery && getFolders().Any(folder => folder.Settings.UseLan);
+        if (!wanted)
+        {
+            LanDiscovery? old = discovery;
+            discovery = null;
+            if (old is not null)
+            {
+                old.PeerDiscovered -= OnLanPeerDiscovered;
+                await old.DisposeAsync().ConfigureAwait(false);
+            }
+            return true;
+        }
+        if (discovery is not null) return true;
+        var next = new LanDiscovery(localDeviceId, deviceSettings.ListenPort,
+            () => getFolders().Where(folder => folder.Settings.UseLan)
+                .Select(folder => (ReadOnlyMemory<byte>)folder.Keys.FolderId()).ToArray(), diagnostics, timeProvider);
+        try
+        {
+            next.PeerDiscovered += OnLanPeerDiscovered;
+            next.Start();
+            discovery = next;
+            return true;
+        }
+        catch (Exception error) when (error is SocketException or InvalidOperationException or PlatformNotSupportedException)
+        {
+            next.PeerDiscovered -= OnLanPeerDiscovered;
+            await next.DisposeAsync().ConfigureAwait(false);
+            diagnostics?.TryWrite(new("service.lan_discovery_unavailable", "peer_network")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            return false;
+        }
+    }
+
     internal async Task RefreshFolderMembershipAsync(CancellationToken cancellationToken)
     {
         foreach (TrackerClient tracker in trackers) tracker.Refresh();
@@ -556,6 +636,12 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             diagnostics?.TryWrite(new("service.peer_session_worker_failed", "folder_membership")
                 { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
         }
+        RequestNetworkRecovery("folder_membership_change");
+    }
+
+    internal void NotifyFolderMembershipExpanded()
+    {
+        foreach (TrackerClient tracker in trackers) tracker.Refresh();
         RequestNetworkRecovery("folder_membership_change");
     }
 
@@ -585,6 +671,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     private async Task RecoverNetworkAsync(string reason, int coalescedRequests)
     {
         CancellationToken token = stopping.Token;
+        var recoveryTimer = Stopwatch.StartNew();
         try
         {
             diagnostics?.TryWrite(new("service.network_recovery_started", reason)
@@ -593,18 +680,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             // refresh endpoints before the immediate reconnect pass.
             await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, token).ConfigureAwait(false);
             KeyValuePair<Guid, IAsyncDisposable>[] activeSessions = sessions.ToArray();
-            foreach (var active in activeSessions)
-            {
-                diagnostics?.TryWrite(new("service.peer_session_reset", "network_recovery")
-                    { SessionId = active.Key, ErrorCode = reason });
-                try { await active.Value.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error)
-                {
-                    diagnostics?.TryWrite(new("service.peer_session_reset_failed", "network_recovery")
-                        { Level = DiagnosticLevel.Warning, SessionId = active.Key,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
-                }
-            }
+            await ResetActiveSessionsAsync(activeSessions, reason, diagnostics).ConfigureAwait(false);
 
             string[] knownPeers = endpoints.KnownPeerKeys();
             foreach (string peerKey in knownPeers)
@@ -613,13 +689,51 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 EnsureMaintainer(peerKey, Convert.FromHexString(peerKey));
             }
             diagnostics?.TryWrite(new("service.network_recovery_complete", reason)
-                { ItemsVisited = knownPeers.Length, ItemsSkipped = coalescedRequests });
+                { ItemsVisited = knownPeers.Length, ItemsSkipped = coalescedRequests,
+                    ElapsedMilliseconds = recoveryTimer.Elapsed.TotalMilliseconds });
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.network_recovery_failed", reason)
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                    ElapsedMilliseconds = recoveryTimer.Elapsed.TotalMilliseconds });
+        }
+    }
+
+    internal static async Task ResetActiveSessionsAsync(
+        IReadOnlyList<KeyValuePair<Guid, IAsyncDisposable>> activeSessions,
+        string reason, DiagnosticJournal? diagnostics)
+    {
+        // Separate sessions can each wait for a stream shutdown. Closing them
+        // one after another makes network recovery exceed the physical 30 s gate.
+        var pending = new Task[activeSessions.Count];
+        for (int index = 0; index < activeSessions.Count; index++)
+        {
+            KeyValuePair<Guid, IAsyncDisposable> active = activeSessions[index];
+            pending[index] = ResetOneAsync(active, reason, diagnostics);
+        }
+        await Task.WhenAll(pending).ConfigureAwait(false);
+    }
+
+    private static async Task ResetOneAsync(KeyValuePair<Guid, IAsyncDisposable> active,
+        string reason, DiagnosticJournal? diagnostics)
+    {
+        var timer = Stopwatch.StartNew();
+        diagnostics?.TryWrite(new("service.peer_session_reset", "network_recovery")
+            { SessionId = active.Key, ErrorCode = reason });
+        try
+        {
+            await active.Value.DisposeAsync().ConfigureAwait(false);
+            diagnostics?.TryWrite(new("service.peer_session_reset_complete", "network_recovery")
+                { SessionId = active.Key, ElapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
+        }
+        catch (Exception error)
+        {
+            diagnostics?.TryWrite(new("service.peer_session_reset_failed", "network_recovery")
+                { Level = DiagnosticLevel.Warning, SessionId = active.Key,
+                    ErrorCode = error.GetType().Name, HResult = error.HResult,
+                    ElapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
         }
     }
 

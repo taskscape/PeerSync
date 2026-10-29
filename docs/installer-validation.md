@@ -6,9 +6,13 @@ and Inno Setup 7.1. The build script publishes self-contained ReadyToRun
 service, app, and CLI payloads into `publish/<arch>/`, then invokes ISCC.
 It downloads the Microsoft-signed Visual C++ v14 Redistributable for the
 selected architecture from Microsoft's documented permalink, verifies its
-Authenticode publisher, and bundles it. Setup installs that prerequisite
-before replacing service files; a required reboot stops Setup before the
-upgrade and must be followed by a rerun. The manifest records its SHA-256.
+Authenticode publisher, and bundles it. Setup checks the installed runtime's
+architecture, registry version, and `VCRUNTIME140.dll` version before replacing service
+files. It skips the prerequisite when the installed version is at least the
+bundled version, avoiding a redundant redistributable run and its Windows
+restore-point activity on upgrades. A missing or older runtime still runs the
+bundled prerequisite; a required reboot stops Setup before the upgrade and
+must be followed by a rerun. The manifest records its SHA-256.
 The [Server 2025 clean-VM smoke](verification/P3-server2025-installer-smoke-2026-10-22.md)
 records the missing-runtime reproduction and the successful bundled fix.
 
@@ -17,6 +21,14 @@ $thumbprint = 'YOUR_LOCALMACHINE_CODE_SIGNING_CERTIFICATE_THUMBPRINT'
 ./build/Build-Installer.ps1 -Arch x64 -Version 1.0.0 -CertificateThumbprint $thumbprint -DevelopmentSigning
 ./build/Build-Installer.ps1 -Arch arm64 -Version 1.0.0 -CertificateThumbprint $thumbprint -DevelopmentSigning
 ```
+
+The default build performs a locked solution restore. If a local development
+machine already has restored assets but another process temporarily locks a
+NuGet analyzer, `-UseExistingRestoredAssets` publishes with `--no-restore`.
+It is accepted only with `-DevelopmentSigning` or `-UnsignedDevelopment`, and
+the manifest records `restoreMode: existing-assets`. This local fallback
+does not establish locked-restore or release-build parity; CI and release
+builds must use the default `restoreMode: locked` path.
 
 `-UnsignedDevelopment` permits local compiler validation without a signing
 identity. It records `localDevelopmentOnly: true` in the adjacent manifest;
@@ -55,6 +67,16 @@ sc.exe query PeerSync
 For scripted installs, use `Start-Process -Wait -PassThru -WindowStyle Hidden`
 to capture Setup's exit code. A bare PowerShell invocation of a GUI setup can
 return before installation finishes in remote sessions.
+
+Before an attended upgrade, choose **Exit app** from the PeerSync tray menu;
+closing the dashboard window alone leaves its tray process running. The
+service continues independently until Setup stops it. Current Setup asks
+Windows Restart Manager to force-close an app still using files it must
+replace, including for silent upgrades, and does not automatically reopen
+the dashboard afterward. Check the exit code and service state before
+reopening the app. An earlier physical silent upgrade failed to replace the
+open dashboard executable; the [installer repair record](verification/P3-open-dashboard-upgrade-repair-2026-10-24.md)
+retains that failure and the pending field verification of the new setting.
 
 The default service account is `NT SERVICE\PeerSync`. The installer switch
 `/SERVICEACCOUNT=LocalSystem` is a fallback when a folder's ACL cannot be

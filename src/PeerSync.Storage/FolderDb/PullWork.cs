@@ -61,16 +61,58 @@ public sealed partial class FolderIndex
     public IReadOnlyList<NeededRow> ReadDuePullWork(byte[] rootId, long nowTicks, TransferPriority priority = TransferPriority.Default, int limit = 1000)
         => ReadDuePullWorkCore(rootId, nowTicks, priority, limit, null);
 
-    /// <summary>Filter incomplete cached deletion stages before applying the batch limit.
-    /// The actual applier must still recheck range and signed work under its gates.</summary>
+    /// <summary>Filter incomplete deletions and live work without installed
+    /// parents before applying the batch limit. The applier still rechecks
+    /// range and signed work under its gates.</summary>
     public IReadOnlyList<NeededRow> ReadScheduledPullWork(byte[] rootId, byte[] localDevice, long nowTicks,
         TransferPriority priority = TransferPriority.Default, int limit = 1000)
     {
-        FolderMaps.RequireBytes(localDevice, 32); return ReadDuePullWorkCore(rootId, nowTicks, priority, limit, localDevice.ToArray());
+        FolderMaps.RequireBytes(localDevice, 32); byte[] own = localDevice.ToArray();
+        byte[] root = FreezeSweep(rootId, nowTicks, 1, limit);
+        if (!Enum.IsDefined(priority)) throw new ArgumentOutOfRangeException(nameof(priority));
+        using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true);
+        RequireBlockReferenceRoot(connection, transaction, root);
+        var rows = new List<NeededRow>(limit);
+        for (int stage = 0; stage < 4 && rows.Count < limit; stage++)
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT n.path_key,n.source_device,n.priority,n.work_stage,n.work_size,n.work_mtime,n.work_hash FROM needed n "
+                + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root "
+                + "WHERE n.work_stage=$stage AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) "
+                + PullRangeFilter + PullParentFilter + "ORDER BY " + StageOrder(stage, priority) + " LIMIT $limit;";
+            command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$own", own);
+            command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$stage", stage);
+            command.Parameters.AddWithValue("$limit", limit - rows.Count);
+            using var reader = command.ExecuteReader(); while (reader.Read()) rows.Add(FolderMaps.ReadNeeded(reader));
+        }
+        return rows.AsReadOnly();
     }
+
+    private static string StageOrder(int stage, TransferPriority priority) => stage switch
+    {
+        0 => "length(n.path_key)-length(replace(n.path_key,'/','')),n.priority DESC,n.path_key",
+        1 => priority switch
+        {
+            TransferPriority.SmallerFirst => "n.priority DESC,n.work_size,n.path_key",
+            TransferPriority.LargerFirst => "n.priority DESC,n.work_size DESC,n.path_key",
+            TransferPriority.OlderFirst => "n.priority DESC,n.work_mtime,n.path_key",
+            TransferPriority.NewerFirst => "n.priority DESC,n.work_mtime DESC,n.path_key",
+            _ => "n.priority DESC,n.path_key",
+        },
+        2 => "n.priority DESC,n.path_key",
+        _ => "length(n.path_key)-length(replace(n.path_key,'/','')) DESC,n.priority DESC,n.path_key",
+    };
 
     private const string PullRangeFilter = " AND ($own IS NULL OR n.work_stage<2 OR n.source_device=$own OR EXISTS("
         + "SELECT 1 FROM remote_index_ranges q JOIN devices d ON d.device_id=q.device_id WHERE q.device_id=n.source_device AND d.last_seq_received>=q.target_sequence)) ";
+
+    // Signed file records can precede their parent directory records in a
+    // large index. Do not repeatedly attempt native work whose direct parent
+    // has not been installed. Parent installation updates local_files and
+    // makes the child eligible on the next scheduling pass.
+    private const string PullParentFilter = " AND ($own IS NULL OR n.work_stage NOT IN (0,1) OR instr(n.path_key,'/')=0 OR EXISTS("
+        + "SELECT 1 FROM local_files p WHERE p.path_key=rtrim(rtrim(n.path_key,replace(n.path_key,'/','')),'/') "
+        + "AND p.type=1 AND p.deleted=0 AND p.flags=0 AND p.ntfs_file_id IS NOT NULL)) ";
 
     private System.Collections.ObjectModel.ReadOnlyCollection<NeededRow> ReadDuePullWorkCore(byte[] rootId, long nowTicks, TransferPriority priority, int limit, byte[]? own)
     {
@@ -79,7 +121,7 @@ public sealed partial class FolderIndex
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT n.path_key,n.source_device,n.priority,n.work_stage,n.work_size,n.work_mtime,n.work_hash FROM needed n "
             + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root "
-            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) " + PullRangeFilter
+            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) " + PullRangeFilter + PullParentFilter
             + "ORDER BY n.work_stage,CASE WHEN n.work_stage=0 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END,"
             + "CASE WHEN n.work_stage=3 THEN length(n.path_key)-length(replace(n.path_key,'/','')) END DESC,n.priority DESC,"
             + "CASE WHEN n.work_stage=1 AND $priority=1 THEN n.work_size END,CASE WHEN n.work_stage=1 AND $priority=2 THEN n.work_size END DESC,"
@@ -94,9 +136,17 @@ public sealed partial class FolderIndex
         byte[] root = FreezeSweep(rootId, nowTicks, 1, 1000); FolderMaps.RequireBytes(localDevice, 32);
         using var connection = database.OpenReader(); using var transaction = connection.BeginTransaction(deferred: true); RequireBlockReferenceRoot(connection, transaction, root);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT MIN(CASE WHEN r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now THEN $now ELSE r.next_ticks END) FROM needed n "
-            + "LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root WHERE n.work_stage IS NOT NULL " + PullRangeFilter;
+        // Due work only needs an existence check. If none is due, future
+        // deadlines live in the much smaller retry table, avoiding a second
+        // aggregate over every cached file on each million-file pass.
+        command.CommandText = "SELECT 1 FROM needed n LEFT JOIN pull_retries r ON r.path_key=n.path_key AND r.work_hash=n.work_hash AND r.root_id=$root "
+            + "WHERE n.work_stage IS NOT NULL AND (r.path_key IS NULL OR r.failed_ticks>$now OR r.next_ticks<=$now) "
+            + PullRangeFilter + PullParentFilter + "LIMIT 1;";
         command.Parameters.AddWithValue("$root", root); command.Parameters.AddWithValue("$now", nowTicks); command.Parameters.AddWithValue("$own", localDevice);
+        if (command.ExecuteScalar() is long) return nowTicks;
+        command.CommandText = "SELECT MIN(r.next_ticks) FROM pull_retries r JOIN needed n ON n.path_key=r.path_key AND n.work_hash=r.work_hash "
+            + "WHERE r.root_id=$root AND n.work_stage IS NOT NULL AND r.failed_ticks<=$now AND r.next_ticks>$now "
+            + PullRangeFilter + PullParentFilter;
         return command.ExecuteScalar() is long ticks ? ticks : null;
     }
 
@@ -136,6 +186,44 @@ public sealed partial class FolderIndex
             using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "DELETE FROM pull_retries WHERE path_key=$path AND work_hash=$hash;";
             command.Parameters.AddWithValue("$path", key); command.Parameters.AddWithValue("$hash", hash); return command.ExecuteNonQuery() == 1;
         }, cancellationToken);
+    }
+
+    // A newly authenticated parent graph can make a previously blocked direct
+    // child eligible. Wake only the exact signed work still represented by a
+    // live needed row; the normal applier revalidates every safety condition.
+    // Keep attempts intact so an unrelated persistent failure still backs off.
+    private static void WakeGraphMemberPullRetries(SqliteConnection connection, SqliteTransaction transaction,
+        byte[] rootId, byte[] graphId, string parentKey, string? cursor)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "UPDATE pull_retries SET next_ticks=failed_ticks WHERE root_id=$root AND next_ticks>failed_ticks "
+            + "AND EXISTS(SELECT 1 FROM needed n JOIN directory_graph_members m ON m.graph_id=$graph AND m.path_key=n.path_key "
+            + "WHERE n.path_key=pull_retries.path_key AND n.work_hash=pull_retries.work_hash AND n.work_stage IN (0,1) "
+            + "AND rtrim(rtrim(n.path_key,replace(n.path_key,'/','')),'/')=$parent "
+            + "AND ($cursor IS NULL OR m.path_key>$cursor));";
+        command.Parameters.AddWithValue("$root", rootId); command.Parameters.AddWithValue("$graph", graphId);
+        command.Parameters.AddWithValue("$parent", parentKey); command.Parameters.AddWithValue("$cursor", (object?)cursor ?? DBNull.Value);
+        command.ExecuteNonQuery();
+    }
+
+    // Releasing a directory publication can unblock its path, descendants or
+    // an ancestor directory. Only wake retries for the same signed work; the
+    // applier still rechecks every publication and native guard.
+    private static void WakePublicationBlockedPullRetries(SqliteConnection connection, SqliteTransaction transaction,
+        byte[] rootId, string pathKey)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "WITH RECURSIVE ancestors(key) AS (VALUES($path) "
+            + "UNION ALL SELECT rtrim(rtrim(key,replace(key,'/','')),'/') FROM ancestors WHERE instr(key,'/')>0) "
+            + "UPDATE pull_retries SET next_ticks=failed_ticks WHERE root_id=$root AND next_ticks>failed_ticks "
+            + "AND (path_key IN (SELECT key FROM ancestors) OR (path_key >= $low AND path_key < $high)) "
+            + "AND EXISTS(SELECT 1 FROM needed n WHERE n.path_key=pull_retries.path_key "
+            + "AND n.work_hash=pull_retries.work_hash AND n.work_stage IS NOT NULL);";
+        command.Parameters.AddWithValue("$root", rootId);
+        command.Parameters.AddWithValue("$path", pathKey);
+        command.Parameters.AddWithValue("$low", pathKey + '/');
+        command.Parameters.AddWithValue("$high", pathKey + '0');
+        command.ExecuteNonQuery();
     }
 
     private static PullRetry ReadRetry(SqliteDataReader reader) => new(reader.GetString(0), reader.GetFieldValue<byte[]>(1), reader.GetFieldValue<byte[]>(2), reader.GetInt32(3), reader.GetInt64(4), reader.GetInt64(5));

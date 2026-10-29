@@ -27,7 +27,8 @@ public static class DiagnosticsCommand
         {
             DiagnosticBundleResult result = DiagnosticBundleCollector.Collect(logs, destination, includeAddresses);
             Console.WriteLine($"Collected {result.EventsIncluded} recent events from {result.FilesIncluded} log files; "
-                + $"expired={result.ExpiredEvents}, invalid={result.InvalidEvents}, bytes={result.BytesIncluded}.");
+                + $"omitted={result.EventsOmitted}, expired={result.ExpiredEvents}, "
+                + $"invalid={result.InvalidEvents}, bytes={result.BytesIncluded}.");
             Console.WriteLine($"BUNDLE {result.Destination}");
             return 0;
         }

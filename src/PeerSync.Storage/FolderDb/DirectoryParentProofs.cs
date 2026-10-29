@@ -30,6 +30,40 @@ public sealed partial class FolderIndex
     public DirectoryParentProof? ReadDirectoryParentProof(string path)
     { using var connection = database.OpenReader(); return FindParentProof(connection, null, PathRules.Key(path)); }
 
+    /// <summary>An authenticated parent-root or reconstruction rebase graph has
+    /// a still-unproven direct child at this path. A scheduled live receipt for
+    /// that exact child may advance its proof; unrelated paths retain any
+    /// ordinary ancestor publication barrier.</summary>
+    public bool HasUnprovenDirectoryParentMember(string path)
+    {
+        string key = PathRules.Key(path), parent = CaptureParent(key);
+        if (parent.Length == 0) return false;
+        using var connection = database.OpenReader();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM directory_publications q "
+            + "JOIN directory_parent_proofs p ON p.path_key=q.path_key AND p.queue_version=q.version "
+            + "AND p.root_id=q.root_id AND p.native_id=q.native_id AND p.local_seq=q.expected_local_seq "
+            + "JOIN directory_parent_roots r ON r.path_key=p.path_key AND r.seen_generation=p.generation "
+            + "JOIN directory_graphs g ON g.id=r.source_id AND g.complete=1 AND g.retiring=0 "
+            + "AND g.root_id=q.root_id AND g.directory_path=r.source_path AND g.node_hash=r.node_hash AND g.node_length=r.node_length "
+            + "JOIN directory_graph_members m ON m.graph_id=r.source_id AND m.path_key=$key "
+            + "WHERE q.path_key=$parent AND q.paused=0 "
+            + "AND p.discovery_complete=1 AND p.resetting=0 AND p.remote_revision=p.discovery_revision "
+            + "AND r.complete=0 AND (r.cursor IS NULL OR m.path_key>r.cursor)) "
+            + "OR EXISTS(SELECT 1 FROM directory_publications q "
+            + "JOIN directory_rebases b ON b.path_key=q.path_key "
+            + "JOIN directory_captures c ON c.parent_key=q.path_key AND c.root_id=q.root_id AND c.native_id=q.native_id "
+            + "AND c.input_hash=b.input_hash AND c.input_epoch=b.input_epoch AND c.input_epoch=q.keys_epoch AND c.node_hash IS NOT NULL "
+            + "JOIN directory_graphs g ON g.id=b.graph_id AND g.complete=1 AND g.retiring=0 "
+            + "AND g.root_id=q.root_id AND g.directory_path=q.path "
+            + "JOIN directory_graph_members m ON m.graph_id=b.graph_id AND m.path_key=$key "
+            + "WHERE q.path_key=$parent AND q.reconstruction_only=1 AND q.paused=0 "
+            + "AND b.complete=0 AND (b.cursor IS NULL OR m.path_key>b.cursor));";
+        command.Parameters.AddWithValue("$parent", parent);
+        command.Parameters.AddWithValue("$key", key);
+        return (long)command.ExecuteScalar()! != 0;
+    }
+
     /// <summary>Rebind only after the caller has revalidated the exact indexed input. Direct-child changes invalidate prior causal work.</summary>
     public Task<DirectoryParentPreparation> BeginDirectoryParentProofAsync(DirectoryPublication queued, DirectoryCaptureState draft,
         DirectoryMetadataSource original, byte[] metadataHash, long nowTicks, int maximumResetWork = 1000, CancellationToken cancellationToken = default)

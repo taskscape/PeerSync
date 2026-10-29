@@ -94,6 +94,14 @@ internal sealed class RelayRegistry : IDisposable
             RelayLeg partner = await leg.Partner.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
             return new RelayJoin(ticket, leg, partner);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            bool ended = ticket.Idle.IsCancellationRequested;
+            Leave(ticket);
+            throw new RpcException(new Status(ended ? StatusCode.Aborted : StatusCode.DeadlineExceeded,
+                ended ? "Relay offer ended before both participants joined."
+                    : "Second relay participant did not join in time."));
+        }
         catch
         {
             Leave(ticket);
@@ -105,30 +113,63 @@ internal sealed class RelayRegistry : IDisposable
     {
         if (bytes is < 1 or > 64 * 1024)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Relay chunk exceeds the 64 KiB limit."));
-        TokenBucketRateLimiter limiter;
+        TokenBucketRateLimiter firstLimiter;
+        TokenBucketRateLimiter? secondLimiter;
         lock (gate)
         {
             if (!tickets.TryGetValue(join.Ticket.TokenHex, out Ticket? current)
                 || !ReferenceEquals(current, join.Ticket))
                 throw new RpcException(new Status(StatusCode.Aborted, "Relay session ended."));
-            if (!deviceLimiters.TryGetValue(join.Leg.DeviceKey, out DeviceLimiter? state))
-            {
-                state = new DeviceLimiter(CreateLimiter(options.RelayPerDeviceBytesPerSecond), time.GetUtcNow());
-                deviceLimiters.Add(join.Leg.DeviceKey, state);
-            }
-            state.LastUsedUtc = time.GetUtcNow();
-            limiter = state.Limiter;
+            // Charge both endpoints for forwarded bytes. A device's cap applies
+            // to its combined relay ingress and egress, including other sessions.
+            // Acquire in one stable order to avoid opposing streams each holding
+            // a token from one device while waiting on the other's bucket.
+            bool senderFirst = string.CompareOrdinal(join.Leg.DeviceKey, join.Partner.DeviceKey) <= 0;
+            string firstKey = senderFirst ? join.Leg.DeviceKey : join.Partner.DeviceKey;
+            string secondKey = senderFirst ? join.Partner.DeviceKey : join.Leg.DeviceKey;
+            firstLimiter = GetDeviceLimiterLocked(firstKey);
+            secondLimiter = firstKey == secondKey ? null : GetDeviceLimiterLocked(secondKey);
         }
-        using RateLimitLease deviceLease = await limiter.AcquireAsync(bytes, cancellationToken).ConfigureAwait(false);
-        if (!deviceLease.IsAcquired)
-            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Device relay quota exceeded."));
-        using RateLimitLease totalLease = await totalLimiter.AcquireAsync(bytes, cancellationToken).ConfigureAwait(false);
-        if (!totalLease.IsAcquired)
-            throw new RpcException(new Status(StatusCode.ResourceExhausted, "Server relay quota exceeded."));
-        join.Ticket.Touch(IdleTimeout);
+        // A low configured rate may be smaller than one 64 KiB wire chunk.
+        // Acquire both budgets in slices rather than granting a full chunk's
+        // worth of initial tokens or exceeding TokenLimit in AcquireAsync.
+        int sliceLimit = Math.Min(options.RelayPerDeviceBytesPerSecond,
+            options.RelayTotalBytesPerSecond);
+        for (int remaining = bytes; remaining > 0;)
+        {
+            int slice = Math.Min(remaining, sliceLimit);
+            using RateLimitLease firstLease = await firstLimiter.AcquireAsync(slice, cancellationToken)
+                .ConfigureAwait(false);
+            if (!firstLease.IsAcquired)
+                throw new RpcException(new Status(StatusCode.ResourceExhausted, "Device relay quota exceeded."));
+            using RateLimitLease? secondLease = secondLimiter is null ? null
+                : await secondLimiter.AcquireAsync(slice, cancellationToken).ConfigureAwait(false);
+            if (secondLease is { IsAcquired: false })
+                throw new RpcException(new Status(StatusCode.ResourceExhausted, "Device relay quota exceeded."));
+            using RateLimitLease totalLease = await totalLimiter.AcquireAsync(slice, cancellationToken)
+                .ConfigureAwait(false);
+            if (!totalLease.IsAcquired)
+                throw new RpcException(new Status(StatusCode.ResourceExhausted, "Server relay quota exceeded."));
+            remaining -= slice;
+            // A legitimately slow configured rate can take longer than the
+            // idle window to admit one wire chunk. Progress on the rate budget
+            // is active work even before the chunk reaches the other peer.
+            join.Ticket.Touch(IdleTimeout);
+        }
     }
 
     internal void Leave(RelayJoin join) => Leave(join.Ticket);
+
+    private TokenBucketRateLimiter GetDeviceLimiterLocked(string deviceKey)
+    {
+        if (!deviceLimiters.TryGetValue(deviceKey, out DeviceLimiter? state))
+        {
+            state = new DeviceLimiter(CreateLimiter(options.RelayPerDeviceBytesPerSecond), time.GetUtcNow());
+            deviceLimiters.Add(deviceKey, state);
+        }
+        state.LastUsedUtc = time.GetUtcNow();
+        return state.Limiter;
+    }
 
     private void Leave(Ticket ticket)
     {
@@ -178,7 +219,7 @@ internal sealed class RelayRegistry : IDisposable
 
     private static TokenBucketRateLimiter CreateLimiter(int bytesPerSecond) => new(new TokenBucketRateLimiterOptions
     {
-        TokenLimit = Math.Max(bytesPerSecond, 64 * 1024),
+        TokenLimit = bytesPerSecond,
         TokensPerPeriod = bytesPerSecond,
         ReplenishmentPeriod = TimeSpan.FromSeconds(1),
         AutoReplenishment = true,

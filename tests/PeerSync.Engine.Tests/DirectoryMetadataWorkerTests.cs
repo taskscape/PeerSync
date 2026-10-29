@@ -54,6 +54,47 @@ public sealed partial class DirectorySnapshotCaptureTests
     }
 
     [Fact]
+    public async Task MetadataPassYieldsLargeGraphToOtherPullerWorkWithoutFailureBackoff()
+    {
+        WriteFiles(Enumerable.Range(0, 48).Select(number => $"item-{number:D3}").ToArray());
+        await using var producer = await FolderIndex.OpenAsync(Database, Token);
+        var original = await PrepareProjection(producer, buildGraph: false);
+        var source = DirectoryMetadataSources.FromVersion(VersionView.Open(original, keys, device))!;
+        await using var receiver = await OpenMetadataReceiver(keys);
+        await receiver.AdmitDirectoryMetadataSourcesAsync(receiver.Meta.Find("_root-identity")!.Value!,
+            [source], DateTime.UtcNow.Ticks, Token);
+        using var published = new PublishedBlocks(Root, producer);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "metadata-yield-logs"), "metadata-fetch", debugEnabled: true);
+        var worker = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice,
+            TimeProvider.System, async (_, hash, length, token) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50), token);
+                return published.TryRead(hash.Span, length, token)
+                    ?? throw new IOException("Expected metadata block is unavailable.");
+            }, journal) { PassDeadline = TimeSpan.FromSeconds(1) };
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var first = await worker.RunAsync(token: Token);
+        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(3));
+        first.Visited.ShouldBe(1);
+        first.Completed.ShouldBe(0);
+        first.Deferred.ShouldBe(0);
+        var pending = receiver.ReadDirectoryMetadataSource(source.SourceId)!;
+        pending.Attempts.ShouldBe(0);
+        pending.NextTicks.ShouldBeNull();
+        receiver.ReadDirectoryGraph(source.SourceId)!.Complete.ShouldBeFalse();
+        string log = File.ReadAllText(Path.Combine(fixture, "metadata-yield-logs", "debug.jsonl"));
+        log.ShouldContain("directory.graph_yielded");
+        log.ShouldNotContain("directory.graph_failed");
+        log.ShouldContain("directory.metadata_progress");
+
+        for (int pass = 0; pass < 10 && receiver.ReadDirectoryMetadataSource(source.SourceId) is not null; pass++)
+            (await worker.RunAsync(token: Token)).Deferred.ShouldBe(0);
+        receiver.ReadDirectoryMetadataSource(source.SourceId).ShouldBeNull();
+        receiver.ReadDirectoryGraph(source.SourceId)!.Complete.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task MetadataRouteCandidatesStayWithinOnePageForTheEntireSourceAttempt()
     {
         WriteFiles("a", "b"); await using var producer = await FolderIndex.OpenAsync(Database, Token);

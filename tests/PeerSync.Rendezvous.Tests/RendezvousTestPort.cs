@@ -12,16 +12,16 @@ internal static class RendezvousTestPort
     {
         lock (Gate)
         {
-            for (int attempt = 0; attempt < 32; attempt++)
+            for (int attempt = 0; attempt < 128; attempt++)
             {
-                var tcp = new TcpListener(IPAddress.Loopback, 0);
-                tcp.Start();
+                // Windows can exclude much of its ephemeral range for UDP.
+                // Probe both protocols in the configured peer-listener range.
+                int port = Random.Shared.Next(20000, 45001);
+                if (Reserved.Contains(port)) continue;
+                var tcp = new TcpListener(IPAddress.Loopback, port);
                 try
                 {
-                    int port = ((IPEndPoint)tcp.LocalEndpoint).Port;
-                    if (Reserved.Contains(port)) continue;
-                    // Kestrel binds both TCP and QUIC UDP on this port. A free
-                    // TCP port alone can still collide with another UDP user.
+                    tcp.Start();
                     using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, port));
                     Reserved.Add(port);
                     return port;

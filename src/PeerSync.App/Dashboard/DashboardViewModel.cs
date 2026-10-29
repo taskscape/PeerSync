@@ -8,6 +8,7 @@ namespace PeerSync.App.Dashboard;
 
 internal sealed partial class DashboardViewModel : ObservableObject
 {
+    private static readonly TimeSpan ErrorNotificationInterval = TimeSpan.FromMinutes(30);
     [ObservableProperty] private string banner = "Connecting to PeerSync service…";
     [ObservableProperty] private string activity = "Waiting for the service.";
     [ObservableProperty] private string folderActivity = "Select a folder to see its activity.";
@@ -15,18 +16,25 @@ internal sealed partial class DashboardViewModel : ObservableObject
     [ObservableProperty] private bool needsAuthorization;
     [ObservableProperty] private string selectedFolderId = "";
     [ObservableProperty] private string transferRates = "Transfer rates unavailable";
+    [ObservableProperty] private string archiveStatus = "Select a folder to list archived versions.";
 
     public ObservableCollection<FolderItem> Folders { get; } = [];
     public ObservableCollection<PeerItem> Peers { get; } = [];
     public ObservableCollection<OverwriteItem> Overwrites { get; } = [];
+    public ObservableCollection<ArchiveItem> ArchiveVersions { get; } = [];
     public ObservableCollection<PendingDeviceItem> PendingDevices { get; } = [];
     private readonly HashSet<string> seenOverwrites = new(StringComparer.Ordinal);
     private readonly HashSet<string> seenPending = new(StringComparer.Ordinal);
     private readonly HashSet<string> seenErrors = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Code, string Source), DateTimeOffset> lastErrorNotice = [];
+    private readonly TimeProvider time;
     private readonly Dictionary<string, (ulong Uploaded, ulong Downloaded)> progressByFolder =
         new(StringComparer.Ordinal);
     private bool hasSnapshot;
     public event Action<string>? Notification;
+
+    public DashboardViewModel() : this(TimeProvider.System) { }
+    internal DashboardViewModel(TimeProvider time) => this.time = time;
 
     internal void Connecting() { Banner = "Connecting to PeerSync service…"; ServiceAvailable = false; NeedsAuthorization = false; }
     internal void Disconnected(bool unauthorized)
@@ -37,7 +45,8 @@ internal sealed partial class DashboardViewModel : ObservableObject
             : "Service not running — retrying automatically…";
         Activity = "No current service snapshot.";
         FolderActivity = "Select a folder to see its activity.";
-        Folders.Clear(); Peers.Clear(); Overwrites.Clear(); PendingDevices.Clear();
+        Folders.Clear(); Peers.Clear(); Overwrites.Clear(); ArchiveVersions.Clear(); PendingDevices.Clear();
+        ArchiveStatus = "Select a folder to list archived versions.";
         hasSnapshot = false; seenOverwrites.Clear(); seenPending.Clear(); seenErrors.Clear();
         progressByFolder.Clear();
         TransferRates = "Transfer rates unavailable";
@@ -91,15 +100,48 @@ internal sealed partial class DashboardViewModel : ObservableObject
         {
             string key = error.Code + ':' + error.Source + ':' + error.OccurredUtcTicks;
             currentErrors.Add(key);
-            if (hasSnapshot && seenErrors.Add(key)) Notification?.Invoke($"PeerSync error: {error.Code}");
-            else seenErrors.Add(key);
+            bool newEvent = seenErrors.Add(key);
+            if (hasSnapshot && newEvent && ShouldNotifyError(error.Code, error.Source))
+                Notification?.Invoke($"PeerSync error: {error.Code}");
         }
         seenErrors.IntersectWith(currentErrors);
         UpdateFolderActivity();
         hasSnapshot = true;
     }
 
-    partial void OnSelectedFolderIdChanged(string value) => UpdateFolderActivity();
+    private bool ShouldNotifyError(string code, string source)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        var kind = (code, source);
+        if (lastErrorNotice.TryGetValue(kind, out DateTimeOffset previous)
+            && now - previous < ErrorNotificationInterval) return false;
+        foreach (var expired in lastErrorNotice.Where(item => now - item.Value >= ErrorNotificationInterval)
+            .Select(item => item.Key).ToArray()) lastErrorNotice.Remove(expired);
+        if (lastErrorNotice.Count >= 128)
+            lastErrorNotice.Remove(lastErrorNotice.MinBy(item => item.Value).Key);
+        lastErrorNotice[kind] = now;
+        return true;
+    }
+
+    partial void OnSelectedFolderIdChanged(string value)
+    {
+        ArchiveVersions.Clear();
+        ArchiveStatus = value.Length == 0 ? "Select a folder to list archived versions."
+            : "Open Archive or choose Refresh to load versions.";
+        UpdateFolderActivity();
+    }
+
+    internal void ApplyArchive(ListArchiveResponse response)
+    {
+        if (response.FolderId != SelectedFolderId) return;
+        ReplaceIfChanged(ArchiveVersions, response.Versions.Select(item => new ArchiveItem(
+            item.FolderId, item.Id, item.OriginalPath,
+            new DateTime(item.ArchivedUtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("g", CultureInfo.CurrentCulture),
+            item.Size, item.Overwritten)).ToArray());
+        ArchiveStatus = response.Truncated
+            ? $"Showing the newest {ArchiveVersions.Count} versions; more versions exist."
+            : $"{ArchiveVersions.Count} archived versions.";
+    }
 
     private void UpdateFolderActivity()
     {
@@ -146,6 +188,13 @@ internal sealed record PeerItem(string FolderId, string DeviceId, string Name, s
     };
 }
 internal sealed record OverwriteItem(string FolderId, long ArchiveId, string Path, string ArchivedLocal);
+internal sealed record ArchiveItem(string FolderId, long ArchiveId, string Path,
+    string ArchivedLocal, long Size, bool Overwritten)
+{
+    public string SizeDisplay => Size < 1024 ? $"{Size} B"
+        : Size < 1024 * 1024 ? $"{Size / 1024d:0.0} KiB"
+        : $"{Size / 1024d / 1024d:0.0} MiB";
+}
 internal sealed record PendingDeviceItem(string FolderId, string DeviceId, string Name, string RequestedLocal)
 {
     public string Fingerprint => DeviceId.Length > 16 ? DeviceId[..16] : DeviceId;

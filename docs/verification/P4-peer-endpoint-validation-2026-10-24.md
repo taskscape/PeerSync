@@ -1,0 +1,7 @@
+# P4 peer endpoint validation — 2026-10-24
+
+The rendezvous presence registry previously accepted syntactically valid multicast and limited-broadcast IPv4 endpoints from an authenticated peer. The service then attempted to dial those addresses when it received a peer list. A certificate-bearing peer could cause other peers to spend connection attempts on targets that cannot be valid one-to-one sync endpoints.
+
+The registry now validates each advertised endpoint before publishing it. The installed service applies the same unicast check to local announcements, mapper endpoints and incoming peer lists. IPv4-mapped IPv6 addresses are normalized to IPv4, so the same address cannot bypass the IPv4 range check. Valid private, public and Tailscale-range unicast addresses remain accepted. Subnet-directed IPv4 broadcast cannot be identified from an address without the relevant subnet mask, so this check does not claim to exclude every directed-broadcast address.
+
+Release `PeerSync.Rendezvous.Tests` and `PeerSync.Service.Tests` passed locally after the change. The regression cases cover multicast, limited broadcast, unspecified, loopback, IPv4 0/8, IPv6 multicast/link-local and mapped IPv4, plus canonical publication of a valid mapped address. This is source-level validation only. The third PC's reported `SocketException` needs its own diagnostic bundle for attribution; the notification text alone does not establish that this endpoint gap caused it. Deployed server/client upgrade and Gate P4 physical network checks remain open.

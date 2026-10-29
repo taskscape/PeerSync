@@ -31,7 +31,7 @@ public sealed class DiagnosticRunJournal : IDisposable
             DirectoryPath = Path.Combine(root.Path, name);
             using (var marker = DiagnosticDirectory.Open(active, ".run", false, 0x00100183, 0, 2))
             using (var output = new FileStream(marker, FileAccess.ReadWrite)) { output.Write(Marker); output.Flush(flushToDisk: true); }
-            Journal = new(DirectoryPath, component, debugEnabled);
+            Journal = new(DirectoryPath, component, debugEnabled, timeProvider: clock);
             SweepAndReport(); timer = clock.CreateTimer(_ => SweepAndReport(), null, TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
         }
         catch { active?.Dispose(); root.Dispose(); throw; }

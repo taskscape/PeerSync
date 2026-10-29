@@ -58,6 +58,17 @@ internal sealed class ScheduledApplySelection : IDisposable
         LocalFileRow? known, NeededDecision decision, bool scheduled)
     {
         if (!index.HasBlockingDirectoryPublication(key, includeDescendants: true)) return false;
+        // An ordinary or reconstruction parent-root proof may be waiting for
+        // this exact direct child. A scheduled authenticated live receipt
+        // changes the capture epoch before an ordinary ancestor can publish,
+        // breaking that dependency cycle without releasing the barrier for
+        // unrelated work or an unpublished target/descendant.
+        if (scheduled && decision.BlockedReason is null && decision.RequiresApply
+            && decision.Winner is { Deleted: false } live
+            && !live.SourceDevice.SequenceEqual(ownDevice)
+            && (known is null || known is { Flags: LocalFileState.None, Record: not null })
+            && !index.HasBlockingDirectoryPublicationAtOrBelow(key)
+            && index.HasUnprovenDirectoryParentMember(key)) return false;
         // Only a fully scheduled, causally newer remote tombstone can pass an
         // unpublished ancestor. Its mutation changes the capture epoch, so the
         // ancestor cannot commit a stale child snapshot. Its own and descendant

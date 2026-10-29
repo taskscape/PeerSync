@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
+using System.Security.Authentication;
 using System.Threading.Channels;
 using Google.Protobuf;
 using PeerSync.Core.Ignore;
+using PeerSync.Core.Settings;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
@@ -19,6 +21,39 @@ public sealed class TransportFolderTests : IDisposable
     private readonly string fixture = Path.Combine(Path.GetTempPath(), "PeerSync-TransportFolder-" + Guid.NewGuid().ToString("N"));
     private readonly FolderKeys keys = FolderKeys.CreateNew();
     private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task InstalledFolderIgnorePolicyExcludesRemoteFilesButTransfersOtherPaths()
+    {
+        await using var source = await NodeAsync(81);
+        string retired = Path.Combine(source.Root, "retired");
+        Directory.CreateDirectory(retired);
+        File.WriteAllText(Path.Combine(retired, "old.txt"), "retired content");
+        File.WriteAllText(Path.Combine(source.Root, "current.txt"), "current content");
+        await Scan(source);
+
+        string receiverRoot = Path.Combine(fixture, "82", "tree");
+        Directory.CreateDirectory(receiverRoot);
+        await using var receiverIndex = await FolderIndex.OpenAsync(Path.Combine(fixture, "82", "index.db"), Token);
+        byte[] receiverId = new byte[32];
+        BinaryPrimitives.WriteUInt64LittleEndian(receiverId, 82);
+        await using var receiver = new TransportFolder(receiverRoot, receiverIndex, keys, receiverId,
+            new FolderSettings { IgnoreRules = "/retired/" });
+        await receiver.RunPassAsync(Token);
+
+        var network = new InMemoryNetwork();
+        var endpoint = network.Register(receiverId, receiver.CreateHandler);
+        network.Register(source.Id, source.Engine.CreateHandler);
+        await using var peer = await receiver.ConnectAsync(endpoint.Connect(source.Id), Token);
+        (await peer.SynchronizeAsync(cancellationToken: Token)).Complete.ShouldBeTrue();
+        var applied = await receiver.RunPassAsync(Token);
+
+        applied.Failed.ShouldBe(0);
+        File.ReadAllText(Path.Combine(receiverRoot, "current.txt")).ShouldBe("current content");
+        Directory.Exists(Path.Combine(receiverRoot, "retired")).ShouldBeFalse();
+        receiverIndex.RemotesForPath("retired/old.txt").Any().ShouldBeTrue();
+        receiverIndex.Needed.Find("retired/old.txt").ShouldBeNull();
+    }
 
     [Fact]
     public async Task RealSignedIndexAndVerifiedChunksTransferThroughInterfaceAndForwardToThirdNode()
@@ -89,13 +124,127 @@ public sealed class TransportFolderTests : IDisposable
     }
 
     [Fact]
+    public async Task FreshPeerStopsProbingAnotherUnseededPeerForEverySmallFile()
+    {
+        await using var receiver = await NodeAsync(71); await using var source = await NodeAsync(72);
+        await using var unseeded = await NodeAsync(73);
+        for (int i = 0; i < 32; i++)
+            File.WriteAllBytes(Path.Combine(source.Root, $"small-{i:D2}.bin"), BitConverter.GetBytes(i));
+        await Scan(source);
+
+        int missingRequests = 0;
+        var network = new InMemoryNetwork(); var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        network.Register(source.Id, source.Engine.CreateHandler);
+        network.Register(unseeded.Id, id => new ControlledHandler(unseeded.Engine.CreateHandler(id))
+        {
+            Block = (_, _, _) =>
+            {
+                Interlocked.Increment(ref missingRequests);
+                return ValueTask.FromException<ReadOnlyMemory<byte>>(
+                    new PeerBlockException(PeerSync.Protocol.Wire.BlockError.NotFound));
+            }
+        });
+        await using var fromSource = await receiver.Engine.ConnectAsync(endpoint.Connect(source.Id), Token);
+        await using var fromUnseeded = await receiver.Engine.ConnectAsync(endpoint.Connect(unseeded.Id), Token);
+        await fromSource.SynchronizeAsync(cancellationToken: Token);
+        PullPassResult result = await receiver.Engine.RunPassAsync(Token);
+
+        result.Failed.ShouldBe(0);
+        for (int i = 0; i < 32; i++)
+            File.ReadAllBytes(Path.Combine(receiver.Root, $"small-{i:D2}.bin")).ShouldBe(BitConverter.GetBytes(i));
+        missingRequests.ShouldBeGreaterThan(0);
+        missingRequests.ShouldBeLessThan(4);
+    }
+
+    [Fact]
+    public async Task TransientPeerAuthenticationFailureDefersFileWithoutStoppingTheFolder()
+    {
+        var time = new NodeClock();
+        await using var receiver = await NodeAsync(77, time); await using var source = await NodeAsync(78, time);
+        byte[] contents = "authenticated retry"u8.ToArray();
+        File.WriteAllBytes(Path.Combine(source.Root, "retry.txt"), contents);
+        await Scan(source);
+
+        int requests = 0;
+        var network = new InMemoryNetwork(); var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        network.Register(source.Id, id =>
+        {
+            IPeerRequestHandler inner = source.Engine.CreateHandler(id);
+            return new ControlledHandler(inner)
+            {
+                Block = (hash, length, token) => Interlocked.Increment(ref requests) == 1
+                    ? ValueTask.FromException<ReadOnlyMemory<byte>>(new AuthenticationException("Transient TLS session failure."))
+                    : inner.ReadBlockAsync(hash, length, token)
+            };
+        });
+        await using var fromSource = await receiver.Engine.ConnectAsync(endpoint.Connect(source.Id), Token);
+        await fromSource.SynchronizeAsync(cancellationToken: Token);
+
+        PullPassResult first = await receiver.Engine.RunPassAsync(Token);
+        first.Failed.ShouldBe(1);
+        File.Exists(Path.Combine(receiver.Root, "retry.txt")).ShouldBeFalse();
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        PullPassResult second = await receiver.Engine.RunPassAsync(Token);
+        second.Failed.ShouldBe(0); second.Applied.ShouldBe(1);
+        File.ReadAllBytes(Path.Combine(receiver.Root, "retry.txt")).ShouldBe(contents);
+        requests.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task ReplicaIsUsedAgainWhenItBeginsServingAnAuthorsBlocks()
+    {
+        await using var receiver = await NodeAsync(74); await using var source = await NodeAsync(75);
+        await using var replica = await NodeAsync(76);
+        for (int i = 0; i < 128; i++)
+        {
+            byte[] data = BitConverter.GetBytes(i);
+            File.WriteAllBytes(Path.Combine(source.Root, $"shared-{i:D3}.bin"), data);
+            File.WriteAllBytes(Path.Combine(replica.Root, $"shared-{i:D3}.bin"), data);
+        }
+        await Scan(source); await Scan(replica);
+
+        int sourceRequests = 0, replicaRequests = 0;
+        var network = new InMemoryNetwork(); var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
+        network.Register(source.Id, id =>
+        {
+            IPeerRequestHandler inner = source.Engine.CreateHandler(id);
+            return new ControlledHandler(inner)
+            { Block = async (hash, length, token) =>
+                { Interlocked.Increment(ref sourceRequests); return await inner.ReadBlockAsync(hash, length, token); } };
+        });
+        network.Register(replica.Id, id =>
+        {
+            IPeerRequestHandler inner = replica.Engine.CreateHandler(id);
+            return new ControlledHandler(inner)
+            { Block = async (hash, length, token) =>
+                { Interlocked.Increment(ref replicaRequests); return await inner.ReadBlockAsync(hash, length, token); } };
+        });
+        await using var fromSource = await receiver.Engine.ConnectAsync(endpoint.Connect(source.Id), Token);
+        await using var fromReplica = await receiver.Engine.ConnectAsync(endpoint.Connect(replica.Id), Token);
+        await fromSource.SynchronizeAsync(cancellationToken: Token);
+        PullPassResult result = await receiver.Engine.RunPassAsync(Token);
+
+        result.Failed.ShouldBe(0);
+        for (int i = 0; i < 128; i++)
+            File.ReadAllBytes(Path.Combine(receiver.Root, $"shared-{i:D3}.bin")).ShouldBe(BitConverter.GetBytes(i));
+        sourceRequests.ShouldBeGreaterThan(10);
+        replicaRequests.ShouldBeGreaterThan(10);
+        (sourceRequests + replicaRequests).ShouldBeLessThan(160);
+    }
+
+    [Fact]
     public async Task FinalChunkEndgameUsesAnotherPeerAndCancelsTheSlowerDuplicate()
     {
         await using var receiver = await NodeAsync(11); await using var slow = await NodeAsync(12); await using var fast = await NodeAsync(13);
-        byte[] data = new byte[256 * 1024]; new Random(2104).NextBytes(data);
+        byte[] data = new byte[2 * 1024 * 1024 + 37]; new Random(2104).NextBytes(data);
         File.WriteAllBytes(Path.Combine(slow.Root, "endgame.bin"), data);
         File.WriteAllBytes(Path.Combine(fast.Root, "endgame.bin"), data);
         await Scan(slow); await Scan(fast);
+        var version = VersionView.Open(slow.Index.LocalFiles.Find("endgame.bin")!.Record!, keys, slow.Id);
+        var chunks = version.ExportBody().Chunks;
+        chunks.Count.ShouldBeGreaterThan(1);
+        byte[] finalHash = chunks[^1].Hash.ToByteArray();
         var slowStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var slowCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int fastRequests = 0;
@@ -108,10 +257,13 @@ public sealed class TransportFolderTests : IDisposable
             {
                 Block = async (hash, length, token) =>
                 {
-                    slowStarted.TrySetResult();
-                    try { await Task.Delay(TimeSpan.FromSeconds(20), token); }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested)
-                    { slowCanceled.TrySetResult(); throw; }
+                    if (hash.Span.SequenceEqual(finalHash))
+                    {
+                        slowStarted.TrySetResult();
+                        try { await Task.Delay(TimeSpan.FromSeconds(20), token); }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        { slowCanceled.TrySetResult(); throw; }
+                    }
                     return await inner.ReadBlockAsync(hash, length, token);
                 }
             };

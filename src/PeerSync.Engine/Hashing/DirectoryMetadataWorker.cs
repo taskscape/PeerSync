@@ -33,10 +33,13 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
     private const string ParentCursor = "_directory-parent-metadata-cursor";
     private bool retainedDirectories;
     internal Action<string>? Checkpoint { get; init; }
+    internal TimeSpan SourceDeadline { get; init; } = TimeSpan.FromSeconds(10);
+    internal TimeSpan PassDeadline { get; init; } = TimeSpan.FromSeconds(10);
 
     internal async Task<DirectoryMetadataPass> RunAsync(int maximumWork = 1000, int maximumSources = 32, CancellationToken token = default)
     {
         if (maximumWork is < 1 or > 1000 || maximumSources is < 1 or > 32) throw new ArgumentOutOfRangeException(nameof(maximumWork));
+        var passTimer = Stopwatch.StartNew();
         using var operation = await FolderOperationGate.AcquireAsync(index, token).ConfigureAwait(false);
         using var tree = new SafeFileTree(rootPath); byte[] root = index.Meta.Find("_root-identity")?.Value?.ToArray() ?? throw new IOException("Metadata root is unbound.");
         if (!tree.Identity.SequenceEqual(root)) throw new IOException("Metadata root identity changed.");
@@ -66,11 +69,15 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
         foreach (var job in index.ReadDueDirectoryMetadataSources(root, now, maximumSources))
         {
             if (remaining == 0) break;
+            TimeSpan available = PassDeadline - passTimer.Elapsed;
+            if (available <= TimeSpan.Zero) break;
             token.ThrowIfCancellationRequested(); visited++; Guid session = Guid.NewGuid();
             using var activity = new Activity("directory-metadata").SetIdFormat(ActivityIdFormat.W3C).Start();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token); deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            deadline.CancelAfter(available < SourceDeadline ? available : SourceDeadline);
             byte[] route = job.Source.RouteHint.ToArray(); byte[]? routeAfter = job.RouteAfter?.ToArray();
             DirectoryMetadataRoutes? routePage = null;
+            int graphProgress = 0;
             try
             {
                 var version = VersionView.Open(job.Source.Record, keys, job.Source.RouteHint);
@@ -79,7 +86,11 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
                     || !source.SourceId.AsSpan().SequenceEqual(job.Source.SourceId)) throw new InvalidDataException("Metadata source manifest changed.");
                 Log("start"); Checkpoint?.Invoke("metadata-before-graph");
                 var graph = await new DirectorySnapshotGraph(rootPath, index, keys, job.Source.RouteHint, journal)
-                { Checkpoint = stage => Checkpoint?.Invoke("metadata-graph-" + stage) }
+                { Checkpoint = stage =>
+                    {
+                        if (stage == "progress") graphProgress++;
+                        Checkpoint?.Invoke("metadata-graph-" + stage);
+                    } }
                     .AdvanceUnderGateAsync(job.Source.Record, Fetch, remaining, deadline.Token).ConfigureAwait(false);
                 remaining -= Math.Max(1, graph.Processed); Checkpoint?.Invoke("metadata-before-account");
                 if (!graph.Complete && graph.Processed == 0) throw new IOException("Metadata graph retirement is still pending.");
@@ -114,6 +125,16 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
                     }
                     throw new IOException("No authenticated metadata route is available.");
                 }
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested && !token.IsCancellationRequested && graphProgress > 0)
+            {
+                // Completed graph nodes are durable. A busy source may use its entire
+                // deadline after making progress; retry it without failure backoff.
+                remaining -= Math.Max(1, graphProgress);
+                using (await FolderReferenceGate.AcquireAsync(index, token).ConfigureAwait(false))
+                    await index.RecordDirectoryMetadataAttemptAsync(job, Now, failed: false,
+                        successfulRoute: route, routeAfter: routeAfter, cancellationToken: token).ConfigureAwait(false);
+                Log("progress", graphProgress); Checkpoint?.Invoke("metadata-accounted");
             }
             catch (Exception error) when (error is IOException or InvalidDataException or Win32Exception or UnauthorizedAccessException or CryptographicException or SqliteException or InvalidOperationException
                 || error is OperationCanceledException && !token.IsCancellationRequested)

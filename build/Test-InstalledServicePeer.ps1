@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)] [string] $FolderPath,
     [string] $FileName = 'smoke.txt',
     [ValidateRange(0, 65535)] [int] $ServicePort = 0,
+    [ValidateSet('Quic', 'Tcp')] [string] $Transport = 'Quic',
     [switch] $RenderUi,
     [ValidateSet('win-x64', 'win-arm64')] [string] $Runtime = 'win-x64'
 )
@@ -50,8 +51,10 @@ if ($probePort -eq 0) { throw 'No free TCP/UDP port was found for the installed 
 $rulePrefix = "PeerSync test $probePort 127.0.0.1"
 try {
     & $helper -ServiceExecutable $probe -ListenPort $probePort -PeerAddress '127.0.0.1'
-    if ($RenderUi) { & $probe $FolderPath $ServicePort $FileName $probePort '--render-ui' }
-    else { & $probe $FolderPath $ServicePort $FileName $probePort }
+    $arguments = @($FolderPath, "$ServicePort", $FileName, "$probePort")
+    if ($Transport -eq 'Tcp') { $arguments += '--tcp' }
+    if ($RenderUi) { $arguments += '--render-ui' }
+    & $probe @arguments
     if ($LASTEXITCODE -ne 0) { throw "Installed peer probe failed: $LASTEXITCODE" }
 }
 finally {

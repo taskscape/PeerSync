@@ -50,9 +50,9 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
         foreach (Endpoint endpoint in announcement.LocalEndpoints)
         {
             if (!IPAddress.TryParse(endpoint.Address, out IPAddress? address)
-                || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)
-                || IPAddress.IsLoopback(address) || endpoint.Port is < 1 or > 65535)
+                || !IsDialableUnicast(address) || endpoint.Port is < 1 or > 65535)
                 throw new ArgumentException("Announcement contains an invalid local endpoint.", nameof(announcement));
+            if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
             endpoints.Add(new Endpoint { Address = address.ToString(), Port = endpoint.Port });
         }
         var observed = new Endpoint
@@ -74,6 +74,16 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
             session.LastAnnouncedUtc = time.GetUtcNow();
             BroadcastLocked(affected);
         }
+    }
+
+    private static bool IsDialableUnicast(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)) return false;
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return address.GetAddressBytes()[0] is > 0 and < 224;
+        return !address.IsIPv6Multicast && !address.IsIPv6LinkLocal && !address.IsIPv6SiteLocal;
     }
 
     internal bool TryGetShared(PresenceSession source, ReadOnlySpan<byte> remoteDeviceId,
@@ -179,19 +189,54 @@ internal sealed class PresenceRegistry(TimeProvider? clock = null)
             if (!IsLiveLocked(receiver)) continue;
             foreach (string folderKey in affected)
             {
-                if (!receiver.FolderKeys.Contains(folderKey)) continue;
-                var list = new PeerList { FolderId = ByteString.CopyFrom(Convert.FromHexString(folderKey)) };
-                foreach (PresenceSession peer in sessions.Values)
-                {
-                    if (ReferenceEquals(peer, receiver) || !IsLiveLocked(peer)
-                        || !peer.FolderKeys.Contains(folderKey)) continue;
-                    var entry = new Peer { DeviceId = ByteString.CopyFrom(peer.DeviceId) };
-                    entry.Endpoints.Add(peer.Endpoints.Select(endpoint => endpoint.Clone()));
-                    list.Peers.Add(entry);
-                }
-                receiver.Outgoing.Writer.TryWrite(new ServerMessage { PeerList = list });
+                if (!receiver.FolderKeys.Contains(folderKey)
+                    || !receiver.PendingPeerLists.Add(folderKey)) continue;
+                var pending = new ServerMessage
+                { PeerList = new PeerList { FolderId = ByteString.CopyFrom(Convert.FromHexString(folderKey)) } };
+                if (!receiver.Outgoing.Writer.TryWrite(pending))
+                    receiver.PendingPeerLists.Remove(folderKey);
             }
         }
+    }
+
+    internal bool TryMaterialize(PresenceSession receiver, ServerMessage queued, out ServerMessage? message)
+    {
+        if (queued.PayloadCase != ServerMessage.PayloadOneofCase.PeerList)
+        {
+            message = queued;
+            return true;
+        }
+
+        string folderKey = Convert.ToHexString(queued.PeerList.FolderId.Span);
+        lock (gate)
+        {
+            receiver.PendingPeerLists.Remove(folderKey);
+            if (!IsCurrentLocked(receiver) || !IsLiveLocked(receiver)
+                || !receiver.FolderKeys.Contains(folderKey))
+            {
+                message = null;
+                return false;
+            }
+            var list = new PeerList { FolderId = queued.PeerList.FolderId };
+            foreach (PresenceSession peer in sessions.Values)
+            {
+                if (ReferenceEquals(peer, receiver) || !IsLiveLocked(peer)
+                    || !peer.FolderKeys.Contains(folderKey)) continue;
+                var entry = new Peer { DeviceId = ByteString.CopyFrom(peer.DeviceId) };
+                entry.Endpoints.Add(peer.Endpoints.Select(endpoint => endpoint.Clone()));
+                list.Peers.Add(entry);
+            }
+            message = new ServerMessage { PeerList = list };
+            return true;
+        }
+    }
+
+    internal bool TryReadOutgoing(PresenceSession session, out ServerMessage? message)
+    {
+        while (session.Outgoing.Reader.TryRead(out ServerMessage? queued))
+            if (TryMaterialize(session, queued, out message)) return true;
+        message = null;
+        return false;
     }
 
     private bool IsLiveLocked(PresenceSession session) => session.LastAnnouncedUtc is { } last
@@ -214,7 +259,7 @@ internal sealed class PresenceSession
         Observed = observed;
         Outgoing = Channel.CreateBounded<ServerMessage>(new BoundedChannelOptions(2048)
         {
-            FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true,
+            FullMode = BoundedChannelFullMode.Wait, SingleReader = true,
             SingleWriter = false, AllowSynchronousContinuations = false,
         });
     }
@@ -227,6 +272,7 @@ internal sealed class PresenceSession
     internal CancellationTokenSource Lifetime { get; } = new();
     internal DateTimeOffset CreatedUtc { get; init; }
     internal HashSet<string> FolderKeys { get; set; } = new(StringComparer.Ordinal);
+    internal HashSet<string> PendingPeerLists { get; } = new(StringComparer.Ordinal);
     internal List<Endpoint> Endpoints { get; set; } = [];
     internal DateTimeOffset? LastAnnouncedUtc { get; set; }
     internal void End()

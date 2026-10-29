@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime;
 using System.Security.Cryptography;
 using System.Text;
 using Google.Protobuf;
@@ -25,6 +26,8 @@ public sealed record ScanProblem(string RelativePath, string Code, int? NativeEr
 public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int Renamed, int Updated,
     int Deleted, int Ignored, int Unsyncable, TimeSpan Elapsed, IReadOnlyList<ScanProblem> Problems)
 {
+    public int ProblemCount { get; init; }
+    internal Guid SessionId { get; init; }
     public bool RequiresFollowupScan { get; init; }
     internal IReadOnlyList<string> ChangedPaths { get; init; } = [];
     internal bool RequiresNeededRebuild { get; init; }
@@ -35,6 +38,10 @@ public sealed record ScanResult(int Enumerated, int Unchanged, int Hashed, int R
 public sealed partial class Scanner : IDisposable
 {
     private const string RootIdentityKey = "_root-identity";
+    private const int LargeScanEntryThreshold = 100_000;
+    private const long LargeScanPrivateThresholdBytes = 300L * 1024 * 1024;
+    private static readonly TimeSpan LargeScanReclaimDelay = TimeSpan.FromSeconds(10);
+    private static long reclaimGeneration;
     private static readonly IReadOnlyDictionary<ulong, ulong> EmptyVector = new Dictionary<ulong, ulong>();
     private readonly string rootPath;
     private readonly FolderIndex index;
@@ -68,10 +75,10 @@ public sealed partial class Scanner : IDisposable
         this.rootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
         this.index = index; this.keys = keys; device = deviceId.ToArray();
         deviceShort = BinaryPrimitives.ReadUInt64LittleEndian(device);
-        this.ignore = ignore ?? new();
+        this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
+        this.ignore = ignore ?? new IgnoreMatcher(this.settings.IgnoreRules);
         this.clock = timeProvider ?? TimeProvider.System;
         this.journal = journal;
-        this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
         this.hashConcurrency = hashConcurrency ?? Math.Max(1, Environment.ProcessorCount - 1);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(this.hashConcurrency);
     }
@@ -79,6 +86,74 @@ public sealed partial class Scanner : IDisposable
     public async Task<ScanResult> ScanAsync(CancellationToken cancellationToken = default)
     {
         await scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ScanResult result = await ScanCoreAsync(cancellationToken).ConfigureAwait(false);
+            if (result.Enumerated >= LargeScanEntryThreshold) ScheduleLargeScanReclaim(result);
+            return result;
+        }
+        finally { scanGate.Release(); }
+    }
+
+    private void ScheduleLargeScanReclaim(ScanResult result)
+    {
+        // The completed async scan still roots its large temporary maps here.
+        // Coalesce consecutive walks and collect only after their tasks unwind.
+        long generation = Interlocked.Increment(ref reclaimGeneration);
+        WeakReference<DiagnosticJournal>? log = journal is null ? null : new(journal);
+        journal?.TryWrite(new("scan.large_reclaim_scheduled", "scan")
+        { SessionId = result.SessionId, ItemsVisited = result.Enumerated });
+        _ = ReclaimAfterIdleAsync(generation, log, result.SessionId, result.Enumerated);
+    }
+
+    private static async Task ReclaimAfterIdleAsync(long generation, WeakReference<DiagnosticJournal>? log,
+        Guid session, int visited)
+    {
+        await Task.Delay(LargeScanReclaimDelay).ConfigureAwait(false);
+        if (Volatile.Read(ref reclaimGeneration) != generation)
+        {
+            if (log is not null && log.TryGetTarget(out DiagnosticJournal? supersededJournal))
+                supersededJournal.TryWrite(new("scan.large_reclaim_skipped", "scan")
+                { SessionId = session, ItemsVisited = visited, ErrorCode = "superseded" });
+            return;
+        }
+        try
+        {
+            using Process process = Process.GetCurrentProcess();
+            process.Refresh();
+            if (process.PrivateMemorySize64 < LargeScanPrivateThresholdBytes)
+            {
+                if (log is not null && log.TryGetTarget(out DiagnosticJournal? smallJournal))
+                    smallJournal.TryWrite(new("scan.large_reclaim_skipped", "scan")
+                    { SessionId = session, ItemsVisited = visited, ErrorCode = "below-private-limit" });
+                return;
+            }
+            long before = GC.GetGCMemoryInfo().TotalCommittedBytes;
+            var elapsed = Stopwatch.StartNew();
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            elapsed.Stop();
+            if (log is not null && log.TryGetTarget(out DiagnosticJournal? completeJournal))
+                completeJournal.TryWrite(new("scan.large_reclaim", "scan")
+                {
+                    SessionId = session, ItemsVisited = visited,
+                    ElapsedMilliseconds = elapsed.ElapsedMilliseconds,
+                    Bytes = Math.Max(0, before - GC.GetGCMemoryInfo().TotalCommittedBytes),
+                });
+        }
+        catch (Exception error)
+        {
+            if (log is not null && log.TryGetTarget(out DiagnosticJournal? failureJournal))
+                failureJournal.TryWrite(new("scan.large_reclaim_failed", "scan")
+                { SessionId = session, Level = DiagnosticLevel.Warning, HResult = error.HResult });
+        }
+    }
+
+    private async Task<ScanResult> ScanCoreAsync(CancellationToken cancellationToken)
+    {
         var stopwatch = Stopwatch.StartNew();
         Guid session = Guid.NewGuid();
         try
@@ -100,15 +175,13 @@ public sealed partial class Scanner : IDisposable
             var history = new SnapshotHistory(index, keys, device, settings, journal, clock) { Checkpoint = Checkpoint };
             foreach (var intent in pendingIntents) await history.RecoverIntentAsync(historyTree, intent, cancellationToken).ConfigureAwait(false);
 
-            var previous = index.LocalFiles.ReadAll().ToDictionary(r => r.Path.ToUpperInvariant(), StringComparer.Ordinal);
-            var entries = new Dictionary<string, WalkEntry>(StringComparer.Ordinal);
-            var protectedPrefixes = new HashSet<string>(StringComparer.Ordinal);
-            var ignoredPrefixes = new HashSet<string>(StringComparer.Ordinal);
+            bool hasPrevious = index.LocalFiles.Count() != 0;
+            using var entries = new ScanObservations(index.DatabasePath, root.Identity, session, journal);
             var problems = new ConcurrentBag<ScanProblem>();
+            int problemCount = 0;
             int ignored = 0;
-            var directories = new Stack<string>();
-            directories.Push("");
-            while (directories.TryPop(out string? directory))
+            entries.PushDirectory("");
+            while (entries.TryPopDirectory(out string directory))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try
@@ -122,53 +195,77 @@ public sealed partial class Scanner : IDisposable
                         bool valid = PathRules.IsValid(path);
                         if (valid && ignore.IsIgnored(path, native.IsDirectory))
                         {
-                            ignored++; ignoredPrefixes.Add(key); continue;
+                            ignored++;
+                            // Only ignored directories can shield descendants.
+                            // Individual ignored files are rechecked against the
+                            // matcher when prior rows are streamed below.
+                            if (native.IsDirectory) entries.IgnoreDirectory(key);
+                            continue;
                         }
                         var entry = new WalkEntry(path, native, !valid || native.IsReparse);
                         if (!entries.TryAdd(key, entry))
                         {
                             // A case-sensitive Windows directory can contain two names for one wire key.
-                            protectedPrefixes.Add(key);
-                            problems.Add(new(path, "case-collision"));
+                            entries.Protect(key);
+                            RecordProblem(path, "case-collision");
                             continue;
                         }
                         if (entry.Unsyncable)
                         {
-                            protectedPrefixes.Add(key);
-                            problems.Add(new(path, native.IsReparse ? "reparse" : "invalid-name"));
+                            entries.Protect(key);
+                            RecordProblem(path, native.IsReparse ? "reparse" : "invalid-name");
                         }
-                        else if (native.IsDirectory) directories.Push(path);
+                        else if (native.IsDirectory) entries.PushDirectory(path);
                     }
                 }
                 catch (Exception error) when (IsFileError(error))
                 {
-                    protectedPrefixes.Add(directory.ToUpperInvariant());
-                    problems.Add(new(directory, "enumeration-failed", NativeCode(error)));
+                    entries.Protect(directory.ToUpperInvariant());
+                    RecordProblem(directory, "enumeration-failed", NativeCode(error));
                     journal?.TryWrite(new("scan.enumeration_failed", "scan") { SessionId = session,
                         Level = DiagnosticLevel.Warning, HResult = error.HResult, NativeError = NativeCode(error) });
                 }
             }
 
+            entries.CompleteWalk();
+            Checkpoint?.Invoke("after-enumerate");
+            LogMemoryStage("scan.memory_enumerated", session, entries.Count, stopwatch);
             var updates = new ConcurrentBag<LocalFileRow>();
             int unchanged = 0, hashed = 0, renamed = 0, deleted = 0, unsyncable = 0;
             // Identity matching is restricted to paths absent from the successful walk.
-            var renameCandidates = previous.Values.Where(r => !r.Deleted && r.Type == 0 && r.Record is not null
-                && r.Flags == LocalFileState.None && r.FileId is not null && !entries.ContainsKey(r.Path.ToUpperInvariant())
-                && !Under(r.Path.ToUpperInvariant(), protectedPrefixes) && !Under(r.Path.ToUpperInvariant(), ignoredPrefixes))
-                .GroupBy(r => Convert.ToHexString(r.FileId!), StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+            var renameBatch = new List<LocalFileRow>(RowRepository<LocalFileRow>.BatchSize);
+            foreach (string oldPath in entries.ReadAbsentLocalPaths(index.ReadLocalPaths()))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string key = oldPath.ToUpperInvariant();
+                if (entries.UnderProtection(key) || entries.UnderIgnoredDirectory(key)) continue;
+                var candidate = index.LocalFiles.Find(key);
+                if (candidate is not { Deleted: false, Type: 0, Record: not null, Flags: LocalFileState.None, FileId: not null }
+                    || ignore.IsIgnored(candidate.Path, false)) continue;
+                renameBatch.Add(candidate);
+                if (renameBatch.Count < RowRepository<LocalFileRow>.BatchSize) continue;
+                entries.StageRenameCandidates(renameBatch); renameBatch.Clear();
+            }
+            if (renameBatch.Count != 0) entries.StageRenameCandidates(renameBatch);
             var cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
             try
             {
-            await Parallel.ForEachAsync(entries.Values, new ParallelOptions
+            foreach (var page in entries.ReadPages())
+            {
+            cancellationToken.ThrowIfCancellationRequested();
+            var previousPage = hasPrevious
+                ? index.ReadLocalFilesByPaths(page.Select(entry => entry.Path).ToArray())
+                : new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+            var renameCandidates = entries.ReadRenameCandidates(page, index);
+            await Parallel.ForEachAsync(page, new ParallelOptions
             {
                 MaxDegreeOfParallelism = hashConcurrency, CancellationToken = cancellationToken,
             }, async (entry, token) =>
             {
                 string key = entry.Path.ToUpperInvariant();
-                previous.TryGetValue(key, out var old);
+                previousPage.TryGetValue(key, out var old);
                 // An incomplete directory listing must not produce changes in that subtree.
-                if (Under(key, protectedPrefixes, includeExact: !entry.Unsyncable)) return;
+                if (entries.UnderProtection(key, includeExact: !entry.Unsyncable)) return;
                 if (entry.Unsyncable)
                 {
                     Interlocked.Increment(ref unsyncable);
@@ -271,19 +368,33 @@ public sealed partial class Scanner : IDisposable
                 catch (Exception error) when (IsFileError(error))
                 { Defer(entry.Path, old, error is CryptographicException ? "published-content-verification-failed" : "read-failed", NativeCode(error)); }
             }).ConfigureAwait(false);
+            if (!updates.IsEmpty) entries.StageUpdates(updates);
+            updates = new ConcurrentBag<LocalFileRow>();
+            if (!cacheUpdates.IsEmpty) entries.StageCacheUpdates(cacheUpdates);
+            cacheUpdates = new ConcurrentBag<NativeChangeTimeUpdate>();
+            }
             }
             finally { await blocks.FlushAsync(index, CancellationToken.None, journal).ConfigureAwait(false); }
 
-            foreach (var old in previous.Values)
+            Checkpoint?.Invoke("after-hash");
+            LogMemoryStage("scan.memory_hashed", session, entries.Count, stopwatch);
+            foreach (string oldPath in entries.ReadAbsentLocalPaths(index.ReadLocalPaths()))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string key = old.Path.ToUpperInvariant();
-                if (Under(key, ignoredPrefixes))
+                if (updates.Count >= RowRepository<LocalFileRow>.BatchSize)
+                {
+                    entries.StageUpdates(updates);
+                    updates = new ConcurrentBag<LocalFileRow>();
+                }
+                string key = oldPath.ToUpperInvariant();
+                if (!entries.UnderIgnoredDirectory(key) && (entries.UnderProtection(key) || IsInternal(oldPath))) continue;
+                var old = index.LocalFiles.Find(key) ?? throw new IOException("Local scan row disappeared during the operation gate.");
+                if (entries.UnderIgnoredDirectory(key))
                 {
                     if ((old.Flags & LocalFileState.Ignored) == 0) updates.Add(old with { Flags = old.Flags | LocalFileState.Ignored });
                     continue;
                 }
-                if (entries.ContainsKey(key) || Under(key, protectedPrefixes) || IsInternal(old.Path)) continue;
+                if (entries.UnderProtection(key) || IsInternal(old.Path)) continue;
                 // Ignore rules can also match paths that disappeared before this walk.
                 if (PathRules.IsValid(old.Path) && ignore.IsIgnored(old.Path, old.Type == 1))
                 {
@@ -313,45 +424,71 @@ public sealed partial class Scanner : IDisposable
                 if (publish) tombstone = tombstone with { Record = Sign(tombstone, 0, []) };
                 updates.Add(tombstone); deleted++;
             }
+            if (!updates.IsEmpty) entries.StageUpdates(updates);
             // The root's pathname may have been replaced while its pinned handle stayed valid.
             using (var currentRoot = new NativeRoot(rootPath))
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity))
                     throw new IOException("Sync root was replaced during the scan.");
-            var ordered = updates.OrderBy(r => r.Path, StringComparer.Ordinal).ToArray(); bool followup = false;
-            var retainedCopies = ordered.Where(r => !r.Deleted && r.Type == 0 && r.FileId is not null && r.FileHash is not null
-                    && r.Path.Split('/').Any(p => p.Contains(".sync-conflict-", StringComparison.Ordinal)))
-                .GroupBy(r => Convert.ToHexString(r.FileId!) + Convert.ToHexString(r.FileHash!), StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.First().Path, StringComparer.Ordinal);
-            foreach (var next in ordered)
-                if (previous.TryGetValue(next.Path.ToUpperInvariant(), out var old))
+            bool followup = false;
+            bool requiresNeededRebuild = false;
+            foreach (var page in entries.ReadUpdates().Chunk(RowRepository<LocalFileRow>.BatchSize))
+            {
+                var previousPage = hasPrevious
+                    ? index.ReadLocalFilesByPaths(page.Select(row => row.Path).ToArray())
+                    : new Dictionary<string, LocalFileRow>(StringComparer.Ordinal);
+                foreach (var next in page)
+                if (previousPage.TryGetValue(next.Path.ToUpperInvariant(), out var old))
                 {
+                    requiresNeededRebuild |= next.Deleted && old is { Type: 0, Deleted: false, Record: not null };
                     string? retainedPath = old.FileId is not null && old.FileHash is not null
-                        && retainedCopies.TryGetValue(Convert.ToHexString(old.FileId) + Convert.ToHexString(old.FileHash), out string? path) ? path : null;
+                        ? entries.FindRetainedConflictCopy(old.FileId, old.FileHash) : null;
                     followup |= await history.EnsureAsync(historyTree, old, next, retainedPath, cancellationToken).ConfigureAwait(false);
                 }
+            }
             Checkpoint?.Invoke("before-scan-commit");
             // History retention can perform I/O: recheck the root pathname again
             // before committing the newly collected local records.
             using (var currentRoot = new NativeRoot(rootPath))
                 if (!currentRoot.Identity.AsSpan().SequenceEqual(root.Identity)) throw new IOException("Sync root changed during history retention.");
-            foreach (var cacheBatch in cacheUpdates.Chunk(1000))
+            foreach (var cacheBatch in entries.ReadCacheUpdates().Chunk(1000))
                 await index.UpdateNativeChangeTimesAsync(cacheBatch, cancellationToken).ConfigureAwait(false);
-            int written = await index.LocalFiles.UpsertAsync(ordered, cancellationToken).ConfigureAwait(false);
+            int written = await index.CommitScanRowsAsync(entries.ReadUpdates(), cancellationToken).ConfigureAwait(false);
             if (StageDirectorySnapshots)
-                await StageDirectoriesAsync(root.Identity, entries, protectedPrefixes, ignoredPrefixes, problems, session, cancellationToken).ConfigureAwait(false);
+                await StageDirectoriesAsync(root.Identity, entries, session, cancellationToken).ConfigureAwait(false);
+            Checkpoint?.Invoke("after-upsert");
+            LogMemoryStage("scan.memory_committed", session, entries.Count, stopwatch);
             stopwatch.Stop();
             journal?.TryWrite(new("scan.complete", "scan") { SessionId = session, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 ItemsVisited = entries.Count, ItemsChanged = written, ItemsHashed = hashed,
-                ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problems.Count });
+                ItemsSkipped = unchanged + ignored + unsyncable, ItemsDeferred = problemCount });
+            // A very large change set rebuilds needed work from the durable
+            // index union; no million-path result list survives this scan.
+            const int changedPathLimit = 10_000;
+            bool rebuildNeeded = requiresNeededRebuild || written + entries.CacheUpdateCount > changedPathLimit;
+            IReadOnlyList<string> changedPaths = rebuildNeeded ? [] : Array.AsReadOnly(entries.ReadUpdates()
+                .Select(row => row.Path).Concat(entries.ReadCacheUpdates().Select(row => row.Path))
+                .Distinct(StringComparer.Ordinal).ToArray());
             return new(entries.Count, unchanged, hashed, renamed, written, deleted, ignored, unsyncable,
                 stopwatch.Elapsed, problems.OrderBy(p => p.RelativePath, StringComparer.Ordinal).ToArray())
-                { RequiresFollowupScan = followup, ChangedPaths = Array.AsReadOnly(ordered.Select(r => r.Path).Concat(cacheUpdates.Select(r => r.Path)).Distinct(StringComparer.Ordinal).ToArray()),
-                    RequiresNeededRebuild = ordered.Any(row => row.Deleted && previous.TryGetValue(row.Path.ToUpperInvariant(), out var old)
-                        && old is { Type: 0, Deleted: false, Record: not null }) };
+                { SessionId = session, ProblemCount = problemCount, RequiresFollowupScan = followup, ChangedPaths = changedPaths,
+                    RequiresNeededRebuild = rebuildNeeded };
+
+            void RecordProblem(string path, string code, int? native = null)
+            {
+                // A million unreadable paths cannot become a million retained
+                // diagnostic objects. The overflow marker forces consumers to
+                // treat the scan as incomplete even if later errors are hidden.
+                int ordinal = Interlocked.Increment(ref problemCount);
+                if (ordinal <= 1000) problems.Add(new(path, code, native));
+                else if (ordinal == 1001) problems.Add(new("", "problem-overflow"));
+                if (code is "enumeration-failed" or "case-collision" or "read-failed"
+                    or "changed-during-read" or "published-content-verification-failed")
+                    entries.MarkUncertain(path.ToUpperInvariant());
+            }
 
             void Defer(string path, LocalFileRow? old, string code, int? native)
             {
-                problems.Add(new(path, code, native));
+                RecordProblem(path, code, native);
                 if (old is not null && (old.Flags & LocalFileState.NeedsRescan) == 0)
                     updates.Add(old with { Flags = old.Flags | LocalFileState.NeedsRescan });
                 journal?.TryWrite(new("scan.defer", "scan")
@@ -365,7 +502,6 @@ public sealed partial class Scanner : IDisposable
                 NativeError = NativeCode(error), ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }
-        finally { scanGate.Release(); }
     }
 
     private LocalFileRow CreateVersion(WalkEntry entry, LocalFileRow? old, FileHash? hash,
@@ -421,19 +557,6 @@ public sealed partial class Scanner : IDisposable
         && (entry.Native.IsDirectory || row.MtimeTicks == entry.Native.MtimeTicks)
         && row.FileId is not null && row.FileId.AsSpan().SequenceEqual(entry.Native.FileId);
 
-    private static bool Under(string key, HashSet<string> prefixes, bool includeExact = true)
-    {
-        if (prefixes.Contains("")) return true;
-        if (includeExact && prefixes.Contains(key)) return true;
-        int separator = key.IndexOf('/');
-        while (separator >= 0)
-        {
-            if (prefixes.Contains(key[..separator])) return true;
-            separator = key.IndexOf('/', separator + 1);
-        }
-        return false;
-    }
-
     /// <summary>Stop scheduling scans and await outstanding scans before disposing.</summary>
     public void Dispose() => scanGate.Dispose();
 
@@ -441,5 +564,23 @@ public sealed partial class Scanner : IDisposable
         || p.EndsWith(".!psp", StringComparison.OrdinalIgnoreCase));
     private static bool IsFileError(Exception error) => error is IOException or UnauthorizedAccessException or Win32Exception or CryptographicException;
     private static int? NativeCode(Exception error) => error is Win32Exception native ? native.NativeErrorCode : null;
+    private void LogMemoryStage(string name, Guid session, int entries, Stopwatch stopwatch)
+    {
+        if (journal is not { DebugEnabled: true }) return;
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            process.Refresh();
+            journal.TryWrite(new(name, "scan")
+            {
+                SessionId = session, Level = DiagnosticLevel.Debug, ItemsVisited = entries,
+                ElapsedMilliseconds = stopwatch.Elapsed.TotalMilliseconds,
+                WorkingSetBytes = process.WorkingSet64, PrivateBytes = process.PrivateMemorySize64,
+                ManagedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
+            });
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        { /* Stage telemetry must not interrupt a scan. */ }
+    }
     private sealed record WalkEntry(string Path, NativeEntry Native, bool Unsyncable);
 }

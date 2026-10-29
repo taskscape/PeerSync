@@ -5,6 +5,13 @@
 #if AppVer == ""
   #error Publish PeerSync.Rendezvous.exe before compiling the installer
 #endif
+#define VcRedistExe StageRoot + "\redist\vc_redist.exe"
+#define VcRedistVersionPacked 0
+#define VcRedistVersion GetPackedVersion(VcRedistExe, VcRedistVersionPacked)
+#if VcRedistVersion == ""
+  #error Bundle a versioned vc_redist.exe before compiling the installer
+#endif
+#define VcRegistryArch "x64"
 
 [Setup]
 AppId={{347EEC9C-2B64-4B93-889A-6F57142E1F76}
@@ -40,9 +47,18 @@ Name: "{commonappdata}\PeerSync.Rendezvous\logs"; Flags: uninsneveruninstall
 
 [Files]
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; Flags: dontcopy noencryption
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Import-RendezvousWebHostingCertificate.ps1"; Flags: dontcopy noencryption
+Source: "Import-RendezvousWebHostingCertificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Set-WerPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Audit-CrashPolicy.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Test-RendezvousDeployment.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Collect-DeploymentEvidence.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Grant-RendezvousCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
+Source: "Import-RendezvousWebHostingCertificate.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 Source: "After-RendezvousRenewal.ps1"; DestDir: "{commonappdata}\PeerSync.Rendezvous"; Flags: ignoreversion uninsneveruninstall
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\*.exe"; DestDir: "{app}"; Flags: ignoreversion signonce
@@ -56,7 +72,6 @@ Source: "{#StageRoot}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 
 [UninstallRun]
-Filename: "{sys}\sc.exe"; Parameters: "delete PeerSyncRendezvous"; Flags: runhidden; RunOnceId: "DeleteService"; Check: ServiceExists
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync Rendezvous TCP 99"""; Flags: runhidden; RunOnceId: "DeleteTcpRule"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync Rendezvous UDP 99"""; Flags: runhidden; RunOnceId: "DeleteUdpRule"
 
@@ -65,6 +80,7 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\Peer
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\PeerSyncRendezvous"; ValueType: dword; ValueName: "TypesSupported"; ValueData: "7"; Flags: uninsdeletekey
 
 [Code]
+#include "VcRuntime.iss"
 function ServiceExists: Boolean;
 begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PeerSyncRendezvous');
@@ -85,11 +101,6 @@ var Code: Integer;
 begin
   Code := RunCommand(FileName, Parameters);
   if Code <> 0 then RaiseException(ExtractFileName(FileName) + ' failed with exit code ' + IntToStr(Code) + '. See setup log.');
-end;
-
-function IsServiceStopped: Boolean;
-begin
-  Result := RunCommand(ExpandConstant('{cmd}'), '/c sc query PeerSyncRendezvous | find "STOPPED"') = 0;
 end;
 
 function InitializeSetup: Boolean;
@@ -118,38 +129,60 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var Tries, Code: Integer;
+var Code, I: Integer;
+    Output: TExecOutput;
 begin
   Result := '';
-  ExtractTemporaryFile('vc_redist.exe');
-  Code := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
-  if Code = 3010 then
+  if not VcRuntimeAtLeastPackaged then
   begin
-    NeedsRestart := True;
-    Result := 'The Visual C++ runtime requires a restart. Restart Windows and run setup again.';
-    Exit;
-  end;
-  if (Code <> 0) and (Code <> 1638) then
-  begin
-    Result := 'The Visual C++ runtime failed (exit code ' + IntToStr(Code) + ').';
-    Exit;
+    ExtractTemporaryFile('vc_redist.exe');
+    Code := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
+    if Code = 3010 then
+    begin
+      NeedsRestart := True;
+      Result := 'The Visual C++ runtime requires a restart. Restart Windows and run setup again.';
+      Exit;
+    end;
+    if (Code <> 0) and (Code <> 1638) then
+    begin
+      Result := 'The Visual C++ runtime failed (exit code ' + IntToStr(Code) + ').';
+      Exit;
+    end;
   end;
   ExtractTemporaryFile('Grant-RendezvousCertificate.ps1');
-  Code := RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\Grant-RendezvousCertificate.ps1') + '" -CheckOnly');
-  if Code <> 0 then
+  ExtractTemporaryFile('Import-RendezvousWebHostingCertificate.ps1');
+  if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Import-RendezvousWebHostingCertificate.ps1') + '"') <> 0 then
   begin
-    Result := 'A current sync.taskscape.com certificate with a machine private key is required. See setup log.';
+    Result := 'The win-acme WebHosting certificate import failed. See setup log.';
     Exit;
   end;
-  if not ServiceExists or IsServiceStopped then Exit;
-  RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSyncRendezvous');
-  for Tries := 1 to 30 do
+  if not ExecAndCaptureOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Grant-RendezvousCertificate.ps1') + '" -CheckOnly',
+    '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then
   begin
-    if IsServiceStopped then Exit;
-    Sleep(1000);
+    Result := 'Could not run the Rendezvous certificate check. See setup log.';
+    Exit;
   end;
-  Result := 'The PeerSyncRendezvous service did not stop within 30 seconds.';
+  if Code <> 0 then
+  begin
+    for I := 0 to GetArrayLength(Output.StdErr) - 1 do
+      Log('Rendezvous certificate check: ' + Output.StdErr[I]);
+    Result := 'The sync.taskscape.com certificate check failed.';
+    if GetArrayLength(Output.StdErr) > 0 then
+      Result := Result + #13#10 + Output.StdErr[0]
+    else
+      Result := Result + ' See setup log.';
+    Exit;
+  end;
+  if not ServiceExists then Exit;
+  ExtractTemporaryFile('Stop-ServiceAndWait.ps1');
+  if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSyncRendezvous') <> 0 then
+    Result := 'The PeerSyncRendezvous service or its old process did not exit. See setup log.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -157,12 +190,12 @@ begin
   if CurStep <> ssPostInstall then Exit;
   if not ServiceExists then
     RequireSuccess(ExpandConstant('{sys}\sc.exe'),
-      'create PeerSyncRendezvous binPath= "' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
-      '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"')
+      'create PeerSyncRendezvous binPath= "\"' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
+      '\"" start= auto obj= "NT SERVICE\PeerSyncRendezvous"')
   else
     RequireSuccess(ExpandConstant('{sys}\sc.exe'),
-      'config PeerSyncRendezvous binPath= "' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
-      '" start= auto obj= "NT SERVICE\PeerSyncRendezvous"');
+      'config PeerSyncRendezvous binPath= "\"' + ExpandConstant('{app}\PeerSync.Rendezvous.exe') +
+      '\"" start= auto obj= "NT SERVICE\PeerSyncRendezvous"');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSyncRendezvous reset= 86400 actions= restart/60000/restart/60000/restart/300000');
   { Remove the broad inheritable grant from earlier development builds before
@@ -174,6 +207,9 @@ begin
     '"' + ExpandConstant('{commonappdata}\PeerSync.Rendezvous\logs') + '" /grant "NT SERVICE\PeerSyncRendezvous:(OI)(CI)M"');
   RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Grant-RendezvousCertificate.ps1') + '"');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\Set-WerPolicy.ps1') + '" -ExecutableNames PeerSync.Rendezvous.exe');
   RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous TCP 99"');
   RunCommand(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall delete rule name="PeerSync Rendezvous UDP 99"');
   RequireSuccess(ExpandConstant('{sys}\netsh.exe'),
@@ -184,17 +220,17 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var Tries: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
-  if ServiceExists and not IsServiceStopped then
-  begin
-    RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSyncRendezvous');
-    for Tries := 1 to 30 do
-    begin
-      if IsServiceStopped then Break;
-      Sleep(1000);
-    end;
-    if not IsServiceStopped then RaiseException('PeerSyncRendezvous did not stop before uninstall.');
-  end;
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSyncRendezvous');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\Set-WerPolicy.ps1') + '" -ExecutableNames PeerSync.Rendezvous.exe -Remove');
+  { Delete before files are removed on every uninstall cycle. A conditional
+    service entry in UninstallRun can be skipped after a reinstall. }
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'delete PeerSyncRendezvous');
 end;

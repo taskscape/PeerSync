@@ -5,7 +5,8 @@ param(
     [string]$IsccPath,
     [string]$CertificateThumbprint = $env:PEERSYNC_SIGNING_THUMBPRINT,
     [switch]$DevelopmentSigning,
-    [switch]$UnsignedDevelopment
+    [switch]$UnsignedDevelopment,
+    [switch]$UseExistingRestoredAssets
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -28,6 +29,9 @@ if (-not $UnsignedDevelopment -and [string]::IsNullOrWhiteSpace($CertificateThum
     throw 'Signed installer requires -CertificateThumbprint or PEERSYNC_SIGNING_THUMBPRINT. Use -UnsignedDevelopment only for local validation.'
 }
 if ($UnsignedDevelopment -and $DevelopmentSigning) { throw 'Choose signed development or unsigned development, not both.' }
+if ($UseExistingRestoredAssets -and -not ($DevelopmentSigning -or $UnsignedDevelopment)) {
+    throw 'Existing restored assets are permitted only for local development builds.'
+}
 
 # Never reuse an older publish tree: it might contain stale runtime files.
 $canonicalRoot = [IO.Path]::GetFullPath($root).TrimEnd('\')
@@ -62,13 +66,17 @@ $projects = @(
 )
 Push-Location $root
 try {
-    & dotnet restore PeerSync.slnx --locked-mode
-    if ($LASTEXITCODE -ne 0) { throw 'Locked restore failed.' }
+    if (-not $UseExistingRestoredAssets) {
+        & dotnet restore PeerSync.slnx --locked-mode
+        if ($LASTEXITCODE -ne 0) { throw 'Locked restore failed.' }
+    }
     foreach ($item in $projects) {
         $destination = Join-Path $stage $item.Name
-        & dotnet publish $item.Project -c Release -r $runtime --self-contained `
-            -p:RestoreLockedMode=true -p:PublishReadyToRun=true `
-            -p:PublishSingleFile=false -p:Version=$Version -o $destination
+        $publishArguments = @($item.Project, '-c', 'Release', '-r', $runtime, '--self-contained',
+            '-p:RestoreLockedMode=true', '-p:PublishReadyToRun=true',
+            '-p:PublishSingleFile=false', "-p:Version=$Version", '-o', $destination)
+        if ($UseExistingRestoredAssets) { $publishArguments += '--no-restore' }
+        & dotnet publish @publishArguments
         if ($LASTEXITCODE -ne 0) { throw "Publish failed: $($item.Name)" }
         $executable = Join-Path $destination $item.Executable
         if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
@@ -110,6 +118,7 @@ try {
         version = $serviceVersion
         selfContained = $true
         readyToRun = $true
+        restoreMode = if ($UseExistingRestoredAssets) { 'existing-assets' } else { 'locked' }
         signed = -not $UnsignedDevelopment
         localDevelopmentOnly = [bool]($UnsignedDevelopment -or $DevelopmentSigning)
         publicReleaseSigning = $false

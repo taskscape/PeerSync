@@ -18,7 +18,8 @@ public sealed class ControlStatusRuntime
     private readonly Dictionary<string, TransferTotals> transferTotals = new(StringComparer.Ordinal);
     private readonly Queue<ControlDiagnosticError> recentErrors = new();
     private readonly Guid instance = Guid.NewGuid();
-    private InstalledFolderHost? folderHost;
+    private volatile InstalledFolderHost? folderHost;
+    private TaskCompletionSource<bool>? installedStartup;
     private ulong sequence;
     private long hashedBytes;
     public ControlStatusRuntime(DiagnosticJournal? diagnostics = null)
@@ -33,6 +34,25 @@ public sealed class ControlStatusRuntime
     internal void NotifySuspending() => Raise(Suspending, "service.power_suspending");
     internal void NotifyResumed() => Raise(Resumed, "service.power_resumed");
     internal void NotifyNetworkChanged() => Raise(NetworkChanged, "service.network_changed");
+    internal void BeginInstalledStartup()
+    {
+        lock (gate)
+        {
+            if (installedStartup is not null || folderHost is not null)
+                throw new InvalidOperationException("Installed startup has already begun.");
+            installedStartup = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+    internal Task WaitForInstalledStartupAsync(CancellationToken cancellationToken)
+    {
+        Task? pending;
+        lock (gate) pending = installedStartup?.Task;
+        return pending is null ? Task.CompletedTask : pending.WaitAsync(cancellationToken);
+    }
+    internal void AbortInstalledStartup()
+    {
+        lock (gate) installedStartup?.TrySetCanceled();
+    }
     internal void AttachFolderHost(InstalledFolderHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -40,6 +60,7 @@ public sealed class ControlStatusRuntime
         {
             if (folderHost is not null) throw new InvalidOperationException("Folder host is already attached.");
             folderHost = host;
+            installedStartup?.TrySetResult(true);
         }
     }
     internal InstalledFolderHost RequireFolderHost()
@@ -69,7 +90,11 @@ public sealed class ControlStatusRuntime
 
     private void OnDiagnosticWritten(DiagnosticEvent entry, DateTime occurredUtc)
     {
-        if (entry.Level is not (DiagnosticLevel.Warning or DiagnosticLevel.Error)) return;
+        // A failed connection candidate is a diagnostic warning, not a user-facing
+        // failure: another candidate may already have authenticated. Keep every
+        // warning in the journal, but reserve control error notifications for
+        // operations the service classified as errors.
+        if (entry.Level != DiagnosticLevel.Error) return;
         lock (gate)
         {
             recentErrors.Enqueue(new(entry.ErrorCode ?? entry.Event, entry.Operation, occurredUtc.Ticks));

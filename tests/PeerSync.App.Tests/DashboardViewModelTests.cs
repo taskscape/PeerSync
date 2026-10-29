@@ -62,6 +62,42 @@ public sealed class DashboardViewModelTests
     }
 
     [Fact]
+    public void RepeatedFailuresNotifyOncePerKindUntilCooldownExpires()
+    {
+        var clock = new AdjustableClock();
+        var model = new DashboardViewModel(clock);
+        var notices = new List<string>();
+        model.Notification += notices.Add;
+        model.Apply(Snapshot());
+
+        ControlEvent first = Snapshot();
+        first.Errors.Add(new ControlError { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 1 });
+        model.Apply(first);
+        notices.Count.ShouldBe(1);
+
+        ControlEvent retry = Snapshot();
+        retry.Errors.Add(new ControlError { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 2 });
+        retry.Errors.Add(new ControlError { Code = "write_failed", Source = "folder_apply", OccurredUtcTicks = 3 });
+        model.Apply(retry);
+        notices.Count.ShouldBe(2);
+        notices.Last().ShouldContain("write_failed");
+
+        model.Disconnected(unauthorized: false);
+        model.Apply(retry);
+        ControlEvent afterReconnect = Snapshot();
+        afterReconnect.Errors.Add(new ControlError
+        { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 4 });
+        model.Apply(afterReconnect);
+        notices.Count.ShouldBe(2);
+
+        clock.Advance(TimeSpan.FromMinutes(30));
+        ControlEvent later = Snapshot();
+        later.Errors.Add(new ControlError { Code = "scan_failed", Source = "folder_scan", OccurredUtcTicks = 5 });
+        model.Apply(later);
+        notices.Count.ShouldBe(3);
+    }
+
+    [Fact]
     public void MetricsDoNotInventTransferRates()
     {
         var model = new DashboardViewModel();
@@ -104,6 +140,42 @@ public sealed class DashboardViewModelTests
         model.Peers.Single().Route.ShouldBe("direct QUIC");
     }
 
+    [Fact]
+    public void ArchiveVersionsFollowTheSelectedFolderAndShowTruncation()
+    {
+        var model = new DashboardViewModel();
+        string firstFolder = new('A', 64), secondFolder = new('B', 64);
+        ControlEvent snapshot = Snapshot();
+        snapshot.Folders.Add(new FolderInfo { FolderId = firstFolder, Path = @"C:\Share", Access = "ReadWrite" });
+        snapshot.Folders.Add(new FolderInfo { FolderId = secondFolder, Path = @"C:\Other", Access = "ReadWrite" });
+        model.Apply(snapshot);
+        var other = new ListArchiveResponse { FolderId = secondFolder };
+        other.Versions.Add(new ArchiveInfo { FolderId = secondFolder, Id = 8, OriginalPath = "other.txt",
+            ArchivedUtcTicks = DateTime.UtcNow.Ticks, Size = 1024 });
+        model.ApplyArchive(other);
+        model.ArchiveVersions.ShouldBeEmpty();
+
+        var selected = new ListArchiveResponse { FolderId = firstFolder, Truncated = true };
+        selected.Versions.Add(new ArchiveInfo { FolderId = firstFolder, Id = 7, OriginalPath = "notes.txt",
+            ArchivedUtcTicks = DateTime.UtcNow.Ticks, Size = 1048576 });
+        model.ApplyArchive(selected);
+        model.ArchiveVersions.Single().Path.ShouldBe("notes.txt");
+        model.ArchiveVersions.Single().SizeDisplay.ShouldContain("1");
+        model.ArchiveStatus.ShouldContain("more versions exist");
+
+        model.SelectedFolderId = secondFolder;
+        model.ArchiveVersions.ShouldBeEmpty();
+        model.ApplyArchive(other);
+        model.ArchiveVersions.Single().Path.ShouldBe("other.txt");
+    }
+
     private static ControlEvent Snapshot() => new()
     { FullSnapshot = true, Status = new ServiceStatus { InstanceId = Guid.NewGuid().ToString("N"), Sequence = 1 } };
+
+    private sealed class AdjustableClock : TimeProvider
+    {
+        private DateTimeOffset now = new(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => now;
+        internal void Advance(TimeSpan duration) => now += duration;
+    }
 }

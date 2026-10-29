@@ -70,6 +70,11 @@ public sealed partial class FolderIndex
             release.Parameters.AddWithValue("$key", key); release.Parameters.AddWithValue("$version", queued.Version.ToString("N"));
             if (release.ExecuteNonQuery() != 2) throw new InvalidOperationException("Directory publication release changed.");
             release.CommandText = "DELETE FROM directory_parent_proofs WHERE path_key=$key;"; release.ExecuteNonQuery();
+            // A parent may be asleep after observing this child in the queue.
+            // Release and wake in one transaction so it can recheck the now
+            // satisfied dependency without waiting for exponential backoff.
+            WakeWaitingParentPublication(connection, transaction, key);
+            WakePublicationBlockedPullRetries(connection, transaction, queued.RootId, key);
             return new DirectoryPublicationCommit(current, row is not null);
 
             LocalFileRow? ReadCurrent()

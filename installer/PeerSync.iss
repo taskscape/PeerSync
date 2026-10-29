@@ -11,6 +11,13 @@
 #if AppVer == ""
   #error Publish PeerSync.Service.exe before compiling the installer
 #endif
+#define VcRedistExe StageRoot + "\redist\vc_redist.exe"
+#define VcRedistVersionPacked 0
+#define VcRedistVersion GetPackedVersion(VcRedistExe, VcRedistVersionPacked)
+#if VcRedistVersion == ""
+  #error Bundle a versioned vc_redist.exe before compiling the installer
+#endif
+#define VcRegistryArch Arch
 
 [Setup]
 AppId={{F6E23D72-1DFD-49D6-933B-A9B1FF63E6B5}
@@ -28,7 +35,10 @@ ArchitecturesInstallIn64BitMode=arm64
 ArchitecturesAllowed=x64compatible and not arm64
 ArchitecturesInstallIn64BitMode=x64compatible and not arm64
 #endif
-CloseApplications=yes
+; The tray dashboard may retain PeerSync.exe across user sessions. Restart
+; Manager remains enabled, while PrepareToInstall also closes the exact
+; installed dashboard and waits for exit before replacing its executable.
+CloseApplications=force
 RestartApplications=no
 UsePreviousTasks=yes
 DisableProgramGroupPage=yes
@@ -55,6 +65,16 @@ Name: "{commonappdata}\PeerSync"; Flags: uninsneveruninstall
 ; NSec's libsodium DLL needs the Microsoft Visual C++ v14 runtime on clean PCs.
 ; Extract before installation so a reboot requirement leaves the old service intact.
 Source: "{#StageRoot}\redist\vc_redist.exe"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; Flags: dontcopy noencryption
+Source: "Stop-ServiceAndWait.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Stop-ClientAppAndWait.ps1"; Flags: dontcopy noencryption
+Source: "Stop-ClientAppAndWait.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Update-Helper.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Assert-UpdateSetupSignature.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Set-UpdatePolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Set-WerPolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Audit-CrashPolicy.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "Collect-DeploymentEvidence.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 #ifndef UnsignedDevelopment
 Source: "{#StageRoot}\service\*.exe"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
 Source: "{#StageRoot}\service\*.dll"; DestDir: "{app}\service"; Flags: recursesubdirs ignoreversion signonce
@@ -87,11 +107,19 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\app\PeerSync.exe"; Description: "Open PeerSync"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
-Filename: "{sys}\sc.exe"; Parameters: "delete PeerSync"; Flags: runhidden; RunOnceId: "DeleteService"; Check: ServiceExists
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\tools\Update-Helper.ps1"" -Unregister"; Flags: runhidden; RunOnceId: "DeleteUpdateTask"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeerSync"""; Flags: runhidden; RunOnceId: "DeleteFirewallRule"
-Filename: "{sys}\net.exe"; Parameters: "localgroup ""PeerSync Users"" /delete"; Flags: runhidden; RunOnceId: "DeleteGroup"; Check: GroupExists
 
 [Code]
+#include "VcRuntime.iss"
+var PostInstallSucceeded: Boolean;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  { Inno can return zero after a suppressed ssPostInstall script exception. }
+  if PostInstallSucceeded then Result := 0 else Result := 9;
+end;
+
 function ServiceExists: Boolean;
 begin
   Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PeerSync');
@@ -121,14 +149,6 @@ end;
 function GroupExists: Boolean;
 begin
   Result := RunCommand(ExpandConstant('{sys}\net.exe'), 'localgroup "PeerSync Users"') = 0;
-end;
-
-function IsServiceStopped: Boolean;
-var
-  Code: Integer;
-begin
-  Code := RunCommand(ExpandConstant('{cmd}'), '/c sc query PeerSync | find "STOPPED"');
-  Result := Code = 0;
 end;
 
 function InitializeSetup: Boolean;
@@ -167,32 +187,46 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Tries, RedistCode: Integer;
+  RedistCode: Integer;
 begin
   Result := '';
-  ExtractTemporaryFile('vc_redist.exe');
-  RedistCode := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
-  if RedistCode = 3010 then
+  if not VcRuntimeAtLeastPackaged then
   begin
-    NeedsRestart := True;
-    Result := 'The Microsoft Visual C++ runtime requires a restart. Restart Windows and run PeerSync Setup again.';
-    Exit;
+    ExtractTemporaryFile('vc_redist.exe');
+    RedistCode := RunCommand(ExpandConstant('{tmp}\vc_redist.exe'), '/install /quiet /norestart');
+    if RedistCode = 3010 then
+    begin
+      NeedsRestart := True;
+      Result := 'The Microsoft Visual C++ runtime requires a restart. Restart Windows and run PeerSync Setup again.';
+      Exit;
+    end;
+    if (RedistCode <> 0) and (RedistCode <> 1638) then
+    begin
+      Result := 'The Microsoft Visual C++ runtime could not be installed (exit code ' +
+        IntToStr(RedistCode) + '). See the setup log.';
+      Exit;
+    end;
   end;
-  if (RedistCode <> 0) and (RedistCode <> 1638) then
+  if ServiceExists then
   begin
-    Result := 'The Microsoft Visual C++ runtime could not be installed (exit code ' +
-      IntToStr(RedistCode) + '). See the setup log.';
-    Exit;
+    ExtractTemporaryFile('Stop-ServiceAndWait.ps1');
+    if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{tmp}\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSync') <> 0 then
+    begin
+      Result := 'The PeerSync service or its old process did not exit. See setup log.';
+      Exit;
+    end;
   end;
-  if not ServiceExists then Exit;
-  if IsServiceStopped then Exit;
-  RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSync');
-  for Tries := 1 to 30 do
+  if FileExists(ExpandConstant('{app}\app\PeerSync.exe')) then
   begin
-    if IsServiceStopped then Exit;
-    Sleep(1000);
+    ExtractTemporaryFile('Stop-ClientAppAndWait.ps1');
+    if RunCommand(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{tmp}\Stop-ClientAppAndWait.ps1') + '" -ExecutablePath "' +
+      ExpandConstant('{app}\app\PeerSync.exe') + '"') <> 0 then
+      Result := 'The PeerSync dashboard did not exit. See setup log.';
   end;
-  Result := 'The PeerSync service did not stop within 30 seconds. Stop it in Services and run Setup again.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -210,39 +244,60 @@ begin
   begin
     Account := ExpandConstant('{param:SERVICEACCOUNT|NT SERVICE\PeerSync}');
     RequireSuccess(ExpandConstant('{sys}\sc.exe'),
-      'create PeerSync binPath= "' + ExpandConstant('{app}\service\PeerSync.Service.exe') +
-      '" start= auto obj= "' + Account + '"');
-  end;
+      'create PeerSync binPath= "\"' + ExpandConstant('{app}\service\PeerSync.Service.exe') +
+      '\"" start= auto obj= "' + Account + '"');
+  end
+  else
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'),
+      'config PeerSync binPath= "\"' + ExpandConstant('{app}\service\PeerSync.Service.exe') +
+      '\"" start= auto');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'),
     'failure PeerSync reset= 86400 actions= restart/60000/restart/60000/restart/300000');
+  RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'failureflag PeerSync 1');
   RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--init');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\tools\Set-WerPolicy.ps1') +
+    '" -ExecutableNames PeerSync.Service.exe,PeerSync.exe,psp.exe');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\tools\Update-Helper.ps1') + '" -Register');
   RunCommand(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall delete rule name="PeerSync"');
   RequireSuccess(ExpandConstant('{sys}\netsh.exe'),
     'advfirewall firewall add rule name="PeerSync" dir=in action=allow program="' +
     ExpandConstant('{app}\service\PeerSync.Service.exe') + '" enable=yes');
   RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'start PeerSync');
+  PostInstallSucceeded := True;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  Tries: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
-  if ServiceExists and not IsServiceStopped then
-  begin
-    RunCommand(ExpandConstant('{sys}\sc.exe'), 'stop PeerSync');
-    for Tries := 1 to 30 do
-    begin
-      if IsServiceStopped then Break;
-      Sleep(1000);
-    end;
-    if not IsServiceStopped then
-      RaiseException('The PeerSync service did not stop. Stop it in Services and run Uninstall again.');
-  end;
+  if FileExists(ExpandConstant('{app}\app\PeerSync.exe')) then
+    RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\tools\Stop-ClientAppAndWait.ps1') + '" -ExecutablePath "' +
+      ExpandConstant('{app}\app\PeerSync.exe') + '"');
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+      ExpandConstant('{app}\tools\Stop-ServiceAndWait.ps1') + '" -ServiceName PeerSync');
   if not UninstallSilent then
     if MsgBox('Also remove PeerSync settings, databases, logs and the device certificate?' + #13#10 +
       'Your synced folders and their files are not touched.',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       RequireSuccess(ExpandConstant('{app}\service\PeerSync.Service.exe'), '--remove-data');
+  RequireSuccess(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\tools\Set-WerPolicy.ps1') +
+    '" -ExecutableNames PeerSync.Service.exe,PeerSync.exe,psp.exe -Remove');
+  { Perform these once on every uninstall, even after an install/uninstall/
+    reinstall cycle. Conditional entries in UninstallRun were skipped on the
+    second cycle, leaving a service pointing at deleted files and an orphaned
+    local group. Keep failures visible before Setup removes the payload. }
+  if ServiceExists then
+    RequireSuccess(ExpandConstant('{sys}\sc.exe'), 'delete PeerSync');
+  if GroupExists then
+    RequireSuccess(ExpandConstant('{sys}\net.exe'), 'localgroup "PeerSync Users" /delete');
 end;

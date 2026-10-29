@@ -2,6 +2,7 @@ extern alias native;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Crypto;
 using PeerSync.Engine.Scanning;
 using PeerSync.Engine.Hashing;
@@ -11,9 +12,13 @@ namespace PeerSync.Benchmarks;
 
 internal static class ScanningBenchmark
 {
-    public static async Task<int> RunAsync(string fixture, int count, bool reuseCorpus = false, bool measureReferences = false)
+    public static async Task<int> RunAsync(string fixture, int count, bool reuseCorpus = false,
+        bool measureReferences = false, bool syncFreshPeer = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromHours(3));
+        var totalElapsed = Stopwatch.StartNew();
+        bool measuredGate = count >= 100_000;
         fixture = Path.GetFullPath(fixture);
         if (!reuseCorpus && (Directory.Exists(fixture) || File.Exists(fixture))) throw new IOException("Benchmark requires a new directory.");
         Directory.CreateDirectory(fixture);
@@ -22,34 +27,118 @@ internal static class ScanningBenchmark
         var creation = Stopwatch.StartNew();
         for (int i = 0; !reuseCorpus && i < count; i++)
         {
+            deadline.Token.ThrowIfCancellationRequested();
             string directory = Path.Combine(root, (i / 1000).ToString("D4", CultureInfo.InvariantCulture));
             if (i % 1000 == 0) Directory.CreateDirectory(directory);
             using var file = new FileStream(Path.Combine(directory, i.ToString("D7", CultureInfo.InvariantCulture)),
                 FileMode.CreateNew, FileAccess.Write, FileShare.None);
             // Small nonempty files exercise real hashing and chunk indexing in the initial scan.
             file.WriteByte((byte)(i % 251));
+            if (count == 1_000_000 && i > 0 && i % 100_000 == 0)
+                Console.WriteLine(JsonSerializer.Serialize(new
+                { stage = "generate", files = i, seconds = creation.Elapsed.TotalSeconds }));
         }
         creation.Stop();
         using var keys = FolderKeys.CreateNew();
         string database = reuseCorpus ? "index-" + Guid.NewGuid().ToString("N") + ".db" : "index.db";
+        var firstIndex = Stopwatch.StartNew();
         await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, database));
-        using var scanner = new Scanner(root, index, keys, new byte[32]);
-        var initial = await scanner.ScanAsync();
+        string? diagnosticPath = measuredGate
+            ? Path.Combine(fixture, "logs-" + Guid.NewGuid().ToString("N")) : null;
+        using var journal = diagnosticPath is null ? null : new DiagnosticJournal(diagnosticPath, "scale", debugEnabled: true);
+        using var scanner = new Scanner(root, index, keys, new byte[32], journal: journal);
+        using var sampler = measuredGate ? new ProcessMemorySampler() : null;
+        long hashedProgress = 0;
+        string scanStage = "first-index";
+        var stageElapsed = Stopwatch.StartNew();
+        if (measuredGate)
+        {
+            scanner.Checkpoint = checkpoint =>
+            {
+                if (checkpoint is not ("after-enumerate" or "after-hash" or "before-scan-commit" or "after-upsert")) return;
+                using Process current = Process.GetCurrentProcess();
+                current.Refresh();
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    target = "P5 scanner-stage-memory", scanStage, checkpoint,
+                    seconds = stageElapsed.Elapsed.TotalSeconds,
+                    workingSetBytes = current.WorkingSet64,
+                    privateBytes = current.PrivateMemorySize64,
+                    peakWorkingSetBytes = current.PeakWorkingSet64,
+                    managedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
+                    gcCommittedBytes = GC.GetGCMemoryInfo().TotalCommittedBytes,
+                    hashed = Interlocked.Read(ref hashedProgress),
+                }));
+            };
+            scanner.BytesHashed += _ =>
+            {
+                long completed = Interlocked.Increment(ref hashedProgress);
+                if (completed % 100_000 == 0)
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                    { stage = "first-index", hashed = completed, seconds = firstIndex.Elapsed.TotalSeconds }));
+            };
+        }
+        var initial = await scanner.ScanAsync(deadline.Token);
+        firstIndex.Stop();
+        scanStage = "unchanged";
+        stageElapsed.Restart();
         // ReadIndexBatch(0) is capped at 1000: use the persisted high-water metadata.
         long sequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
-        var unchanged = await scanner.ScanAsync();
+        var unchanged = await scanner.ScanAsync(deadline.Token);
+        sampler?.Stop();
         long finalSequence = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(index.Meta.Find("_local-sequence")!.Value!);
         long rows = index.LocalFiles.Count();
+        bool changedPathsBounded = count <= 10_000 || initial.RequiresNeededRebuild && initial.ChangedPaths.Count == 0;
         bool correct = initial.Hashed == count && initial.Problems.Count == 0 && unchanged.Problems.Count == 0
-            && unchanged.Hashed == 0 && unchanged.Updated == 0 && unchanged.Unchanged == rows && sequence == finalSequence;
-        bool targetMet = correct && unchanged.Elapsed.TotalSeconds < 10;
+            && unchanged.Hashed == 0 && unchanged.Updated == 0 && unchanged.Unchanged == rows && sequence == finalSequence
+            && changedPathsBounded;
+        double? idleCpuPercent = null;
+        long? idleWorkingSetBytes = null, idlePrivateBytes = null;
+        long? peakWorkingSetBytes = null, managedIdleBytes = null;
+        long? gcCommittedIdleBytes = null, sqliteMemoryIdleBytes = null;
+        long? sampledPeakWorkingSetBytes = sampler?.PeakWorkingSetBytes;
+        long? sampledPeakPrivateBytes = sampler?.PeakPrivateBytes;
+        int? memorySamples = sampler?.Samples;
+        if (measuredGate)
+        {
+            using Process process = Process.GetCurrentProcess();
+            process.Refresh();
+            TimeSpan cpuBefore = process.TotalProcessorTime;
+            var idle = Stopwatch.StartNew();
+            await Task.Delay(TimeSpan.FromSeconds(30), deadline.Token);
+            idle.Stop();
+            process.Refresh();
+            idleCpuPercent = (process.TotalProcessorTime - cpuBefore).TotalSeconds /
+                idle.Elapsed.TotalSeconds / Environment.ProcessorCount * 100;
+            idleWorkingSetBytes = process.WorkingSet64;
+            idlePrivateBytes = process.PrivateMemorySize64;
+            peakWorkingSetBytes = process.PeakWorkingSet64;
+            managedIdleBytes = GC.GetTotalMemory(forceFullCollection: false);
+            gcCommittedIdleBytes = GC.GetGCMemoryInfo().TotalCommittedBytes;
+            sqliteMemoryIdleBytes = SQLitePCL.raw.sqlite3_memory_used();
+        }
+        const long memoryLimit = 300_000_000;
+        bool targetMet = measuredGate
+            ? correct && firstIndex.Elapsed.TotalSeconds < 1200 && idleCpuPercent < 1
+                && idleWorkingSetBytes < memoryLimit && idlePrivateBytes < memoryLimit
+                && peakWorkingSetBytes < memoryLimit && sampledPeakWorkingSetBytes < memoryLimit
+                && sampledPeakPrivateBytes < memoryLimit && memorySamples > 0
+            : correct && unchanged.Elapsed.TotalSeconds < 10;
         Console.WriteLine(JsonSerializer.Serialize(new
         {
-            target = "Scanner", files = count, rows, reuseCorpus, database, creationSeconds = creation.Elapsed.TotalSeconds,
+            target = count == 100_000 ? "P5 100k-file scanner" :
+                count == 1_000_000 ? "P5 million-file scanner" : "Scanner",
+            files = count, rows, reuseCorpus, database, diagnosticPath,
+            creationSeconds = creation.Elapsed.TotalSeconds,
+            firstIndexSeconds = firstIndex.Elapsed.TotalSeconds,
             initialSeconds = initial.Elapsed.TotalSeconds, initialHashed = initial.Hashed,
             unchangedSeconds = unchanged.Elapsed.TotalSeconds, unchanged.Hashed, unchanged.Updated,
-            unchanged.Unchanged, sequencePreserved = sequence == finalSequence, targetSeconds = 10, correct, targetMet,
-            scope = "real one-byte files in 1000-file directories, warm local SSD; initial full hashing/signing/indexing then unchanged full walk",
+            unchanged.Unchanged, sequencePreserved = sequence == finalSequence, changedPathsBounded,
+            idleCpuPercent, idleWorkingSetBytes, idlePrivateBytes,
+            peakWorkingSetBytes, sampledPeakWorkingSetBytes, sampledPeakPrivateBytes, memorySamples,
+            managedIdleBytes, gcCommittedIdleBytes, sqliteMemoryIdleBytes,
+            targetSeconds = measuredGate ? 1200 : 10, correct, targetMet,
+            scope = "real one-byte files in 1000-file directories, local SSD; first index includes database open and full hashing/signing/indexing, followed by unchanged walk",
         }));
         if (measureReferences)
         {
@@ -64,7 +153,51 @@ internal static class ScanningBenchmark
                 seconds = clock.Elapsed.TotalSeconds, correct = referencesCorrect, scope = "authenticated production snapshot over the real scanner index; 251 distinct one-byte values" }));
             correct &= referencesCorrect;
         }
+        if (syncFreshPeer && targetMet && correct)
+            correct = await MillionPeerBenchmark.SyncAsync(fixture, root, index, keys, count,
+                totalElapsed, deadline.Token);
         // Preserve the corpus and database for inspection; never delete a caller's directory.
-        return targetMet && correct ? 0 : 1;
+        return targetMet && correct && totalElapsed.Elapsed < TimeSpan.FromHours(3) ? 0 : 1;
+    }
+
+    private sealed class ProcessMemorySampler : IDisposable
+    {
+        private readonly Timer timer;
+        private int stopped, samples;
+        private long peakWorkingSet, peakPrivate;
+        public long PeakWorkingSetBytes => Volatile.Read(ref peakWorkingSet);
+        public long PeakPrivateBytes => Volatile.Read(ref peakPrivate);
+        public int Samples => Volatile.Read(ref samples);
+        public ProcessMemorySampler() => timer = new Timer(_ => Sample(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(250));
+        private void Sample()
+        {
+            try
+            {
+                using var process = Process.GetCurrentProcess();
+                process.Refresh();
+                Raise(ref peakWorkingSet, process.WorkingSet64);
+                Raise(ref peakPrivate, process.PrivateMemorySize64);
+                Interlocked.Increment(ref samples);
+            }
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
+            { /* A failed telemetry sample is visible in the sample count. */ }
+        }
+        private static void Raise(ref long peak, long value)
+        {
+            long before = Volatile.Read(ref peak);
+            while (value > before)
+            {
+                long observed = Interlocked.CompareExchange(ref peak, value, before);
+                if (observed == before) break;
+                before = observed;
+            }
+        }
+        public void Stop()
+        {
+            if (Interlocked.Exchange(ref stopped, 1) != 0) return;
+            using var drained = new ManualResetEvent(false);
+            timer.Dispose(drained); drained.WaitOne(); Sample();
+        }
+        public void Dispose() => Stop();
     }
 }

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Net;
@@ -7,11 +8,42 @@ using System.Security.Principal;
 using System.Text.Json;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using PeerSync.Control.Contracts;
 using PeerSync.Spikes;
 
+if (args is ["service-state", "running", _, _, _])
+{
+    var (owner, processId) = InstalledControlEndpoint.ReadRunningService(args[2]);
+    uint expectedProcessId = uint.Parse(args[4], CultureInfo.InvariantCulture);
+    bool ownerVerified = owner.Value == args[3], processVerified = processId == expectedProcessId;
+    Console.WriteLine(JsonSerializer.Serialize(new { service = args[2], state = "running", ownerVerified, processVerified }));
+    return ownerVerified && processVerified ? 0 : 1;
+}
+if (args is ["service-state", "stopped", _])
+{
+    try { _ = InstalledControlEndpoint.ReadRunningService(args[2]); }
+    catch (IOException ex) when (ex.Message == "The installed control service is not running.")
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new { service = args[2], state = "stopped", rejected = true }));
+        return 0;
+    }
+    Console.Error.WriteLine("FAILED stopped service was accepted");
+    return 1;
+}
+if (args is ["service-state", "missing", _])
+{
+    try { _ = InstalledControlEndpoint.ReadRunningService(args[2]); }
+    catch (Win32Exception ex) when (ex.NativeErrorCode == 1060)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new { service = args[2], state = "missing", nativeError = ex.NativeErrorCode, rejected = true }));
+        return 0;
+    }
+    Console.Error.WriteLine("FAILED missing service was accepted");
+    return 1;
+}
 if (args.Length < 3 || args[0] is not ("server" or "client"))
 {
-    Console.Error.WriteLine("server <pipeName> <allowedSID> [readiness-file] [startup-delay-ms] | client <pipeName> <expectedOwnerSID>");
+    Console.Error.WriteLine("server <pipeName> <allowedSID> [readiness-file] [startup-delay-ms] | client <pipeName> <expectedOwnerSID> | service-state <running|stopped|missing> <serviceName> [expectedOwnerSID expectedPID]");
     return 2;
 }
 string pipeName = args[1];

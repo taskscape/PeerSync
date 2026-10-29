@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Ignore;
@@ -54,6 +55,72 @@ public sealed class ScannerTests : IDisposable
         third.Hashed.ShouldBe(1); third.Updated.ShouldBe(1);
         hashedBytes.ShouldBe(16);
         index.LocalFiles.Find("dir")!.LocalSequence.ShouldBe(directory.LocalSequence);
+    }
+
+    [Fact]
+    public async Task PagedPriorLookupPreservesUnchangedRowsAndFindsDeletionAcrossPageBoundary()
+    {
+        for (int i = 0; i < 1001; i++)
+            File.WriteAllBytes(Path.Combine(Root, $"file-{i:D4}"), []);
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device);
+        var first = await scanner.ScanAsync(Token);
+        first.Updated.ShouldBe(1001); first.Problems.ShouldBeEmpty();
+
+        var unchanged = await scanner.ScanAsync(Token);
+        unchanged.Unchanged.ShouldBe(1001); unchanged.Updated.ShouldBe(0);
+        File.Delete(Path.Combine(Root, "file-1000"));
+        File.WriteAllText(Path.Combine(Root, "file-0000"), "edited");
+        var changed = await scanner.ScanAsync(Token);
+        changed.Deleted.ShouldBe(1); changed.Hashed.ShouldBe(1); changed.Updated.ShouldBe(2);
+        index.LocalFiles.Find("file-1000")!.Deleted.ShouldBeTrue();
+        index.LocalFiles.Find("file-0000")!.Deleted.ShouldBeFalse();
+        index.LocalFiles.Count().ShouldBe(1001);
+    }
+
+    [Fact]
+    public async Task OrderedPriorMergeKeepsUnicodeRowsAndFindsMissingPathAmongNewObservations()
+    {
+        string privateUse = "p-\uE000", emoji = "p-\U0001F600";
+        await Write("p-z", "old");
+        await Write("p-é", "old");
+        await Write(privateUse, "old");
+        await Write(emoji, "old");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device);
+        (await scanner.ScanAsync(Token)).Updated.ShouldBe(4);
+        var unchanged = await scanner.ScanAsync(Token);
+        unchanged.Unchanged.ShouldBe(4); unchanged.Updated.ShouldBe(0);
+
+        File.Delete(Path.Combine(Root, emoji));
+        await Write("p-\uE001", "new");
+        var changed = await scanner.ScanAsync(Token);
+        changed.Deleted.ShouldBe(1); changed.Hashed.ShouldBe(1);
+        changed.Updated.ShouldBe(2);
+        index.LocalFiles.Find(emoji)!.Deleted.ShouldBeTrue();
+        index.LocalFiles.Find(privateUse)!.Deleted.ShouldBeFalse();
+        index.LocalFiles.Find("p-\uE001")!.Deleted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task AbandonedObservationIsDiscardedOnlyAfterItsOwnerReleasesTheLock()
+    {
+        await Write("kept", "user bytes");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        string owner = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(index.DatabasePath)))[..16];
+        string stem = Path.Combine(fixture, "scan-observations-" + owner + "-" + Guid.NewGuid().ToString("N"));
+        string lockPath = stem + ".lock", staged = stem + ".db";
+        File.WriteAllBytes(staged, [1, 2, 3]);
+        using (var ownerLock = new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+        using (var scanner = new Scanner(Root, index, keys, Device))
+        {
+            (await scanner.ScanAsync(Token)).Problems.ShouldBeEmpty();
+            File.Exists(staged).ShouldBeTrue();
+        }
+        using (var scanner = new Scanner(Root, index, keys, Device))
+            (await scanner.ScanAsync(Token)).Updated.ShouldBe(0);
+        File.Exists(staged).ShouldBeFalse(); File.Exists(lockPath).ShouldBeFalse();
+        File.ReadAllText(Path.Combine(Root, "kept")).ShouldBe("user bytes");
     }
 
     [Fact]
@@ -204,6 +271,25 @@ public sealed class ScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task AdversarialInvalidNamesKeepScanProblemsAndPrefixesBounded()
+    {
+        const int invalidNames = 1100;
+        for (int i = 0; i < invalidNames; i++)
+            await Write($"e\u0301-{i:D4}", "invalid native name");
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var scanner = new Scanner(Root, index, keys, Device);
+        var result = await scanner.ScanAsync(Token);
+
+        result.Enumerated.ShouldBe(invalidNames);
+        result.Unsyncable.ShouldBe(invalidNames);
+        result.ProblemCount.ShouldBe(invalidNames);
+        result.Problems.Count.ShouldBe(1001);
+        result.Problems.ShouldContain(problem => problem.Code == "problem-overflow");
+        index.LocalFiles.Count().ShouldBe(invalidNames);
+        (await scanner.ScanAsync(Token)).Updated.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task IncompleteSubtreePreservesOldChildrenAndNeverInventsDeletions()
     {
         await Write("dir/child", "keep");
@@ -257,6 +343,14 @@ public sealed class ScannerTests : IDisposable
         index.LocalFiles.Find("private-name")!.Flags.ShouldBe(LocalFileState.None);
         string log = await File.ReadAllTextAsync(Path.Combine(fixture, "logs", "debug.jsonl"), Token);
         log.ShouldContain("scan.defer"); log.ShouldContain("scan.complete");
+        using (var stage = System.Text.Json.JsonDocument.Parse(log.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .First(line => line.Contains("scan.memory_hashed", StringComparison.Ordinal))))
+        {
+            stage.RootElement.GetProperty("workingSetBytes").GetInt64().ShouldBeGreaterThan(0);
+            stage.RootElement.GetProperty("privateBytes").GetInt64().ShouldBeGreaterThan(0);
+            stage.RootElement.GetProperty("managedHeapBytes").GetInt64().ShouldBeGreaterThan(0);
+        }
+        log.ShouldContain("scan.memory_enumerated"); log.ShouldContain("scan.memory_committed");
         log.ShouldNotContain("private-name"); log.ShouldNotContain("private content"); log.ShouldNotContain(keys.ExportText());
     }
 

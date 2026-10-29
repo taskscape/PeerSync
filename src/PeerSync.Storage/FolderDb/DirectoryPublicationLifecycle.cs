@@ -24,8 +24,12 @@ public sealed partial class FolderIndex
             RequireBlockReferenceRoot(connection, transaction, row.RootId); RequirePublicationExpected(connection, transaction, row);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "DELETE FROM directory_captures WHERE parent_key=$key AND root_id=$root; DELETE FROM directory_publications WHERE path_key=$key AND version=$version;";
-            command.Parameters.AddWithValue("$key", PathRules.Key(row.Path)); command.Parameters.AddWithValue("$root", row.RootId);
-            command.Parameters.AddWithValue("$version", row.Version.ToString("N")); command.ExecuteNonQuery(); return 0;
+            string key = PathRules.Key(row.Path);
+            command.Parameters.AddWithValue("$key", key); command.Parameters.AddWithValue("$root", row.RootId);
+            command.Parameters.AddWithValue("$version", row.Version.ToString("N")); command.ExecuteNonQuery();
+            WakeWaitingParentPublication(connection, transaction, key);
+            WakePublicationBlockedPullRetries(connection, transaction, row.RootId, key);
+            return 0;
         }, cancellationToken);
     }
     public Task<bool> PauseDirectoryPublicationAsync(DirectoryPublication expected, bool paused, long nowTicks, CancellationToken cancellationToken = default)

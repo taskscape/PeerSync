@@ -11,6 +11,7 @@ internal sealed class RelayService(RelayRegistry registry, DiagnosticJournal dia
     public override async Task Pipe(IAsyncStreamReader<RelayChunk> requests,
         IServerStreamWriter<RelayChunk> responses, ServerCallContext context)
     {
+        var connection = context.GetHttpContext().Connection;
         byte[] deviceId;
         try { deviceId = await RendezvousRpcIdentity.RequireAsync(context).ConfigureAwait(false); }
         catch (RpcException)
@@ -20,17 +21,27 @@ internal sealed class RelayService(RelayRegistry registry, DiagnosticJournal dia
             { Level = DiagnosticLevel.Warning, ErrorCode = "unauthenticated",
                 Transport = context.GetHttpContext().Request.Protocol == "HTTP/3"
                     ? DiagnosticTransport.Http3 : DiagnosticTransport.Http2,
-                RemoteAddress = context.GetHttpContext().Connection.RemoteIpAddress,
-                RemotePort = context.GetHttpContext().Connection.RemotePort });
+                RemoteAddress = connection.RemoteIpAddress,
+                RemotePort = connection.RemotePort });
             throw;
         }
         string? encoded = context.RequestHeaders.FirstOrDefault(header => header.Key == "psp-relay-token")?.Value;
         if (encoded is null || encoded.Length != 64)
+        {
+            diagnostics.TryWrite(new("rendezvous.relay_join_rejected", "relay")
+            { Level = DiagnosticLevel.Warning, ErrorCode = "missing-or-invalid-token", Transport = Transport(context),
+                RemoteAddress = connection.RemoteIpAddress, RemotePort = connection.RemotePort });
             throw new RpcException(new Status(StatusCode.Unauthenticated, "A relay token is required."));
+        }
         byte[] token;
         try { token = Convert.FromHexString(encoded); }
         catch (FormatException)
-        { throw new RpcException(new Status(StatusCode.Unauthenticated, "A valid relay token is required.")); }
+        {
+            diagnostics.TryWrite(new("rendezvous.relay_join_rejected", "relay")
+            { Level = DiagnosticLevel.Warning, ErrorCode = "invalid-token", Transport = Transport(context),
+                RemoteAddress = connection.RemoteIpAddress, RemotePort = connection.RemotePort });
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "A valid relay token is required."));
+        }
         RelayRegistry.RelayJoin join;
         try
         {
@@ -40,7 +51,17 @@ internal sealed class RelayService(RelayRegistry registry, DiagnosticJournal dia
         catch (RpcException error)
         {
             diagnostics.TryWrite(new("rendezvous.relay_join_rejected", "relay")
-            { Level = DiagnosticLevel.Warning, ErrorCode = error.StatusCode.ToString() });
+            { Level = DiagnosticLevel.Warning, ErrorCode = error.StatusCode.ToString(), Transport = Transport(context),
+                RemoteAddress = connection.RemoteIpAddress, RemotePort = connection.RemotePort });
+            throw;
+        }
+        catch (OperationCanceledException error)
+        {
+            diagnostics.TryWrite(new("rendezvous.relay_join_rejected", "relay")
+            { Level = context.CancellationToken.IsCancellationRequested ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
+                ErrorCode = context.CancellationToken.IsCancellationRequested ? "client-cancelled" : "join-ended-or-timeout",
+                Transport = Transport(context), HResult = error.HResult,
+                RemoteAddress = connection.RemoteIpAddress, RemotePort = connection.RemotePort });
             throw;
         }
         diagnostics.TryWrite(new("rendezvous.relay_joined", "relay")
@@ -83,4 +104,7 @@ internal sealed class RelayService(RelayRegistry registry, DiagnosticJournal dia
             { SessionId = join.SessionId, Transport = DiagnosticTransport.Relay, Bytes = bytes });
         }
     }
+
+    private static DiagnosticTransport Transport(ServerCallContext context)
+        => context.GetHttpContext().Request.Protocol == "HTTP/3" ? DiagnosticTransport.Http3 : DiagnosticTransport.Http2;
 }

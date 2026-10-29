@@ -1,0 +1,685 @@
+# Physical three-PC LAN soak, 2026-10-27
+
+This is the setup record for Gate P2's three-hour physical recovery soak. It is **not a pass** until all four real hourly captures, the random-operation journals, actual sleep/resume and Wi-Fi switch, and three-machine comparisons are reviewed.
+
+The first run documented below was `cd253776057947ccb61f32923f68c9d1`; its first capture hour was `2026-10-27T15:00:00Z` and its active window ended at 18:00 UTC. It failed. The latest registered attempt is described at the end of this document. Three one-time SYSTEM tasks were registered for the first run at 14:55 UTC and read back as Ready:
+
+| PC | Label | Task |
+| --- | --- | --- |
+| R5-7600X | first | `PeerSync-PhysicalSoak-cd253776057947ccb61f32923f68c9d1-first` |
+| DESKTOP-BN535U0 | second | `PeerSync-PhysicalSoak-cd253776057947ccb61f32923f68c9d1-second` |
+| LARKBOX-X-1 | third | `PeerSync-PhysicalSoak-cd253776057947ccb61f32923f68c9d1-third` |
+
+Before registration, all three installed 1.0.33.0 services were Running. The same preflight counted 10,396,520,008 content bytes on each synchronized root, below the 10 GiB cap. No prior physical-soak tasks or launcher journals were present. The earlier proposed 14:00 run `1f058b35090a426db3db0b3ec3b7aa2a` was retired without a coordinated launch and is not reused.
+
+Each staged kit is outside its synchronized root at `C:\PeerSync-Gate-Evidence\20261027-soak-kit`. The corrected tree collector SHA-256 is `5C1E27BC7E9E75DA29D062C4D11346D9C294BB7963D9B30337609108D1BDED53`; the corrected content-budget walker SHA-256 is `713B9D5E5241E6A03AD0F2F87F2BCF0FC415CCCB88711AFEF7130591AC7A7578`. The launcher SHA-256 is `F3DEC779FAD31E1EAC94CABFD653E256CC0D1DC0A71E3BEABA68F5D955C6650F`. All three copies of each were verified before task registration. The task registration helper was corrected to use Windows' `-InputObject` parameter set without `-Description`; its final staged SHA-256 is `46A71E8364B828D18EFC96DDC3D2EB44974209E741D250033785FD3E51CE6220`.
+
+The launcher schedules captures at hours 0, 1, 2 and 3, with bounded random-operation batches in minutes 20–45 of each active hour. Final read-only capture and comparison can finish after the active window per the [bounded requirement](../requirements/three-hour-ten-gib-test-budget.md). The physical network-change and resume actions, native service health, per-hour content budgets, and exact three-way hashes must still be recorded before the gate is checked. The setup receipts and preflight JSON are retained under ignored `artifacts/field/physical-50k-20261027/`; the original corpus's failed 13:00 capture remains separate [evidence](P2-three-pc-50k-retry-2026-10-27.md).
+
+## Hour-zero checkpoint
+
+All three scheduled launchers and capture loops started. The 15:00 UTC snapshots were copied with source/destination SHA-256 checks into ignored `artifacts/field/physical-50k-20261027/soak-cd253776057947ccb61f32923f68c9d1/hour-0/`. `compare-hour-0.json` reports `match: true` and no issues: each PC has 50,073 files, 82 directories, 10,396,520,008 content bytes and tree SHA-256 `263284B6B378C57FFAA503E09A86C013AF74C3BDDC5049ED7C5CF0938D66F524`. Capture start/end times were first 15:00:00–15:01:26, second 15:00:00–15:02:06 and third 15:00:00–15:11:18 as each PC's UTC clock reported. The third took about 11 minutes 19 seconds, below the procedure's 15-minute per-capture budget.
+
+The two remote clocks read approximately 41 seconds behind the first PC in a bounded round-trip check before capture. This offset does not change the matching nominated hourly digest; subsequent sub-minute recovery timing needs evidence from each PC's local event sequence. Hours one through three and all physical recovery conditions remain unverified here.
+
+## First operation batch and recovery evidence
+
+The 15:00 run did **not** pass. At the first random-operation batch, each launcher recorded `exitCode: null` and stopped its capture loop, even though each corresponding operation journal recorded five completed and zero failed operations. The launcher used Windows PowerShell 5.1 `Start-Process -PassThru`; its returned `Process` object did not expose the exited child's code in this context. A focused reproduction confirmed this behavior. `build/Invoke-PeerSyncPhysicalSoak.ps1` now starts the child through `[Diagnostics.Process]`, redirects its streams inside the child, and reads the actual integer exit code. The tracked [child exit-code control](../../build/Test-PeerSyncSoakChildExit.ps1) passed under Windows PowerShell 5.1: it ran the real operation script, observed exit 0 and five completed operations, and observed exit 1 and nonempty stderr for a deliberate failure. Its local result is retained under ignored `artifacts/field/physical-50k-20261027/child-process-control-20261027T1544/`. The corrected launcher SHA-256 `C66ED66AE4ED16FABA6390FB55119AC616B7542580CF38F1A822FDA1EFF119C3` was staged and verified on all three PCs after the old run ended. This does not retroactively pass the old run.
+
+The second PC actually suspended and resumed during the failed run: local Kernel-Power sleep event 42 and Power-Troubleshooter wake event 1 were observed around 15:16–15:18 UTC on that PC; the service returned to Running. Its unattended sleep policy caused a second sleep shortly after wake. A bounded Wake-on-LAN packet restored it. The original 120-second unattended sleep timeout is temporarily set to 14,400 seconds, with a SYSTEM task to restore 120 seconds; the eventual restoration must be verified. There is not yet evidence of reconnection within 30 seconds. The planned Ethernet-to-Wi-Fi switch was cancelled before execution when the launchers failed; it remains untested.
+
+At about 15:31 UTC, a small manifest of the failed run's operation subtree matched on the first and second PCs (seven files, 164,277 bytes), while the third held two additional third-owned files (nine files, 219,584 bytes). The third service was Running with connected peers but logged repeated bounded `directory.metadata_deferred` timeouts while processing 19–76 graph nodes per attempt. Treat this as an unresolved convergence observation until a later manifest matches or the cause is repaired. No new physical-soak run should be accepted from this mismatched state.
+
+The three-way subtree recheck subsequently matched all nine files and 219,584 bytes at about 15:40 UTC. A read-only inspection of the third PC's SQLite main database found 66 admitted directory metadata sources and 442,335 pending graph-work rows, including retained graphs for the earlier 100,000-file corpus and current 50,000-file corpus. The `immutable` database read intentionally omitted uncheckpointed WAL changes, so these counts are approximate diagnostic context, not a live index acceptance result. The repeated bounded metadata work did not prevent the nine-file native subtree from converging.
+
+## Fresh 16:00 run registration
+
+With the operation subtree matching, three new one-time SYSTEM tasks were registered for a fresh run ID `245d19c6d3bf43dbb8383deed56309ca`, first capture hour 16:00 UTC and active window through 19:00 UTC. Each PC's fresh preflight counted exactly 10,396,739,592 content bytes, leaving 340,678,648 bytes below the 10 GiB ceiling. Each service reported Running and each staged launcher matched the repaired SHA-256 above. Registration returned Ready on all three PCs. This is a new attempt; it has no passing hourly capture yet.
+
+The second PC's temporary unattended sleep timeout remains at 14,400 seconds to keep it awake after a scheduled physical wake. The independent SYSTEM restoration task, using the previously verified restoration script, was moved from 18:25 to 19:30 UTC and read back in Task Scheduler. The original 120-second value must be checked after that task runs. The old run's sleep/wake events remain evidence of an actual suspend and resume but do not by themselves satisfy the new run's recovery timing requirement.
+
+### Fresh hour-zero checkpoint
+
+The three new launchers and capture loops started under their scheduled SYSTEM tasks with identical tool hashes. The fresh 16:00 UTC snapshots were copied with source/destination SHA-256 checks into ignored `artifacts/field/physical-50k-20261027/soak-245d19c6d3bf43dbb8383deed56309ca/hour-0/`. Its comparison reports `match: true` with no issues. Each PC reports 50,082 files, 10,396,739,592 content bytes and tree SHA-256 `04CBC06A183DD0DB0977EDFA3D4ABB932F2AEB6D8F651B4F9AC04D37610C622A`. Capture durations were 1m17s on the first, 2m16s on the second and 6m45s on the third PC, within the 15-minute capture allowance. This is an intermediate checkpoint; later hourly snapshots and recovery probes remain required.
+
+The second PC's fresh scheduled suspend returned at 16:14:51.056 UTC. Its Windows event log records Kernel-Power sleep event 42 at 16:13:03 and Power-Troubleshooter resume event 1 at 16:14:52; the wake task fired at 16:15:01 and exited 0. The PeerSync service stayed Running and first logged authenticated QUIC at 16:14:51.617, about 0.56 seconds after the suspend call returned. It later reported connected peers. The temporary AC wake-timer setting was restored to its original value `0`; the separate unattended sleep timeout remains scheduled for restoration to 120 seconds at 19:30 UTC. This supports transport reauthentication inside the 30-second recovery target; native content recovery still depends on later tree comparisons.
+
+The first random-operation batch on all three PCs completed with integer child exit code 0, five completed operations and zero failed operations per journal. On the first PC, the permission-change probe created a small file, observed a changed DACL, restored the original SDDL exactly and confirmed unchanged SHA-256 `1F25E5091B990A3DA879257320E7F99F461DFC1244D27E4C4F9CCC9AD9C34889`. The second PC's source-bound Wi-Fi route to the first PC passed before scheduling a bounded Ethernet-to-Wi-Fi switch for 16:32–16:36 UTC, with an independent fallback at 16:38. The resulting physical checks are detailed below.
+
+### Fresh physical recovery checkpoint
+
+The second PC authenticated direct LAN QUIC to the first PC's `192.168.0.176` at 16:14:51.617 UTC, shortly after physical wake. By about 16:26 UTC, the permission probe file had arrived on the second PC with the exact SHA-256 above. This verifies native content resumed after its sleep, beyond the transport's quick reauthentication. The second PC's AC wake-timer policy is back at its original `0` value; the unattended sleep timeout restoration remains due at 19:30 UTC.
+
+The scheduled Wi-Fi switch task exited 0. Its journal records switch request at 16:32:03.121 UTC, Ethernet Disabled with Wi-Fi Up and PeerSync Running at 16:32:05.562, and Ethernet Up again at 16:36:06.041. The restoration task exited 0; after verifying Ethernet and PeerSync, the unused 16:38 fallback was removed. The service logged a `network_change` folder rescan at 16:32:03.595 with two visited and zero deferred items, and authenticated QUIC to the first PC's Tailscale address at 16:32:22.722, within 20 seconds of switch request. This establishes service recovery while its active interface was Wi-Fi, with the selected authenticated path carried by Tailscale. It does not claim a direct Wi-Fi LAN transport path or matching later tree content.
+
+The first four random-operation batches on each PC returned exit 0, five completed and zero failed operations per batch. A 16:38 subtree inspection found 14 test files on the first PC, 13 on the second, and eight on the third; the third still lacked first- and second-PC files. A subsequent third-PC index read found new remote rows and needed work, while recent installed-service diagnostics showed pull retries labeled `work-deferred` and pending directory publication. No data-loss conclusion follows from this intermediate lag. The 17:00 full-tree comparison is the first decisive post-operation checkpoint; retain the run as unverified until then.
+
+### Fresh hour-one failure and preserved evidence
+
+The 17:00 UTC comparison **failed** (`match: false`, `tree-mismatch`). Verified source and destination SHA-256 copies of all three native snapshots and `compare-hour-1.json` are under ignored `artifacts/field/physical-50k-20261027/soak-245d19c6d3bf43dbb8383deed56309ca/hour-1/`. The comparison report SHA-256 is `A5369294D9BA1DE4EA49938E1AD9C67B5EF197A61CCBA7DCB4C7FC743EBA8C3F`.
+
+| PC | Files | Directories | Content bytes | Full-tree SHA-256 | Capture end UTC |
+| --- | ---: | ---: | ---: | --- | --- |
+| First | 50,096 | 130 | 10,397,298,433 | `28B527294DD79818B0151CEAD935C092BD9D151AE274AAB33215E686AF1F4A06` | 17:01:32 |
+| Second | 50,095 | 130 | 10,397,186,377 | `4A14FF013634B6F83D6A2A4560CD9AC553A5F163AE47A5CF4101881083BF7E61` | 17:02:13 |
+| Third | 50,091 | 121 | 10,397,081,942 | `45DCDA5966446F7E70CAF28890EADF4544A086AE5C7DA5CCF918A42FA901ECEF` | 17:09:24 |
+
+All totals stayed below 10 GiB. A mismatch at a required checkpoint fails this attempt regardless of later convergence. After the completed hour-one captures, only the three exact run-ID capture-loop processes were validated and stopped; their one-time launcher journals now report `failed` because they were intentionally stopped. The installed PeerSync services remained Running. No hour-two or hour-three pass is claimed.
+
+The third PC's authenticated metadata graph and index were examined read-only. Its ordinary `PEERSYNC-SOAK` publication had seven retries and an incomplete parent-root proof. The old graph's direct child for the fresh run was present but not causally proven against the incoming signed row; the next nested path and its descendants were absent locally despite remote index rows. The parent proof waited for its direct child while the scheduled puller blocked that same child behind the pending parent publication. The ten-minute publication backoff lengthened the wait. The separate `PEERSYNC-GATECORPUS` reconstruction queue was not the ordinary mutation barrier. This is a concrete dependency cycle; the three differing snapshots remain the actual field result.
+
+The source repair permits only a fully scheduled authenticated live receipt for the exact unproven direct graph member to pass its ordinary ancestor publication, subject to the existing case, local-state, target/descendant-publication and native apply guards. It leaves the parent proof and capture epoch checks in place, and an applied direct child wakes the parent publication immediately. Focused Engine and Storage regressions verify that unrelated paths remain blocked and the parent queue is rechecked. The full local Release suites passed after the repair: Engine 1,052/1,052 and Storage 306/306. This repair has **not** converted the failed 1.0.33.0 field attempt into a pass; it requires a new signed deployment and fresh three-hour run.
+
+### Development-signed repair deployment and bounded observation
+
+Commit `683f5ba1e89743b9227b91573c861a0752337c6e` was packaged as development-signed client 1.0.34.0. The installer and manifest record source revision `683f5ba`, installer SHA-256 `C56C5DE6FB57420181F24D32A9B6F55695AE78F0C398901CFF16030887DE8FA5`, and the development signing certificate `6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`. This is local development signing, not release signing. The build manifest reports a dirty worktree because the unrelated, untracked `Sync.zip.tmp` was present; the source repair itself is committed.
+
+Verified installer staging and setup reports under ignored `artifacts/field/physical-50k-20261027/` and `C:\Temp\PeerSync-1.0.34.0\result.json` show setup exit 0 on the third, second and first PCs. Each installed service reports file version 1.0.34.0 and Running. The previously synchronized sentinel files retained their expected native SHA-256 after each upgrade. The failed soak's capture loops were already stopped; this deployment did not restart them or create a new gate attempt.
+
+The third PC logged `directory.ancestor-publication-child-recovery` under its new service process at 17:34:26 UTC, proving the new bypass was reached. A read-only SQLite probe after restart showed total pending publications fall from 97 to 77, while 45 `PEERSYNC-SOAK` paths still needed work. The ordinary `PEERSYNC-SOAK` proof remained incomplete, and the fresh-run `FIRST` and `SECOND` directories still had pull retries. A bounded native subtree comparison at about 17:38 UTC found 14 files on the first PC, 17 on the second and nine on the third, with differing content for one second-PC file. This is **not convergence** and does not pass any hourly checkpoint. Retain the signed deployment and probe evidence, and diagnose the remaining scheduled apply or publication dependency before any new three-hour soak.
+
+### Reconstruction-parent dependency repair and 1.0.35.0 deployment
+
+Read-only first-PC SQLite evidence found a second dependency cycle under the failed soak's `SECOND` subtree. The pending `SECOND` reconstruction publication had a current parent-root proof with complete discovery, a complete authenticated graph and an unproven direct child `SECOND/00`. The child had a clean installed row and a remote needed row, with no ordinary publication at or below its path. Its ordinary ancestors blocked scheduled application, while the reconstruction proof could not complete until that exact child arrived. The 1.0.34.0 direct-child exception excluded reconstruction publications, so the required receipt remained deferred. The guarded read-only query returned true for this exact member when the reconstruction filter was removed.
+
+Commit `7600d44c52d3204a071682080a26cf76c9c0fe95` extends that narrow authenticated direct-child exception to reconstruction parent proofs and wakes either kind of waiting parent after an accepted receipt. The ordinary ancestor barrier, local-state, case-preservation, target/descendant publication, discovery and graph checks remain in place. The full local Release suites passed: Storage 307/307 and Engine 1,052/1,052. The development-signed 1.0.35.0 installer records that source revision, SHA-256 `6E99D11D5DE4DA8045BF19D90D55261E83450AB1CD62CBE78A1A16B0BB812848` and development signer `6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`; its manifest marks `localDevelopmentOnly: true` and `publicReleaseSigning: false`.
+
+Verified 1.0.35.0 setup reports at `C:\Temp\PeerSync-1.0.35.0\result.json` on the third, second and first PCs show setup exit 0, the installed service Running and the previously synchronized sentinel SHA-256 unchanged. On the first PC, a SYSTEM task could not validate the development certificate (`UnknownError`) and stopped before setup. The elevated administrator session validated the same staged installer as `Valid` with the expected signer and hash, then completed setup; the failed SYSTEM report was overwritten by the successful run. After the first PC's 18:01 UTC scheduled retry, its journal recorded six `directory.ancestor-publication-child-recovery` events and its `PEERSYNC-SOAK` needed count fell from 41 to 35. These are intermediate recovery observations, **not** a passing tree comparison or a new three-hour soak.
+
+### Rebase-graph direct-file dependency repair and 1.0.36.0 deployment
+
+The first PC's reconstruction queues then reached `rebase.pending` on direct file members. A read-only check of its `SECOND/00` graph found the missing `ITEM-A0BA9375EA5D46E781BD9EBA8149772F.BIN` after the rebase cursor, with an authenticated complete, non-retiring graph and matching queued capture input. The already proven member before the cursor and an unrelated filename were rejected by the same query. The ordinary ancestor publication blocked that file's scheduled receipt, so the reconstruction queue could not advance. The first PC's file retry log showed the member deferred again at 18:04 UTC.
+
+Commit `fc3ca19a4f0fe5a72046427bdb23cc5208602f2d` extends the existing exact-direct-member exception to a current reconstruction rebase proof. The query requires the queued root, native ID, capture hash and epoch, complete graph, matching directory path, unproven cursor position and unpaused reconstruction queue. The caller still requires a scheduled authenticated remote live winner, a clean installed target (or no target), and no ordinary publication at or below that target. The Storage suite passed 308/308 and Engine passed 1,052/1,052 locally in Release.
+
+The development-signed 1.0.36.0 installer has SHA-256 `6E4522AEEAB26CCAF4F5674F11DAA283E66BCC5EE4DB22E7D7377CA878072258`, manifest source revision `fc3ca19a4f0fe5a72046427bdb23cc5208602f2d` and signer `6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`. Staged hash and Authenticode checks passed on the third, second and first PCs. Their `C:\Temp\PeerSync-1.0.36.0\result.json` reports show setup exit 0, installed version 1.0.36.0, Running services and unchanged sentinel SHA-256. This is a recovery deployment during a **failed** physical soak attempt. Full native convergence and a fresh three-hour, four-checkpoint soak remain unverified.
+
+After 1.0.36.0 started, the first PC logged direct-file recovery events, completed its reconstruction rebase proof and reduced pending soak work from 35 to three by 18:31 UTC. Its ordinary soak publication queue cleared. The third PC's read-only index moved from 45 to 23 needed soak rows by 18:26 UTC. A single bounded native operation-subtree snapshot at 18:31 UTC remains unequal: first PC 28 files/1,049,111 bytes, second 19/706,761, third 20/788,954. Eleven paths were common to all three with matching hashes; the 17 differences were absent paths on one receiver, with no differing content hash for a common path. The ignored snapshot `artifacts/field/physical-50k-20261027/subtree-post136-20261027.json` has SHA-256 `11C3680F8128FB78BCAFF5D7834A413AD7ADA91023B770F15BDE365A90837E15`. This is an intermediate mismatch while retries remain scheduled, and the failed soak stays failed.
+
+### Recovered operation subtree and fresh scheduled attempt
+
+The three installed 1.0.36.0 services continued their queued work without another installer or database edit. Read-only probes showed the first PC's failed-run needed work drain to zero; the second PC's `THIRD` directory and descendants arrived after its scheduled retry, reducing its needed count from 24 to six by 18:55 UTC. The third PC's ordinary soak publication cleared and its needed count fell to two. A new native operation-subtree snapshot at 18:55 UTC reports **28 files and 1,049,111 bytes on each PC**, with identical relative names, lengths and SHA-256 values for every file. Its ignored evidence file is `artifacts/field/physical-50k-20261027/subtree-post136-later-20261027.json`, SHA-256 `C8EFBA77D6C099D4E7CC8CF67A392961EE2A8C8566DA89587CBA8FF94421DE17`. This proves the previous operation subtree recovered, but does not change the failed hour-one checkpoint or establish full-tree convergence.
+
+A **new** physical attempt `2361033ccfdf4aa68b010b6861aa82b0` is scheduled for hourly checkpoints at 20:00, 21:00, 22:00 and 23:00 UTC on 2026-10-27. Three independent SYSTEM tasks read back `Ready`; each launcher preflight measured **10,397,788,703 content bytes**, below the 10 GiB cap, and verified the staged tool hash. The new run uses the same installed development-signed 1.0.36.0 repair. A third-PC SYSTEM Taildrop probe delivered a hash-matched marker to the first PC; a separate task will send each third-PC snapshot after completion even after its temporary WinRM window closes. The second PC's temporary unattended-sleep override has a verified restoration trigger at 00:30 UTC on 2026-10-28. Registration and preflight are not a test pass. The fresh attempt remains unverified until all four complete hourly native tree comparisons and operation/cleanup journals are collected, and the formal release-signed soak remains separate.
+
+At 19:01–19:03 UTC, direct WinRM reads again verified all three installed 1.0.36.0 services Running and the third PC's scoped remoting rule active. The third PC's existing SYSTEM WinRM cleanup trigger was moved from 20:01:29 to 01:10 UTC on 2026-10-28, then read back in Task Scheduler; it remains limited to the first PC's Tailscale source. A local watcher is waiting for the exact first-PC soak task and its launcher journal. The first PC's SYSTEM permission probe is scheduled at 20:30 UTC, conditional on its completed hour-zero snapshot. On the second PC, SYSTEM tasks are scheduled for physical suspend at 20:15, wake at 20:17 and AC wake-policy restoration at 20:19 UTC, then Ethernet-to-Wi-Fi switch at 20:32, Ethernet restoration at 20:36 and independent fallback restoration at 20:38 UTC. Task triggers, SYSTEM principals, wake-to-run settings, installed service/adapters and enabled AC wake timers were read back. Each disruptive script checks that the second PC's hour-zero snapshot is complete before acting; all actual outcomes, reconnection timing and native tree matches remain to be observed. The original unattended-sleep setting still has its separate 00:30 UTC restoration task.
+
+### Fresh 20:00 run: hour-one failure and retry-dependency diagnosis
+
+Run `2361033ccfdf4aa68b010b6861aa82b0` passed its 20:00 UTC hour-zero comparison: each PC had **50,110 files, 139 directories and 10,397,788,703 content bytes**, with the same full-tree SHA-256 `28A8549BAFDB6A8C9C5ECC9CA1DABF8AF727E58749C73177581AB397CE2DB563`. The formal `hour-0/compare-hour-0.json` is retained under ignored `artifacts/field/physical-50k-20261027/soak-2361033ccfdf4aa68b010b6861aa82b0/` (SHA-256 `60455F445CEA3C08A4975B8BD5E3B5E3BCCF8A7D9203DA77254ECC95E6DD60`). All three PCs completed five random-operation batches in the first active hour, each with exit 0 and no capture stderr. The second PC actually suspended and resumed at 20:15–20:17 UTC, then switched Ethernet to Wi-Fi at 20:32 and restored Ethernet at 20:36; independent fallback ran at 20:38. SCM, adapter and QUIC recovery evidence was recorded. The first PC's 20:30 permission probe restored the original SDDL and preserved the file's SHA-256. These exercised recovery steps do not substitute for matching hourly trees.
+
+The required **21:00 UTC hour-one comparison failed**. The first, second and third PCs respectively captured 50,129 / 50,123 / 50,113 files, 158 / 158 / 149 directories, and 10,398,449,938 / 10,398,219,690 / 10,397,819,627 content bytes. Their full-tree SHA-256 values were `06AD045D3ACF49ABA2B2F32E09EABF172A05D550DC2BE9C18D1D95415B60C009`, `98257D5AF2BA6EA882D6681A53BA804217DFB6A0CB68E4F2558CCD4B0D25B14B`, and `1FA67322BDEFC8F026719CCA565AD2774908A0FEB08D46F9433C6F286BA6CF26`. All captures completed within their 15-minute windows and had no stderr; this is a real synchronization miss. The formal `hour-1/compare-hour-1.json` reports `tree-mismatch`, SHA-256 `34FD3E649935E5ED632EBC32CD0DC942BA0DCE688857520F680E48F3EFB61E97`. Each source snapshot was copied with source/destination SHA verification. A read-only operation-subtree manifest (`subtree-hour1-failure-20261027.json`, SHA-256 `EA3C19C1F7C2F11F2E6A78357A406193B644D50C3E692AFB47BBF5BD35AE3DDD`) found missing paths rather than conflicting hashes among common files. Only the three exact capture-loop processes for this failed run were stopped, with PID/command/source validation and receipts in `stopped-after-hour1.json`; installed services were left running. No hour-two or hour-three result is claimed, and later convergence cannot repair the failed hour-one gate.
+
+Read-only live-index probes at 21:13–21:17 UTC found signed `needed` work for new-run direct children on all receivers, many at retry attempt 7 with a ten-minute `next_ticks`. On the first PC, the exact current reconstruction rebase graph was complete and non-retiring, its queued capture input matched, and `SECOND` was an unproven direct member after the rebase cursor. The parent proof had become usable while `SECOND` still retained an older ten-minute pull delay. The first PC's `needed` count fell from 19 to five as other delayed work retried, confirming progress but not the hourly requirement. The second and third probes showed the same class of delayed direct-child work; the third also held 103 queued directory publications, so its full queue remains a separate throughput concern. Exact local probe JSON and remote hash-checked results are retained as `index-probe-hour1-first.json`, `index-probe-hour1-second.json` and `index-probe-hour1-third.json` under the ignored field evidence directory.
+
+The storage repair now wakes only matching delayed live `needed` work when a newly authenticated reconstruction graph or ordinary parent-root witness makes its exact direct member eligible. It preserves retry attempts and leaves all normal apply checks in force. Two new focused storage controls cover unrelated paths and repeated proof reads; the full local Storage suite passed 310/310 and Engine passed 1,052/1,052 in Release. This is source/local verification only. A corrected signed build, physical deployment, complete recheck and fresh three-hour soak are still required before checking Gate P2.
+
+### 1.0.37.0 deployment and remaining queued-publication delay
+
+The proof-transition repair was packaged as development-signed **1.0.37.0** from source revision `3239c2ed567cc6dcd5063e78e68e7de623f9cb2a`. The installer SHA-256 is `E1E409D0E6B530BB21F227C310C0E64C10A166D8E177AD4394C68C661B16ED4D`; the build manifest records `localDevelopmentOnly: true`. Hash and Authenticode checks preceded each installation. Third (`LARKBOX-X-1`), second (`DESKTOP-BN535U0`) and first (`R5-7600X`) setup processes exited 0; all three services report **1.0.37.0 Running**, and each local sentinel hash was unchanged. Upgrade reports are retained at `C:\Temp\PeerSync-1.0.37.0\result.json` on each PC. This deployment confirms no installer regression in the observed sentinels; it does not pass the failed soak.
+
+The first PC's prior failed-run `needed` work drained to zero. Read-only 22:31 local-time probes on the second and third PCs still found **44** and **47** soak `needed` rows; the third's private publication queue fell from **114** to **97** rows after the restart, so it was making progress but had not converged. Exact second/third probe JSON SHA-256 values are `29A7A44D79BA02AC3DEBEE376C6F48A9407D08122C1979394637C04FB8B72E7C` and `BBB62B88D4EF3D9510951B25C6F187327A9548A3D332CF40E6080F5E3F9A294E`. Hash-checked service journals (second `BA54129E55DDDAAC8B7152C1E8D96F0777E9F039409668094D41AFFA1000CB1A`, third `EFEC9058A004B4C6AC76A06E6B1A2156ABD6E781BA787A2392135134B94E49CD`) show continued `puller.work_retry` at the ten-minute cap and parent `directory.publication_retry` for `dependencies.pending`. A queued child publication can commit or be discarded while its waiting parent retains its old retry deadline. The next storage change wakes only that direct parent in the same durable transaction as the child queue release; two focused controls exercise commit and discard, and the full local Storage suite passes **312/312** in Release. A new physical comparison and fresh three-hour run are still required.
+
+The child-release repair was packaged as development-signed **1.0.38.0** from source revision `ab0440bf96eab29f3fa3a4395818d5842ae69d00`, installer SHA-256 `2F1493282D9FDA67799BF91E75A6E79D1C46CEB75A4BBE3E7EA2A2264B26847D`. Hash, manifest revision, development-only flag and Authenticode checks passed. Third and second PC SYSTEM upgrade tasks exited 0, reported **1.0.38.0 Running**, and preserved their sentinel hashes. On the first PC, the initial SYSTEM task stopped before setup because the development signer was trusted in the current user's Root store rather than LocalMachine Root. The failed report is retained as `C:\Temp\PeerSync-1.0.38.0\result-system-failed.json`; automatic approval review rejected the public-certificate machine-trust import. The same package validated `Valid` under the already elevated user, and that account's runner completed setup with exit 0, **1.0.38.0 Running** and unchanged sentinel hash. The one-time failed SYSTEM task was removed; no machine certificate trust was changed.
+
+At the first post-upgrade read-only probe, the second PC still had **44** needed soak rows and **5** private publications; the third had **47** needed soak rows but its publication queue had fallen to **14**. Second/third JSON SHA-256 values are `076D2A754E93739C026D0EE09C5F1150C39A0F097B07A5EF1764E84A452CC598` and `B4EBCAF42C92436E621B8AA505C5C3D7FD34FD5915DD9C95C13CDB81ECBBCF8D`. Both services were Running. The field state was still in flight and not a full-tree comparison; do not start or pass another soak from this checkpoint.
+
+### Exact missing-tombstone dependency and source repair
+
+At 21:44:42 UTC the second PC retried reconstruction publication `PEERSYNC-SOAK/2361033CCFDF4AA68B010B6861AA82B0/FIRST/00`, then deferred `rebase.pending` for another 600,000 ms. The bounded journal extract `second-publication138.json` has SHA-256 `A89E66F7718B9DBAF3F8FDA1C36754C2EA7A0C847ED52770ED327A4AC9E0BAEB`. The read-only `second-dependency138.json` (SHA-256 `78F312D69AE399567B6670704E6E642CAA92475D1DB9BE91CE4BA9AC63DC6329`) proves that the queue, capture, complete nonretiring authenticated graph and rebase input match at epoch 272758. Its single unproven direct member is an absent regular-file tombstone: the local row is missing, the selected remote deletion is scheduled, and the exact graph-membership query admits it. The ordinary ancestor publication blocked that deletion, so the rebase could not finish. This is a specific cycle, not a generic transport outage.
+
+The Engine repair permits a scheduled, complete-range, signed regular-file tombstone with no local row through an ordinary ancestor only when the path is the exact unproven authenticated graph member and has no publication at or below itself. The native target must be absent before reservation and again before durable commit; any concurrent target, incomplete range, case work, unrelated graph member or other policy block remains blocked. The tombstone does not fetch bytes or release the ancestor publication. An interrupted prepared intent abandons safely and retries through the same checks. Five focused controls and the full local Release Engine suite **1,057/1,057** pass. This is source/local evidence; the failed physical attempt remains failed until a verified deployment, matching native trees and a fresh three-hour run.
+
+### 1.0.39.0 field deployment and exact dependency transition
+
+Commit `7a594d36efe630f83847fdfdb35df0ab9cc8f0a8` was packaged as development-signed client **1.0.39.0**. The installer SHA-256 is `89131110577CFCC2371DE550AF5685BF80E4108301FC4E40F213748C9DAEA3D3`; the manifest matches that hash and revision, marks `localDevelopmentOnly: true` and `publicReleaseSigning: false`, and Authenticode reports `Valid` for the pinned development signer `6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD` under the installing accounts. The exact package and manifest were checked before setup on each PC. Third, second and first setup each exited 0; each installed service reports 1.0.39.0 Running, and each previously synchronized sentinel retained its SHA-256. Reports are at `C:\Temp\PeerSync-1.0.39.0\result.json` on the respective PCs. The first PC used its already elevated user account because the prior optional LocalMachine development-certificate trust change was blocked by automatic approval review.
+
+The first post-upgrade read-only index probe found 44/29 needed soak rows on second/third, then 43/29 after the second PC's scheduled retry. Its exact prior missing tombstone was no longer in `needed`. A second read-only dependency query proves its local row now exists as a clean regular-file deletion (`localDeleted=1`, `localFlags=0`) with no needed row; the current matching reconstruction graph and queue remain intact. The latter JSON is `second-dependency139.json`, SHA-256 `948B2226A890FEFF85BF090A29DDD30CA148A04B2AD83A6EB2B7C9D771A3B9F2`. The read-only post-retry index JSON hashes are `F14F2ECA9069FE09B9CDAB441B20C08916CE8079505166C4F99CE4C5FFEF39A1` (second) and `924C1129C1BE0B1B360E26C6B51D2410CC8C0B2AE8E0F55A6F35409872DE7038` (third). This proves the particular blocked deletion advanced, but the reconstruction publication and other needed rows still require convergence; no full-tree equality or new soak pass is claimed.
+
+### Durable metadata yields and 1.0.40.0 field deployment
+
+The stopped 20:00 attempt remains failed. During recovery, the second PC's needed soak rows reached zero; the third still had ten stage-two deletion rows and a parent publication. A read-only native snapshot outside the formal hourly window found 50,132 files, 167 directories, 10,398,480,862 content bytes and the same tree SHA-256 `1CA9FCD7148A0963F16C5645E15ED5A5B5504D4C761FAC7DB1E383D261AF1FA1` on each PC. Its `native-preflight-8835aab1a2fd4236ba7b6f93661d729b/compare.json` correctly reports `capture-time-invalid` and `match:false`; it proves native equality at that observation, not an hourly soak checkpoint. The third PC's earlier service journal snapshot `third-debug-post139-2254.jsonl` contains 34 `directory.graph_failed` and 34 paired `directory.metadata_deferred` events while graph nodes were being durably completed. The ten-second source deadline treated this partial progress as failure and imposed exponential retry delay, contributing to the large third-PC publication backlog.
+
+Commit `4b5b9b7584f193a55de97c3bf3346e7e2d62ad54` retains unrestricted graph work for fast paths. When the source deadline expires after at least one durable graph-node completion, the metadata worker now records a successful partial attempt and resumes without failure backoff; a zero-progress timeout still follows the existing failure policy. The graph journal names a durable timed yield `directory.graph_yielded` rather than `directory.graph_failed`. The new partial-progress regression and the previously failing 2,001-file Puller case pass; the full local Release Engine suite passes **1,058/1,058**. The initial fixed 32-node cap was rejected after that Puller case failed, and is absent from the committed source.
+
+The development-signed **1.0.40.0** installer has SHA-256 `2943E640371FCCA97174169FFC63099BF7F652095CC169B55C4E50E8F709709A`, manifest source revision `4b5b9b7584f193a55de97c3bf3346e7e2d62ad54`, `localDevelopmentOnly:true`, `publicReleaseSigning:false`, and the existing pinned development signer `6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`. The build used existing restored assets and is not locked-restore or release-signing evidence. Third, second and first PCs each verified the exact installer hash, manifest and Authenticode signature, then completed setup with exit 0. Their `C:\Temp\PeerSync-1.0.40.0\result.json` reports each show 1.0.40.0 Running and unchanged sentinel SHA-256. The third/second read-only indexes immediately afterward showed respectively ten/zero needed soak rows; the third publication queue fell from 120 before upgrade to 113 at the first post-upgrade probe. These are recovery observations, not proof of full index convergence or a new three-hour soak. The physical gate, WAN soak, independent review and release signing remain open.
+
+A follow-up hash-preserved third-PC service journal snapshot at 23:10 UTC (`third-debug-post140-second.jsonl`, SHA-256 `51809B98DA95445ACF74225FA1EA3EB2A2ABE2A079528D4133B262E0969AC6B4`) shows the new path executing: 14 `directory.graph_yielded` events cover 185 durably processed nodes, paired with 14 `directory.metadata_progress` events and zero `directory.metadata_deferred` or `directory.graph_failed` events. The publication count fell to 112. This verifies removal of the specific false-failure backoff on the installed third PC; its remaining ten deletions and full convergence still need observation.
+
+### Metadata pass fairness and 1.0.41.0 field deployment
+
+A new read-only graph probe measured **62 incomplete metadata graphs and 360,926 pending graph nodes** on the third PC at 23:14 UTC. Three incomplete graphs each had about 96,000 pending nodes. Its JSON (`graph-probe-post140-initial-third.json`, SHA-256 `AE2942B543750BF216DF5E6B0F5574D92F3E3EE86FA45281C31D05D7118C2551`) reports only coarse source categories and counts. A later read at 23:18 UTC found 360,127 pending nodes, proving progress, but the worker was allowed up to 32 ten-second sources under one folder operation gate before returning to the Puller. The ten stage-two deletion rows and one soak publication remained. A timed graph yield alone could therefore still delay ordinary file retries for minutes.
+
+Commit `9e34f341760094ea2f89a6db90a0b22be8bf8643` adds a ten-second total metadata-pass deadline, keeping the source deadline and unrestricted fast graph path. The graph can save its completed nodes before yielding, while the Puller gets a turn between passes. The adjusted timed-progress regression, the previously sensitive 2,001-file Puller case, and the full local Release Engine suite **1,058/1,058** pass. The development-signed **1.0.41.0** installer has SHA-256 `F6B85FF2848533A8E94F811F4652056BDB0B0E11B8DC6F1302020C2836D3C12F`, source revision `9e34f341760094ea2f89a6db90a0b22be8bf8643`, and the same pinned development signer. The manifest is local-development-only and uses existing restored assets. Third, second and first PCs each verified the exact package and signature, completed setup with exit 0, report 1.0.41.0 Running and preserve the respective sentinel hashes in `C:\Temp\PeerSync-1.0.41.0\result.json`. An immediate index read still found ten needed soak deletions on the third and zero on the second. A new complete physical soak, WAN soak, independent review and release signing remain unverified.
+
+### Deferred deletion recovery after 1.0.41.0
+
+The third PC's exact ten deletion rows still had no local row after deployment. A read-only probe at 23:29 UTC found that each direct parent publication had already cleared, so the next scheduled Puller retry could run through the ordinary signed tombstone path. The retry was due at about 23:34 UTC. At 23:34:41 UTC the third-PC index had **zero needed soak rows**, down from ten, and the second PC remained at zero. The tombstones generated new directory publication work: the third PC then had 141 total pending publications, with one pending soak root, declining to 136 total by 23:36:07 UTC. These are recovery observations; the earlier failed hour-one result remains failed.
+
+A new read-only launcher preflight for a *candidate* fresh run at 02:00 UTC on 2026-10-28 returned `ready` on all three PCs, each with PeerSync 1.0.41.0 Running and 10,398,480,862 initial content bytes under the 10 GiB cap. Its ignored evidence is `artifacts/field/physical-50k-20261027/soak-141-preflight.json`. The candidate run is **not registered** while the third-PC publication queue remains under the soak tree; no hourly snapshot or soak pass is claimed. The old temporary `Sync.zip.tmp` is unrelated and untouched. WAN soak, independent security review and release signing remain open.
+
+At 23:39–23:43 UTC, a fresh read-only native full-tree capture on all three PCs again found exactly **50,132 files, 167 directories, 10,398,480,862 bytes and tree SHA-256 `1CA9FCD7148A0963F16C5645E15ED5A5B5504D4C761FAC7DB1E383D261AF1FA1`** on each. The comparator's `match:false` and three `capture-time-invalid` issues are expected: this readiness capture started about 40 minutes after its nominated 23:00 UTC hour, outside the formal 15-minute hourly window. The report is `native-preflight-4dcbaeb0b8e7486eadb4f99e7911fc96/compare.json`; it is **native equality evidence only**, not a passing soak checkpoint. A separate current-operation-subtree scan at 23:44 UTC found the same 22 paths and 692,159 content bytes with matching relative-name/size/SHA-256 manifests on all three PCs. At 23:43:52 UTC the third PC's total publication queue had fallen to 107, with zero needed soak rows and one pending soak publication. Do not register a new timed run until that publication queue settles and the subtree is freshly rechecked.
+
+### Fresh 01:00 run registration after 1.0.41.0 recovery
+
+The third PC's read-only index at 23:47:07 UTC showed one total publication, **zero pending soak publications** and **zero needed soak rows**. The second PC likewise showed zero pending and needed soak rows. The third-PC probe SHA-256 is `251F7402A3EB26A54A796C81E91E81AA00AEA875531F7287812A9A7233941C42`; the second-PC probe SHA-256 is `2195B5724ACD8F4897342A971BA5EA49330F4819BD09A2E9D29185BAD726EB0F`. A fresh native operation-subtree inspection at about 23:48 UTC found the same **22 relative paths and 692,159 bytes**, with identical per-file SHA-256, on all three PCs. The full-tree readiness equality above remains outside the formal hourly timing.
+
+A **new** run `311fbde49775445997a6f1c1523830a7` was registered for launch at 00:55 UTC and hourly checkpoints at **01:00, 02:00, 03:00 and 04:00 UTC on 2026-10-28**. All three one-time SYSTEM tasks read back `Ready`; each preflight measured 10,398,480,862 content bytes and matched launcher SHA-256 `C66ED66AE4ED16FABA6390FB55119AC616B7542580CF38F1A822FDA1EFF119C3`. Their exact registration receipts are retained in ignored `soak-registration-311fbde49775445997a6f1c1523830a7.json`. The third PC has a separate one-time SYSTEM evidence forwarder beginning at 01:01 UTC, with staged script SHA-256 `878ED08031FA6632E17EF7AA92947F627536CD8690C0B82403390E7018C65DF8`, to Taildrop its completed hourly captures and final journal to the first PC.
+
+On the second PC, the AC wake timer started at its original value `0`. The new run's SYSTEM tasks are registered for suspend at **01:12**, wake at **01:15**, and wake-policy restoration at **01:18 UTC**, then Ethernet-to-Wi-Fi switch at **01:32**, Ethernet restoration at **01:36**, and independent restoration fallback at **01:39 UTC**. The source-bound Wi-Fi route to the first PC passed before registration. A read-back of all six triggers, SYSTEM principals, `WakeToRun` settings and exact run-specific script actions passed; the AC wake timer is now `1` until its restoration task. Receipts are in ignored `soak-resume-registration-...json`, `soak-resume-action-repair-...json`, `soak-wifi-registration-...json` and `second-scheduled-actions-141.json`. The second PC's preexisting temporary unattended-sleep override remains 14,400 seconds and has a verified SYSTEM restoration trigger at **04:30 UTC**, after the final checkpoint. The tasks have not yet executed; neither physical transition nor recovery has passed from registration alone.
+
+All earlier failed hourly attempts remain failed. At registration, this latest attempt had **no hourly pass yet**; its first passing checkpoint is recorded below. Gate P2 requires four in-window three-way native comparisons, successful bounded operation batches, the actual sleep/resume and Wi-Fi transition journals, service recovery and restoration evidence. The WAN soak, independent security review and release signing remain open.
+
+On 2026-10-28 at 00:38 UTC, a read-only third-PC task audit found the temporary
+WinRM cleanup set for 01:10 UTC, during this run. The existing SYSTEM cleanup
+task and Tailscale-only TCP 5985 rule were verified, then only the cleanup
+trigger was moved to **05:00 UTC**, after the final evidence collection and
+within the user-approved six-hour management window. Trigger and next-run
+read-back matched; WinRM remained Running. The ignored exact-run receipt is
+`artifacts/field/physical-50k-20261027/third-remoting-soak141-extension.json`
+(SHA-256 `56CE86C51BE3D5EA06922AE4C2667D5540174634DECB86B8BE74862F2437EE66`).
+This change does not affect PeerSync service or the soak tasks. The second
+PC's Tailscale management channel still reported offline at that time, although
+its LAN neighbor was reachable and the first client reported two connected
+devices. Missing remote collection alone will not be classified as data loss;
+the second PC's locally timed captures must be inspected when access returns.
+
+An unattended first-PC collector is live as process **12384** (`pwsh.exe`, script SHA-256 `F683FA728BFC6F7FB414AF323BD23D410020316589E259816FF591C10C0E5355`). It will begin read-only collection ten minutes after each nominated hour, copy the first and second snapshots with SHA-256 verification, read the third snapshot forwarded by Taildrop, then write the exact three-PC comparison. Its process receipt and JSONL journal are ignored artifacts named `soak-collector-311fbde49775445997a6f1c1523830a7.*`. At 23:59:29 UTC the exact process was live with a `start` journal and empty stderr. An initial Windows PowerShell 5.1 collector launch ended before collection because that child environment did not resolve `Get-FileHash`; its preserved `.first-launch-failed` logs are separate, and the current PowerShell 7 process started successfully. This collector only preserves and compares evidence; it cannot turn a failed hourly capture into a pass.
+
+### 01:00 UTC checkpoint of the new run
+
+The first, second and third SYSTEM launchers entered `Running` for the exact
+`311fbde49775445997a6f1c1523830a7` run. Their hour-zero snapshots all
+report `complete`, **50,132 files**, **167 directories** and **10,398,480,862
+content bytes**. Each has tree SHA-256
+`1CA9FCD7148A0963F16C5645E15ED5A5B5504D4C761FAC7DB1E383D261AF1FA1`.
+The first capture ended at 01:00:19 UTC, the second at 01:02:05, and the third
+at 01:10:27, all within the fifteen-minute hourly capture window. The third
+snapshot's SHA-256 on LARKBOX-X-1 and after Taildrop to the first PC both equal
+`A7870B24FC6F8A456985E9388AE2DE42A626657A8BEDC5E693E09B35839EADE5`.
+
+The unattended collector initially retried because the third capture was still
+running. At 01:11:39 UTC it wrote
+`soak-311fbde49775445997a6f1c1523830a7/hour-0/compare-hour-0.json`,
+with `machineCount: 3`, `match: true` and no issues. The comparison file's
+SHA-256 is `FCBBDCED9C1BF23A609FF21A783EE9448CB35F0857B07736122BE051DBBA6116`.
+This is **one of four** required physical checkpoints. The 02:00, 03:00 and
+04:00 comparisons, random operation batches, actual sleep/resume and Wi-Fi
+transition, service recovery and cleanup remain unverified; Gate P2 stays open.
+
+### Second PC physical suspend and resume
+
+For the same run, `DESKTOP-BN535U0` recorded a suspend request at 01:12:01 UTC,
+the suspend call returning at 01:14:51, and its scheduled wake task firing at
+01:15:02. Windows Kernel-Power events 42 and 107 corroborate the power
+transition. The three exact SYSTEM tasks for suspend, wake and AC wake-policy
+restoration each report result 0. At 01:18:00 the restoration journal recorded
+the original AC wake-timer value `0`; an independent `powercfg /qh` readback
+confirmed `0x00000000`. At 01:24:24 the 1.0.41.0 PeerSync service was Running,
+Ethernet was Up, and `psp status` reported production sync available with
+accepted peer rows. The Tailscale management route returned after the wake.
+The read-only receipt is ignored
+`artifacts/field/physical-50k-20261027/second-resume-311fbde49775445997a6f1c1523830a7.json`
+(SHA-256 `F199E6F43424A21E121460BB2176F52BD1190A9BC1D784F88921037D04E0B1F3`).
+The service journal query yielded no matching recovery or rescan event in the
+bounded 01:12–01:18 window, so **the 30-second reconnect/rescan deadline is
+not proven** by this receipt. The later Wi-Fi transition is recorded below;
+three later hourly comparisons, operations and final cleanup remain pending.
+
+### Second PC physical Wi-Fi switch and restoration
+
+The exact second-PC SYSTEM switch task exited 0. Its journal recorded the
+switch request at 01:32:02 UTC and Ethernet Disabled with Wi-Fi Up at
+01:32:04. A live read showed the route to the first PC sourced from
+`192.168.10.152` on Wi-Fi while Ethernet was disabled. The service remained
+Running, with production sync available and accepted peer rows. Network-change
+folder scans completed at 01:32:02, less than a second after the request.
+
+The first `service.network_recovery_started` event was at 01:32:02.7259033;
+its `service.network_recovery_complete` event was at 01:32:35.7342733,
+**33.008 seconds later**. The recovery loop reset three active sessions
+sequentially before completing. This exceeds the plan's 30-second recovery
+target on that diagnostic; the receipt does not prove that all peers reconnected
+inside the deadline. Later redundant network-change scans logged three
+`IOException` failures, as well as successful scans. They need correlation
+with the hourly tree comparisons before the gate can be judged.
+
+The restoration task and independent fallback both exited 0. Their journal
+entries show Ethernet Up at 01:36:06 and again at 01:39:00; the route to the
+first PC returned to `192.168.0.183` on Ethernet. At 01:39:42 the 1.0.41.0
+service was Running, production sync was available and eight accepted peer
+status rows were present. The final read-only receipt is ignored
+`artifacts/field/physical-50k-20261027/second-wifi-311fbde49775445997a6f1c1523830a7.json`
+(SHA-256 `77D321D2A37F6DBA2E2B82571533EFA620D1B74ACF3D739F8BA32FA6179C3A40`).
+No installed binaries or active soak tasks were changed during the transition.
+
+The concurrent-session recovery change was packaged after this observation as
+development-signed client installer **1.0.42.0** from source revision
+`e500ea653f04a71963d72f4d7b9aadfb0cdd3b70`. Local SHA-256 of
+`artifacts/installer/PeerSync-Setup-1.0.42.0-x64.exe` matches its manifest:
+`876C4B7D9393049E07607E66CAE70242ECE6EBC0F731C586A72DD0FFC56FA694`.
+Authenticode is `Valid`, signer thumbprint is
+`6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`, and the staged service
+file version is 1.0.42.0. Its manifest is `localDevelopmentOnly: true`;
+this is **not** a public release signature. The package has **not** been
+installed on any of the three PCs during this run. Parser-checked remote
+upgrade runners are prepared as ignored field artifacts, pending the final
+01:00–04:00 run evidence and failure inventory.
+
+### 02:00 UTC capture failure and guarded stop
+
+This exact attempt **failed** at hour one. The first and second PCs completed
+their 02:00 snapshots at 02:00:18 and 02:02:11 UTC: both report 50,146 files,
+186 directories, 10,398,907,208 content bytes and full-tree SHA-256
+`1AD670D3C02F45FFCC12282DACD372DBE48C018A50D356118D475C0D0CD46FC8`.
+The third PC started at 02:00:21, but its full native-byte scan took until
+02:28:39 and wrote `status: failed`, `errorType: MethodInvocationException`.
+The installed 1.0.41.0 collector recorded only that wrapper type, so the
+underlying file or I/O cause cannot be established from this report. Its
+capture loop ended after one of four requested hours, and the 02:25 unattended
+collector deadline independently recorded `hour-missing`. No hour-one
+three-PC match or later-hour result is claimed. The 01:20–01:45 random
+operation batches on all three PCs had exited 0; a third-PC 02:20 batch also
+completed while its scan was still running, so scan/workload overlap is a
+possible contributor, not a proven root cause.
+
+After verifying the exact failed third snapshot, the collector's missed-hour
+entry, the first and second complete snapshots, and each run-specific encoded
+capture command, only the first and second capture-loop processes and the
+unattended collector were stopped. Their launchers recorded failed endings;
+the third launcher had already failed. All three installed PeerSync services
+remained Running. The ignored stop receipt is
+`artifacts/field/physical-50k-20261027/stopped-after-hour1-311fbde49775445997a6f1c1523830a7.json`
+(SHA-256 `9493FC7ED17A9ACD517B09D56CAF70E333D3DF50FD70B9AF3C3FC30593AEDA8A`).
+The collector journal SHA-256 is
+`458E156CAF12F8FC9980483D150DCDBBCAF2496EF52C7F3ED71F50D2AD7D691B`;
+the third failed snapshot SHA-256 is
+`A208C97C04DCCEBF2C720D717E5AC4B9A7CDBAD7CDD77426477ABBB4C1155F45`.
+
+The next-source collector now records the scan stage, root exception type,
+HRESULT and a hash of the affected relative path. It uses a 1 MiB buffered
+sequential file stream for the full native hash. The launcher waits for its
+own completed hourly capture before beginning that hour’s random operations
+and fails explicitly if the capture misses the operation window. A real
+Windows PowerShell 5.1 long-path control and the positive/negative three-hour
+report controls passed locally; an exclusive-file negative control produced
+`hash-file`, root `IOException`, `0x80070020` and a path hash. These are
+local harness checks. A new full physical run and the 1.0.42.0 installed
+recovery check remain required; Gate P2 stays open.
+
+### Buffered collector diagnostic and installed 1.0.42.0 recovery build
+
+Before restarting the gate, a one-time SYSTEM task on LARKBOX-X-1 ran the
+new collector against the full physical tree. Its exact tool SHA-256 was
+`E8A692957A2D0A37996B43409170FCA4AC7AC91F612ECDC67487DEB90FE2CF37`.
+The report for diagnostic run `5bad7d57a91c49c39e4e90b4904357c3` is
+`complete`: 50,145 files, 195 directories, 10,398,885,709 content bytes,
+tree SHA-256 `805BB8D74D7322A067781E958356A4F72AD95D0549819DEFFF53AF0A163CF54F`.
+It ran from 02:37:35 to 02:42:47 UTC, about 5 minutes 12 seconds. The task
+result was zero and the task was removed. The report, failed prior report and
+prior capture journal are preserved under ignored
+`artifacts/field/physical-50k-20261027/third-capture-preserved-20261028`;
+the new report's SHA-256 is
+`945507BDC1979497EC2539C17CB707A96C766B8C0841BB2C3ADADEE7365D1968`.
+This single-machine diagnostic shows the revised collector finished within
+the hourly capture window. It does not establish three-way equality.
+
+The development-signed 1.0.42.0 client installer was then applied on
+R5-7600X, DESKTOP-BN535U0 and LARKBOX-X-1. Each host's setup exited zero,
+the installed service file reports 1.0.42.0, PeerSync is Running and its
+pre/post-upgrade sentinel SHA-256 is unchanged. The LARKBOX-X-1 setup report
+records 02:46:51–02:47:41 UTC, `status: ready`, valid signer
+`6AE1CBFC31F1DB189AF03A82D60C535AE8E0A7BD`, and installer SHA-256
+`876C4B7D9393049E07607E66CAE70242ECE6EBC0F731C586A72DD0FFC56FA694`.
+Its one-time upgrade task was removed. The first-PC report is at
+`C:\Temp\PeerSync-1.0.42.0\result.json`; each remote PC retains the same
+path locally. No fresh physical Wi-Fi or suspend-recovery timing has been
+measured on 1.0.42.0 yet.
+
+The updated seven-file soak kit is SHA-256-verified outside the synchronized
+roots on all three hosts at `C:\PeerSync-Gate-Evidence\20261028-soak-kit`.
+An initial content-budget preflight found 10,398,979,724 bytes on the first
+and second hosts, and 10,398,879,379 on the third. All are below 10 GiB, but
+the third differs by 100,345 bytes; this is a preflight observation, not a
+passing tree comparison. A separate three-machine baseline capture is queued
+for 03:00 UTC under run `bfb1bf59e40a4cc4b6a11094901d04cf`. The new
+three-hour soak will start only after the baseline and installed-version
+preflight establish an acceptable initial state. Gate P2 remains unchecked.
+
+### 03:00 baseline failure and publication-retry diagnosis
+
+The 03:00 UTC baseline did **not** pass, and no new three-hour soak was
+registered. The first and second SYSTEM collectors completed with 50,154 and
+50,151 files, respectively, and different native tree hashes. The third
+collector failed at 03:04:25 UTC while re-enumerating because its tree entry
+count changed during measurement. Its task exit was 1; the other two task
+exits were 0. The three reports and hash-checked transfer receipt are retained
+under ignored `artifacts/field/physical-50k-20261027/baseline-142-bfb1bf59e40a4cc4b6a11094901d04cf-preserved2`.
+The comparator reports `match:false`, including `snapshot-invalid` and
+`tree-mismatch`; its SHA-256 is
+`029F056A91C892670B39A2AFF3609C37A2002B9BDE64556A7C03D3D163219ADE`.
+
+A read-only native subtree inspection after the failure found 20, 21 and 19
+files on the first, second and third PCs, with seven differing relative paths.
+The third PC's local index retained an older 14,148-byte version of one file
+whose current 27,389-byte version was present in both other indexes. A
+read-only SQLite probe found all advertised remote index ranges complete on
+the third PC, but 13 needed rows and 27 directory publications under the
+failed run. The same probe found pending work on the other PCs. The observed
+lag is therefore in apply/publication work after index receipt, not evidence
+of a missing index page. Several retries had reached the ten-minute cap while
+ordinary directory publications were pending. A source repair now wakes only
+matching signed pull retries in the affected path branch when a publication
+commits or is discarded; the normal applier still validates all guards. The
+transactional commit rollback and literal sibling boundary cases pass focused
+storage tests locally. Gate P2 remains unchecked.
+
+### 1.0.43.0 publication-retry deployment and convergence checkpoint
+
+The development-signed 1.0.43.0 client installer carries source revision
+`b0a57a69f1af6ca424ff2150cd555e6a3669a2b3` and SHA-256
+`3C30FE8072CA5CDD7D3F6EAAC6AD8DE7E1EE9EF270F56FEDA9A7087A32E2F271`.
+The third, second and first PCs each verified the staged hash, manifest and
+development Authenticode signer, then completed setup with exit zero. Their
+installed services report 1.0.43.0 Running, and each preserved sentinel's
+native SHA-256 stayed unchanged. The three setup reports, copied with matching
+source/destination hashes, are under ignored
+`artifacts/field/physical-50k-20261027/upgrade-143-evidence/`. The third-PC
+report is SHA-256 `896732DEC0AA7ADD39E49265B1884BC8E5844D530A52519D565EEE2EA83DF4D7`;
+the second is `887E3CF944C36A75322477CD9910C344A5C980AA4B1C879BDA9B1A07A37FE8DE`;
+the first is `78A3ECE1ADA0214472CB6E278BE9694A7BFB313373CAF2A411A93F82D269CB58`.
+
+This is a deployment check, not a convergence pass. At approximately 03:34
+UTC, read-only index probes found the failed-run needed and publication queues
+empty on the first and second PCs, but the third still held seven needed rows
+and 27 directory publications. Two needed regular files under `SECOND/02` and
+`SECOND/03` were still absent from the third native subtree. All advertised
+remote index ranges were received. The third service journal showed continuing
+bounded directory-capture passes; a fresh three-machine baseline is required
+after the queues settle. No new three-hour soak was registered at this
+checkpoint, and Gate P2 remains unchecked.
+
+### 04:00 equal native trees and capture-timing retry
+
+The 04:00 UTC baseline run `d96780a173a5415fad677ae95a2cf280` found
+the same 50,154 files, 195 directories, 10,399,184,958 native content bytes
+and full tree SHA-256
+`70F8577BF8775D14D240B1A6EEA4255D1869690216C9258106931BB667927FC3`
+on all three installed 1.0.43.0 PCs. This establishes a native-content
+convergence observation below the 10 GiB content cap. It does **not** pass the
+strict baseline comparator: the third collector's scheduled task started at
+03:45 UTC, waited until 04:00, and its 30-minute task lifetime stopped the
+scan around 04:15 before it wrote a snapshot. Its journal had only a start
+record, no snapshot, and Task Scheduler reported `267014`. The task action
+and service were unchanged. A bounded rerun extended only that exact task's
+lifetime to 65 minutes and completed at 04:31 UTC; the first and second
+snapshots were refreshed concurrently. Their original successful snapshots
+were preserved under `*-original.json` with verified SHA-256. All three retry
+snapshots completed with exit zero and identical native tree hashes.
+
+The comparator still correctly returned `match:false`, with three
+`capture-time-invalid` issues: all retry scans started after the required
+first 15 minutes of the nominated 04:00 hour. The hash-checked snapshots,
+`compare.json` and receipt remain under ignored
+`artifacts/field/physical-50k-20261027/baseline-143-d96780a173a5415fad677ae95a2cf280-preserved2`.
+No soak was registered against that invalid receipt. A distinct 05:00 UTC
+baseline run `2295504e687f4bf2b545025d9dca1e32` is registered on all
+three PCs with the corrected 65-minute task limit. The third PC's existing
+Tailscale-only WinRM cleanup is scheduled for 09:45 UTC, and the second PC's
+temporary unattended-sleep setting is scheduled to restore at 09:30 UTC.
+Those temporary management and power changes do not count as a baseline or
+soak pass. The next three-hour soak may be registered only if the 05:00
+snapshots pass the strict three-machine comparator.
+
+### 05:00 strict baseline pass and 06:00 soak registration
+
+Run `2295504e687f4bf2b545025d9dca1e32` passed the strict 05:00 UTC
+three-PC comparator. All three installed 1.0.43.0 collectors started within
+seven seconds of 05:00, exited zero, and reported 50,154 files, 195
+directories, 10,399,184,958 native content bytes and the same full tree
+SHA-256 `70F8577BF8775D14D240B1A6EEA4255D1869690216C9258106931BB667927FC3`.
+The third scan ended at 05:19:31 UTC, within its corrected 65-minute task
+lifetime. The comparator returned `match:true`, `issues:[]` and exit zero;
+its SHA-256 is
+`E0E26CDF1F0C00893626A6DE123B40CAF5CC4E45F7C822E2A76803D8087C5D00`.
+The three snapshots, comparison and hash-checked transfer receipt are under
+ignored `artifacts/field/physical-50k-20261027/baseline-143-2295504e687f4bf2b545025d9dca1e32-preserved2`.
+This proves a common starting tree; it does not establish the original
+corpus's fresh-peer convergence time.
+
+The second PC unexpectedly entered sleep at 05:15:14 UTC after its baseline
+capture, despite AC standby being disabled and a four-hour temporary
+unattended-sleep setting. Kernel-Power event 42 identifies the reason as
+`System Idle`; Power-Troubleshooter event 1 reports an unknown wake source
+at 05:17:59 UTC. A bounded Wake-on-LAN recovery also reached it. A PeerSync
+scheduled-task inventory found no task nominated for 05:15. The installed
+PeerSync service was Running after
+wake. Its saved `Zag` Wi-Fi profile was unavailable at this location; the
+available saved `ZAG6` profile connected with Wi-Fi address
+`192.168.10.152`, and a source-bound ping to the first PC succeeded twice.
+The unexplained sleep remains an observed availability incident and must be
+accounted for in the soak outcome.
+
+Against the passing receipt, run `3f81e62b8aad49048073be5801d2622c`
+registered the 06:00–09:00 UTC three-PC physical soak tasks with the same
+10,399,184,958-byte starting content on each PC. The third-PC hourly
+forwarder, first-PC 06:30 permission mutation, second-PC 06:15/06:17
+sleep/wake sequence and second-PC 07:32–07:38 Ethernet/Wi-Fi switch and
+restore tasks are registered. These are scheduled operations, not a soak
+pass. The pending hourly snapshots, native-byte evidence, service uptime,
+cleanup results and final full-tree comparisons determine the gate.
+Four first-PC collectors are also scheduled for 06:25, 07:25, 08:25 and
+09:25 UTC under the logged-on administrator account. They copy each host's
+snapshot with source/destination SHA-256 checks and write an hourly comparison
+and a local collector status receipt. A failed or absent receipt remains a
+failed or incomplete hourly gate; the task schedule alone is not evidence of
+successful collection.
+
+### Aborted 06:00 run and fresh 09:00 attempt
+
+The 06:00 UTC run `3f81e62b8aad49048073be5801d2622c` did not start on
+all three machines. The first and second launchers recorded `start`, but the
+third scheduled task exited 1 before writing its first launcher journal row.
+Task Scheduler on that PC reports an exact 05:55:00 UTC start and result 1;
+its Operational log has no matching event in the 05:50–06:10 window.
+The original scheduled action discarded standard error, so the exact
+pre-journal exception is unknown. A separate read-only content scan on the
+third PC succeeded with 10,399,184,958 bytes in 86.392 seconds. The first
+and second capture loops were stopped before hour zero, after checking their
+exact run identity; they recorded zero operation batches. Every remaining
+task for this run, including second-PC power and network changes, was
+disabled and archived with its definition. This run does not count toward
+the physical soak gate.
+
+The task registrar now schedules launch 20 minutes before hour zero and
+captures task-level stdout, stderr and pre-journal exceptions. Its
+`-PreflightOnly` path passed on a disposable fixture. The revised registrar
+was staged with a matching SHA-256 on all three PCs. Run
+`08c8a8e8facf40228fc0737e961b13b0` is scheduled for a fresh strict
+07:00 UTC baseline; a distinct three-hour run
+`18ae0e008618401d80953797ae6703b4` is reserved for 09:00–12:00 UTC
+only if that baseline passes. Registration, hourly comparison, operations
+and cleanup remain unverified. The second-PC temporary sleep policy has an
+automatic restore at 12:45 UTC, and third-PC temporary WinRM has automatic
+cleanup at 13:15 UTC.
+The three first-PC scheduling actions for baseline start, baseline collection
+and new-run registration retain their original triggers and principals, now
+capture separate task stdout/stderr files, and passed decoded-action syntax
+and Task Scheduler trigger read-back. This closes the previous blind spot for
+errors before a field wrapper can write its own status receipt.
+The second PC was live and reachable at 06:27 UTC with 1.0.43.0 Running,
+Ethernet and Wi-Fi both Up, and a source-bound Wi-Fi ping to the first PC
+passing. Its AC wake-timer setting was still `1` after the aborted run's
+tasks were disabled. At 06:30 UTC, with zero old-run tasks enabled, the
+original `0` value was restored and read back. The new run's guarded
+sleep/wake registration can now perform its own enable/restore sequence.
+An exact final collector is scheduled for 12:58 UTC, after the hour-three
+snapshots and before the third PC's temporary WinRM cleanup. It copies each
+run-specific native snapshot, launcher/capture/operation journal and physical
+action record from all three PCs into separate local evidence directories,
+verifying each copied file's SHA-256 against its source. Its `complete`
+status means only that collection succeeded; the four hourly comparisons,
+operation results, physical transitions and cleanup must still be audited
+before a gate can pass.
+The 20-minute launch lead exposed a task-lifetime mismatch: the previous
+4 h 10 min Task Scheduler limit could stop a launcher ten minutes before its
+one-hour final read-only capture grace ended. The registrar now grants
+4 h 30 min (20-minute lead, three-hour active window, one-hour capture
+grace and ten-minute shutdown margin). Its revised source SHA-256
+`EB792F12D560405DA4BAC75A91635ED9B859F6805840E68706379A36FFAA1C4B`
+was staged and read back on all three PCs before the 08:00 UTC registration
+task; the previous registrar is preserved outside the shares on each PC.
+At 06:40 UTC the first-PC baseline start task exited zero and wrote a
+`complete` receipt for all three distinct physical hosts. Read-only Task
+Scheduler checks then confirmed each exact 07:00 baseline capture task was
+`Running` under SYSTEM, with PeerSync 1.0.43.0 services Running. The 07:00
+snapshots and later strict comparison are still pending; a running task is
+not a baseline pass.
+A read-only second-PC timing collector is staged with SHA-256
+`F88DF08114D3BFC10E190C2B8C746E119197C7F6E133BAC53BA6E92EC78F81C2`
+and scheduled under SYSTEM at 10:55 UTC. It will select service network
+change/recovery events from 09:35–10:50 UTC into a sanitized local report
+after the sleep/wake and Wi-Fi transition windows. Its output is timing
+evidence to review against the 30-second recovery requirement; registration
+alone does not verify recovery.
+An exact one-time task using the same interactive elevated principal passed
+before launch: it decrypted the locally protected third-PC credential and
+authenticated to both remote Windows identities at 05:37 UTC, with task
+result zero. Its task was removed; the sanitized readiness receipt remains
+under ignored `artifacts/field/physical-50k-20261027/soak-collector-principal-143.json`.
+At that check, all three services were Running and C: free space was about
+181 GB, 17.6 GB and 102 GB on the first, second and third PCs. The workload
+script remeasures content before each five-operation batch and reserves the
+maximum simultaneous growth of all three hosts; the starting content leaves
+about 338 MB below the 10 GiB cap. These preflights do not prove that the
+scheduled hourly collectors will succeed.
+
+### 07:00 baseline recovery and 09:00 soak registration
+
+The 07:00 UTC baseline capture completed on all three physical PCs running
+1.0.43.0. The third PC needed 29 minutes 11 seconds for its 50,154-file
+scan, finishing at 07:29:24 UTC. The scheduled first-PC collector had run at
+07:28 and failed because that snapshot did not yet exist. Its failed status
+and partial copies remain preserved. A separate strict comparator copied the
+three unchanged 07:00 snapshot files, checked transfer hashes and task exit
+codes, and returned `match: true` with no issues: each snapshot reports
+50,154 files, 195 directories and 10,399,184,958 native bytes, with full
+tree SHA-256
+`70F8577BF8775D14D240B1A6EEA4255D1869690216C9258106931BB667927FC3`.
+The supplemental receipt is under ignored
+`artifacts/field/physical-50k-20261027/baseline-143-08c8a8e8facf40228fc0737e961b13b0-supplemental/`.
+
+Run `18ae0e008618401d80953797ae6703b4` was canceled before launch
+because its 20–45-minute operation window would overlap the observed slow
+scan. Its registration and final-collector tasks on the first PC and the
+second-PC recovery-timing task were disabled. A first replacement registration
+`64b268c301794be78cd711a10ca2db58` failed before creating any launcher
+task because the field registrar copy had an older SHA-256 than the staged
+canonical source. Its failed receipt is retained. The canonical registrar
+SHA-256 `EB792F12D560405DA4BAC75A91635ED9B859F6805840E68706379A36FFAA1C4B`
+was then staged and checked on all three hosts.
+
+The launcher now limits random-operation starts to minutes 35–50 of each
+active hour, requires a completed batch in each of those hours, and bounds
+each batch by minute 50. This leaves the first 35 minutes for native scans
+and ten minutes for convergence before the next top-of-hour capture. The
+changed launcher SHA-256
+`DE0B79D616A5FE6ACA1B4198BF23918940A9C103E090C1B08BCFA1E65DC1BB07`
+was staged and read back on all three PCs. The distinct 09:00–12:00 UTC run
+`f899ccb822fd4298ab08b68f6bf743c4` is registered with four hourly
+comparators at minute 50, a first-PC permission check, second-PC sleep/wake
+and Ethernet/Wi-Fi switch tasks, a second-PC network-recovery timing report,
+third-PC evidence forwarding and a 12:58 UTC final collector. All exact
+run tasks read back `Ready` and all services read back `Running`; this is
+registration evidence, not a soak result. Gate P2 remains unchecked pending
+all four hourly comparisons, the native operation journals and physical
+transition/recovery evidence.
+
+At 08:17–08:32 UTC on 2026-10-28, read-only checks found all three physical
+PCs online: `R5-7600X`, `DESKTOP-BN535U0` and `LARKBOX-X-1` each reported
+PeerSync 1.0.43.0 `Running`, `productionSyncAvailable=true`, connected peers
+and its exact `f899ccb822fd4298ab08b68f6bf743c4` launcher task `Ready` for
+08:40 UTC. The second PC's Ethernet and Wi-Fi adapters were both `Up`; its
+scheduled sleep/wake and Wi-Fi switch/restore tasks were `Ready`. The third
+PC's read-only check used its existing temporary WinRM credential and restored
+the first PC's previous WinRM and TrustedHosts state afterward. This confirms
+the second PC is available before launch; no soak result is inferred.
+
+### 10:32 UTC physical Wi-Fi switch and route limitation
+
+For run `f899ccb822fd4298ab08b68f6bf743c4`, the second PC's scheduled
+switch task exited zero at 10:32 UTC. Its journal records Ethernet disabled
+at 10:32:04.544 UTC, Wi-Fi `192.168.10.152` Up and PeerSync Running. A
+read-only remote check during the interval found the route to the first PC's
+`192.168.0.176` through Wi-Fi. The scheduled restore task exited zero;
+Ethernet was Up again at 10:34:05.185 UTC, with PeerSync still Running.
+The fallback task also exited zero at 10:36 UTC, leaving Ethernet Up. The
+second-PC recovery-timing collector is due at 10:55 UTC and the later formal
+hourly comparisons are pending.
+
+The first PC's installed-service journal records an authenticated QUIC
+candidate to the second PC's Tailscale address `100.88.55.83` at
+10:33:12.160 UTC during the Wi-Fi-only interval, followed by direct LAN QUIC
+to `192.168.0.183` at 10:34:50.242 UTC after Ethernet returned. A
+source-bound first-to-second Wi-Fi ping timed out twice, although the
+second-to-first source-bound Wi-Fi preflight had passed before the switch.
+This run proves the physical adapter transition and service continuity, but
+the observed first-to-second session during the switch used the overlay. It
+does not establish authenticated sync over the physical Wi-Fi path. Keep the
+Wi-Fi recovery subcheck and Gate P2 open pending a separately isolated
+physical-path check and the complete four-checkpoint soak audit.
+
+The recovery-timing collector initially selected only `debug.jsonl`, while
+the installed journal rotates into `debug.*.jsonl` during this active run.
+Before its scheduled 10:55 UTC execution, the exact registered second-PC
+script was backed up with its original SHA-256
+`8811479093E0B2B0DF68D508FB4431F775CC07FFDD3554C0FDA9D6FCBE5D735D`
+and replaced with a PowerShell 5.1 parse-checked version that reads all
+`debug*.jsonl` segments touched by the observation window. The remote file
+read back SHA-256
+`ACB247A349B9C0AC08E3075B1A96E08B5473C83287E4B98639A1292948EE79F2`,
+and the same scheduled task remained `Ready`. The pending report, rather than
+this staging receipt, determines whether a recovery deadline was met.
+
+The exact hour-one collector task exited zero at 10:50:07 UTC. Its
+`compare-hour-1.json` accepts three native snapshots captured at 10:00 UTC:
+each has 50,167 files, 223 directories, 10,399,485,686 bytes and full-tree
+SHA-256 `81D9BD7B67C9205C515D7DF84A7345FC9ADF32035378A278E46CDE102D4ECD3A`.
+The comparison has `match=true` and no issues. Hour two, hour three and the
+final operation/cleanup audit remain pending; one
+matching hourly checkpoint does not pass the full soak.
+
+The corrected second-PC recovery collector executed at 10:55 UTC with exit
+zero. It scanned four retained service-journal segments, parsed 25 network
+events with zero invalid lines, found six completed recovery passes and zero
+failed passes. Its report SHA-256 is
+`FD8E2A392E99CF9CA4C1EFD4DE731A36BB5F32F3C6E0FDEADEBA138EF47718F1`.
+The one-off collector projected the wrong duration field name; the installed
+safe journal uses `elapsedMs`. A separate read-only extraction of the original
+journal events preserves that field in ignored
+`artifacts/field/physical-50k-20261027/second-recovery-timeline-f899ccb822fd4298ab08b68f6bf743c4.json`
+(SHA-256 `6A8CB7D2D5191BF34ED69753C490DA20A00561A000279FFAD78B0BF91E6489B6`).
+
+The second PC's Windows wake event was at 09:33:50.991 UTC. Its first
+post-wake folder rescan completed at 09:33:59.615, network recovery completed
+at 09:34:04.671, and it selected an authenticated direct LAN QUIC candidate
+to the first PC at 09:34:07.269: 16.278 seconds after wake. The long first
+pass began before sleep and includes suspended time; its 126,024 ms diagnostic
+is not a post-wake reconnect duration. At the 10:32 Ethernet-to-Wi-Fi switch,
+the first recovery pass completed in 17,018 ms, a queued second pass in 1,111
+ms, and an authenticated candidate to the third PC's Tailscale address was
+selected by 10:32:24.984. A physical Wi-Fi endpoint and reconnection to all
+peers within 30 seconds are not established. P2.5.5 remains open for that
+separate physical-path check.
+
+The operator requested that the second PC remain awake for the rest of field
+testing. At 11:00:41 UTC, a guarded WinRM action set AC and battery idle
+standby, idle hibernate, unattended sleep, and lid-close sleep action to zero
+in its active power scheme, then read back every setting as zero. The exact
+old unattended-sleep restoration task scheduled for 12:45 UTC was disabled;
+PeerSync stayed Running. The pre-change values, task identity and read-back are
+retained in ignored `second-no-sleep-20261028.json` (SHA-256
+`024D6A0BA51777BFC908973A7FB4676E1292F5EA0A7D3E25586FE789824C7C0E`).
+This setting change prevents another automatic sleep during LAN collection
+and the later hotspot test; it does not alter the already observed physical
+sleep/wake evidence.

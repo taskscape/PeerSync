@@ -4,3 +4,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("PeerSync.Simulation")]
 [assembly: InternalsVisibleTo("PeerSync.Benchmarks")]
 [assembly: InternalsVisibleTo("PeerSync.Service")]
+[assembly: InternalsVisibleTo("PeerSync.Service.Tests")]
