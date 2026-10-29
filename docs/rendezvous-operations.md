@@ -50,6 +50,41 @@ The service identity must not be able to edit the administrator-run renewal
 scripts in the parent data directory. Setup removes that inherited grant when
 upgrading an earlier development installation.
 
+### Replace a newer test build with a release package
+
+The GitHub development-release workflow currently builds version `1.0.0.0`.
+A server used for testing may already have a higher file version, so setup
+rejects that package as a downgrade even if its source commit is newer.
+Updated installers show both versions in the setup error and log.
+
+For an intentional rollback, back up the installed `appsettings.json` outside
+the installation directory, then run a setup containing the recovery switch
+from an elevated PowerShell:
+
+```powershell
+$setup = '.\PeerSync-Rendezvous-Setup-1.0.0.0-x64.exe'
+$process = Start-Process -FilePath $setup -ArgumentList '/ALLOWDOWNGRADE=1',
+    '/LOG="C:\Windows\Temp\PeerSync-Rendezvous-setup.log"' -Wait -PassThru
+$process.ExitCode
+```
+
+Only `/ALLOWDOWNGRADE=1` permits a lower version. Normal installs still reject
+downgrades, and the switch does not bypass certificate or service-stop checks.
+Setup preserves the existing `appsettings.json`, data directory and logs.
+Check that the older service supports any settings added by the test build,
+then verify the service and listeners using the commands below.
+
+Packages built before this switch was added cannot use it. With those packages,
+back up `appsettings.json`, uninstall **PeerSync Rendezvous** through Installed
+apps, then run the downloaded setup. If uninstall requests a reboot, complete
+it first. Uninstall stops and removes the rendezvous service and its firewall
+rules, but retains `%ProgramData%\PeerSync.Rendezvous` and the server TLS
+certificate. After installation, stop `PeerSyncRendezvous`, restore your saved
+`appsettings.json` to its installation directory, and start the service again.
+This interrupts discovery and relay sessions while the service is unavailable.
+
+### Verify the installed service
+
 ```powershell
 Get-Service PeerSyncRendezvous
 Get-NetTCPConnection -State Listen -LocalPort 99

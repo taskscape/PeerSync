@@ -104,14 +104,24 @@ begin
       'InstallLocation', PreviousDir) then PreviousDir := ExpandConstant('{autopf}\PeerSync Rendezvous');
     if not GetPackedVersion(AddBackslash(PreviousDir) + 'PeerSync.Rendezvous.exe', InstalledVersion) then
     begin
-      MsgBox('The installed rendezvous service has no readable version. Repair it before upgrading.', mbError, MB_OK);
+      SuppressibleMsgBox('The installed rendezvous service has no readable version. Repair it before upgrading.', mbError, MB_OK, IDOK);
       Exit;
     end;
     NewVersion := {#NewVersionPacked};
+    Log('Rendezvous version check: installed=' + VersionToStr(InstalledVersion) +
+      ', setup=' + VersionToStr(NewVersion));
     if ComparePackedVersion(NewVersion, InstalledVersion) < 0 then
     begin
-      MsgBox('PeerSync Rendezvous cannot be downgraded.', mbError, MB_OK);
-      Exit;
+      if ExpandConstant('{param:ALLOWDOWNGRADE|0}') <> '1' then
+      begin
+        SuppressibleMsgBox('PeerSync Rendezvous ' + VersionToStr(InstalledVersion) +
+          ' is installed. This setup contains ' + VersionToStr(NewVersion) + '.' + #13#10#13#10 +
+          'To intentionally replace a newer test build, back up appsettings.json and rerun ' +
+          'this setup with /ALLOWDOWNGRADE=1. Otherwise, install the same or a newer version.',
+          mbError, MB_OK, IDOK);
+        Exit;
+      end;
+      Log('Rendezvous downgrade explicitly allowed by /ALLOWDOWNGRADE=1.');
     end;
   end;
   Result := True;
