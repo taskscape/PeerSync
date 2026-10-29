@@ -138,12 +138,18 @@ Download them from the [Actions run](https://github.com/taskscape/PeerSync/actio
 CI packages use a temporary development signing identity and are experimental
 test packages. Public release signing remains a separate requirement.
 
-As checked on **2026-10-29**, the
-[latest `main` run](https://github.com/taskscape/PeerSync/actions/runs/40822000853)
-was denied before any job steps ran because an Actions budget prevented
-further use. That run produced no installers or test results. Hosted
-verification of the current revision remains unproven until CI can run;
-local validation must be reported separately.
+After all CI jobs pass on `main`, push and manual runs also publish the three
+installers, manifests and public test certificates to
+[GitHub Releases](https://github.com/taskscape/PeerSync/releases) as a development
+prerelease tagged `build-<full commit SHA>`. Pull request runs do not publish
+releases. Only the publishing job has `contents: write` permission. Assets are
+uploaded to a draft before publication; reruns resume an unfinished draft or
+keep an already published prerelease unchanged.
+
+The [2026-10-29 `main` run](https://github.com/taskscape/PeerSync/actions/runs/40843512072)
+passed all ten jobs and produced all three installer artifacts. It predates
+automatic prerelease publication. Hosted validation of the publishing job
+remains pending its first run.
 
 To build installers locally with a development signing identity:
 

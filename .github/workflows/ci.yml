@@ -225,3 +225,69 @@ jobs:
           name: installer-evidence
           path: artifacts/installer/*.manifest.json
           if-no-files-found: warn
+  release:
+    name: Publish development prerelease
+    needs: [build, fuzz-smoke, retained-simulation, boundary-aggregate, service-security, installer]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: PeerSync-*-win-*-${{ github.sha }}
+          path: artifacts/release/
+          merge-multiple: true
+      - name: Validate assets and publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @()
+          foreach ($name in @('PeerSync-Setup-1.0.0.0-x64.exe',
+              'PeerSync-Setup-1.0.0.0-arm64.exe', 'PeerSync-Rendezvous-Setup-1.0.0.0-x64.exe')) {
+            $setup = Join-Path 'artifacts/release' $name
+            foreach ($file in @($setup, "$setup.manifest.json", "$setup.cer")) {
+              if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing release asset: $file" }
+              $assets += $file
+            }
+            $manifest = Get-Content -LiteralPath "$setup.manifest.json" -Raw | ConvertFrom-Json
+            if ($manifest.sourceRevision -ne $env:GITHUB_SHA -or $manifest.workingTreeDirty -ne $false -or
+                $manifest.signed -ne $true -or $manifest.localDevelopmentOnly -ne $true -or
+                $manifest.installerSha256 -ne (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash) {
+              throw "Release asset does not match this signed development build: $name"
+            }
+          }
+          $tag = "build-$env:GITHUB_SHA"
+          $title = "PeerSync development build $($env:GITHUB_SHA.Substring(0, 12))"
+          $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          @"
+          Experimental development packages from main at commit $env:GITHUB_SHA.
+
+          These installers use a temporary development signing certificate. The public
+          certificates and source/hash manifests are attached alongside each installer.
+          LAN/WAN beta and v1.0 release acceptance gates remain open.
+
+          Verified CI run: $runUrl (attempt $env:GITHUB_RUN_ATTEMPT).
+          "@ | Set-Content -LiteralPath release-notes.md -Encoding utf8
+          $existing = & gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) {
+              Write-Output "Prerelease $tag is already published."
+              exit 0
+            }
+          } else {
+            & gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA `
+              --title $title --notes-file release-notes.md --draft --prerelease --latest=false
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the draft prerelease.' }
+          }
+          & gh release upload $tag @assets --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload all prerelease assets.' }
+          & gh release edit $tag --repo $env:GITHUB_REPOSITORY --title $title `
+            --notes-file release-notes.md --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the prerelease.' }
