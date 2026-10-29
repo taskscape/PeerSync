@@ -306,27 +306,41 @@ public sealed class InstalledFolderHostTests
                 && ReadDiagnosticLog(Path.Combine(leftLogs, "debug.jsonl"))
                     .Split("\"eventName\":\"service.network_recovery_complete\"", StringSplitOptions.None).Length
                     >= recoveriesBeforeNetworkChange + 3, timeout.Token);
-            await UntilAsync(() => leftStatus.ReadStatus().Clocks.Any(row => row.Session.IsConnected
-                && !oldSessions.Contains(row.Session.SessionId)), timeout.Token);
-            await UntilAsync(() => rightStatus.ReadStatus().Clocks.Any(row => row.Session.IsConnected
-                && !oldSessions.Contains(row.Session.SessionId)), timeout.Token);
             await UntilAsync(() => File.Exists(Path.Combine(leftLogs, "debug.jsonl"))
                 && ReadDiagnosticLog(Path.Combine(leftLogs, "debug.jsonl"))
                     .Contains("\"eventName\":\"service.resume_scan_complete\"", StringComparison.Ordinal), timeout.Token);
+            // Clock rows appear before the folder handshake enables production sync.
+            // Observe both peers' complete recovery before asserting availability.
+            await UntilAsync(() =>
+            {
+                var leftSnapshot = leftStatus.ReadStatus();
+                var rightSnapshot = rightStatus.ReadStatus();
+                return leftSnapshot.ProductionSyncAvailable && rightSnapshot.ProductionSyncAvailable
+                    && leftSnapshot.Clocks.Any(row => row.Session.IsConnected
+                        && !oldSessions.Contains(row.Session.SessionId))
+                    && rightSnapshot.Clocks.Any(row => row.Session.IsConnected
+                        && !oldSessions.Contains(row.Session.SessionId));
+            }, timeout.Token);
             recoveryTimer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
             Guid[] networkRecoveredSessions = leftStatus.ReadStatus().Clocks.Where(row => row.Session.IsConnected)
                 .Select(row => row.Session.SessionId).ToArray();
             networkRecoveredSessions.ShouldNotBeEmpty();
             var resumeTimer = System.Diagnostics.Stopwatch.StartNew();
             leftStatus.NotifyResumed();
-            await UntilAsync(() => leftStatus.ReadStatus().Clocks.Any(row => row.Session.IsConnected
-                && !networkRecoveredSessions.Contains(row.Session.SessionId)), timeout.Token);
-            await UntilAsync(() => rightStatus.ReadStatus().Clocks.Any(row => row.Session.IsConnected
-                && !networkRecoveredSessions.Contains(row.Session.SessionId)), timeout.Token);
             await UntilAsync(() => File.Exists(Path.Combine(leftLogs, "debug.jsonl"))
                 && ReadDiagnosticLog(Path.Combine(leftLogs, "debug.jsonl"))
                     .Split("\"eventName\":\"service.resume_scan_complete\"", StringSplitOptions.None).Length >= 3,
                 timeout.Token);
+            await UntilAsync(() =>
+            {
+                var leftSnapshot = leftStatus.ReadStatus();
+                var rightSnapshot = rightStatus.ReadStatus();
+                return leftSnapshot.ProductionSyncAvailable && rightSnapshot.ProductionSyncAvailable
+                    && leftSnapshot.Clocks.Any(row => row.Session.IsConnected
+                        && !networkRecoveredSessions.Contains(row.Session.SessionId))
+                    && rightSnapshot.Clocks.Any(row => row.Session.IsConnected
+                        && !networkRecoveredSessions.Contains(row.Session.SessionId));
+            }, timeout.Token);
             resumeTimer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
             string recoveredLog = ReadDiagnosticLog(Path.Combine(leftLogs, "debug.jsonl"));
             recoveredLog.ShouldContain("\"eventName\":\"service.peer_session_reset\"");
