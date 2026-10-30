@@ -88,7 +88,7 @@ internal static class ElevatedActions
             run?.Journal.TryWrite(new("app.helper_failed", "helper")
             {
                 Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name,
-                HResult = error.HResult,
+                Exception = error, HResult = error.HResult,
                 NativeError = (error as Win32Exception ?? error.InnerException as Win32Exception)?.NativeErrorCode,
             });
             return 1;
@@ -128,7 +128,8 @@ internal static class ElevatedActions
             {
                 diagnostics?.TryWrite(new("app.service_start_retry", "helper")
                 {
-                    Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name,
+                    Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error,
+                    HResult = error.HResult,
                     NativeError = (error as Win32Exception ?? error.InnerException as Win32Exception)?.NativeErrorCode,
                     RetryInMilliseconds = 500,
                 });

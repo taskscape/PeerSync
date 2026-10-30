@@ -5,7 +5,8 @@ using System.Text.Json.Serialization;
 namespace PeerSync.Core.Diagnostics;
 
 /// <summary>A process-local single-writer journal. Give concurrent processes distinct directories.
-/// Only explicitly named metadata can be logged.</summary>
+/// Only explicitly named metadata is written to <c>debug.jsonl</c>. Warning and error exceptions
+/// are copied to the optional <see cref="ExceptionLog"/>.</summary>
 public sealed class DiagnosticJournal : IDisposable
 {
     private readonly object gate = new();
@@ -14,12 +15,13 @@ public sealed class DiagnosticJournal : IDisposable
     private readonly string runId = Guid.NewGuid().ToString("N");
     private readonly long maxFileBytes;
     private readonly int retainedFiles;
+    private readonly ExceptionLog? exceptions;
     private bool disposed;
     private long droppedEvents;
     private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     public DiagnosticJournal(string directory, string component, bool debugEnabled = false,
-        long maxFileBytes = 14_000_000, int retainedFiles = 7)
+        long maxFileBytes = 14_000_000, int retainedFiles = 7, ExceptionLog? exceptions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentException.ThrowIfNullOrWhiteSpace(component);
@@ -30,6 +32,7 @@ public sealed class DiagnosticJournal : IDisposable
         this.component = component;
         this.maxFileBytes = maxFileBytes;
         this.retainedFiles = retainedFiles;
+        this.exceptions = exceptions;
         DebugEnabled = debugEnabled;
         Directory.CreateDirectory(this.directory);
     }
@@ -47,7 +50,7 @@ public sealed class DiagnosticJournal : IDisposable
         { Interlocked.Increment(ref droppedEvents); return false; }
     }
 
-    /// <summary>No arbitrary message, exception text, paths, keys, FolderIds, or payloads are accepted.</summary>
+    /// <summary>No arbitrary message, exception text, paths, keys, FolderIds, or payloads are written to the structured journal.</summary>
     public void Write(DiagnosticEvent entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -97,6 +100,10 @@ public sealed class DiagnosticJournal : IDisposable
             output.Write(line);
             output.WriteByte((byte)'\n');
         }
+        if (exceptions is not null && entry.Exception is not null
+            && entry.Level is DiagnosticLevel.Warning or DiagnosticLevel.Error)
+            exceptions.TryAppend(new DateTimeOffset(occurredUtc), component, runId, Environment.ProcessId,
+                Activity.Current?.TraceId.ToString(), entry);
         foreach (Action<DiagnosticEvent, DateTime> observer in EntryWritten?.GetInvocationList() ?? [])
             try { observer(entry, occurredUtc); }
             catch (Exception error) when (error is not OutOfMemoryException) { }
@@ -149,6 +156,10 @@ public sealed record DiagnosticEvent(string Event, string Operation)
     public double? ElapsedMilliseconds { get; init; }
     public double? ClockSkewSeconds { get; init; }
     public string? ErrorCode { get; init; }
+    /// <summary>In memory only. Warning and error records copy it to <see cref="ExceptionLog"/> when one is attached.
+    /// The structured journal does not serialize the message or stack.</summary>
+    [JsonIgnore]
+    public Exception? Exception { get; init; }
     public int? HResult { get; init; }
     public int? NativeError { get; init; }
     public long? TransportErrorCode { get; init; }

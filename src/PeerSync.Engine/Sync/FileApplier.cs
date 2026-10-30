@@ -543,7 +543,7 @@ public sealed partial class FileApplier
         catch (Exception error)
         {
             journal?.TryWrite(new("apply.failed", operation) { SessionId = session, Level = DiagnosticLevel.Warning,
-                ErrorCode = error.GetType().Name, HResult = error.HResult,
+                ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult,
                 NativeError = error is Win32Exception native ? native.NativeErrorCode : null, ElapsedMilliseconds = watch.Elapsed.TotalMilliseconds });
             throw;
         }

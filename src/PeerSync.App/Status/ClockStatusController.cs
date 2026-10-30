@@ -96,7 +96,7 @@ internal sealed class ClockStatusController(ClockStatusViewModel model,
         foreach (var cause in Causes(error))
             diagnostics?.TryWrite(new(depth++ == 0 ? "app.control_failed" : "app.control_cause", "control") { SessionId = session, Level = DiagnosticLevel.Warning,
                 ErrorCode = cause is RpcException rpc ? "RpcException." + rpc.StatusCode : cause.GetType().Name,
-                HResult = cause.HResult, NativeError = cause is Win32Exception native ? native.NativeErrorCode : null });
+                Exception = cause, HResult = cause.HResult, NativeError = cause is Win32Exception native ? native.NativeErrorCode : null });
     }
     private static IEnumerable<Exception> Causes(Exception error)
     {

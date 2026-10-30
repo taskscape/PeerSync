@@ -257,7 +257,7 @@ public sealed class BlockReferences
 
         void Log(string name, string? code = null, Exception? error = null, long? changed = null, long? deferred = null) =>
             journal?.TryWrite(new(name, "block-references") { SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
-                ErrorCode = code, HResult = error?.HResult, NativeError = error switch { Win32Exception native => native.NativeErrorCode,
+                ErrorCode = code, Exception = error, HResult = error?.HResult, NativeError = error switch { Win32Exception native => native.NativeErrorCode,
                     SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null }, ItemsChanged = changed, ItemsDeferred = deferred,
                 ElapsedMilliseconds = watch.ElapsedMilliseconds, RetryInMilliseconds = error is not null || name == "block.references_wait" ? 10000 : null });
     }

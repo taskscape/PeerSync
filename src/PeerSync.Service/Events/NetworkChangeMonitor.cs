@@ -61,7 +61,7 @@ internal sealed class NetworkChangeMonitor : IDisposable
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("service.network_change_callback_failed", "network_change")
-                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         }
     }

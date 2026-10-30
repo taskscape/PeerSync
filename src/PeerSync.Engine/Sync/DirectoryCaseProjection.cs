@@ -75,7 +75,7 @@ internal sealed class DirectoryCaseProjection(string rootPath, FolderIndex index
         catch (Exception error)
         {
             journal?.TryWrite(new("directory.case_projection_failed", "directory-projection") { SessionId = session, Level = DiagnosticLevel.Warning,
-                ErrorCode = stage + "." + (error is OperationCanceledException ? "cancelled" : error.GetType().Name), HResult = error.HResult,
+                ErrorCode = stage + "." + (error is OperationCanceledException ? "cancelled" : error.GetType().Name), Exception = error, HResult = error.HResult,
                 NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null } });
             throw;
         }

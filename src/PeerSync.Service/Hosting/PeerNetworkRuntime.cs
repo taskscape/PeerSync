@@ -145,7 +145,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 catch (Exception error) when (error is SocketException or InvalidOperationException or PlatformNotSupportedException)
                 {
                     diagnostics?.TryWrite(new("service.lan_discovery_unavailable", "peer_network")
-                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
             }
 
@@ -177,7 +177,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 catch (ArgumentException error)
                 {
                     diagnostics?.TryWrite(new("tracker.server_invalid", "rendezvous")
-                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name });
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
             }
             return runtime;
@@ -229,7 +229,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     // connection without faulting the long-lived listener.
                     diagnostics?.TryWrite(new("service.incoming_peer_rejected", "peer_network")
                         { Level = DiagnosticLevel.Debug, Transport = DiagnosticTransport.Quic,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
+                            ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                     continue;
                 }
                 TrackSession(session);
@@ -238,7 +238,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     or ObjectDisposedException)
                 {
                     diagnostics?.TryWrite(new("service.incoming_peer_rejected", "peer_network")
-                        { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                        { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                     try { await session.DisposeAsync().ConfigureAwait(false); } catch { }
                 }
             }
@@ -249,7 +249,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.peer_accept_failed", "peer_network")
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             throw;
         }
     }
@@ -272,7 +272,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 {
                     diagnostics?.TryWrite(new("service.incoming_peer_rejected", "peer_network")
                         { Level = DiagnosticLevel.Debug, Transport = DiagnosticTransport.Tcp,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
+                            ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                     try { await raw.DisposeAsync().ConfigureAwait(false); } catch { }
                     continue;
                 }
@@ -283,7 +283,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 {
                     diagnostics?.TryWrite(new("service.incoming_peer_rejected", "peer_network")
                         { Level = DiagnosticLevel.Debug, Transport = DiagnosticTransport.Tcp,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
+                            ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                     try { await session.DisposeAsync().ConfigureAwait(false); } catch { }
                 }
             }
@@ -294,7 +294,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         {
             diagnostics?.TryWrite(new("service.peer_accept_failed", "peer_network")
                 { Level = DiagnosticLevel.Error, Transport = DiagnosticTransport.Tcp,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             throw;
         }
     }
@@ -330,7 +330,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         catch (NetworkInformationException error)
         {
             diagnostics?.TryWrite(new("tracker.local_addresses_unavailable", "rendezvous")
-            { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
         if (portMapper is not null)
             foreach (IPEndPoint endpoint in portMapper.PublicEndpoints.Take(4))
@@ -429,7 +429,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             relayAcceptWorkers.TryRemove(new KeyValuePair<Guid, Task>(id, completed));
             if (completed.IsFaulted)
                 diagnostics?.TryWrite(new("service.relay_accept_failed", "relay")
-                { Level = DiagnosticLevel.Warning, SessionId = id,
+                { Level = DiagnosticLevel.Warning, SessionId = id, Exception = completed.Exception,
                     ErrorCode = completed.Exception?.GetBaseException().GetType().Name,
                     HResult = completed.Exception?.GetBaseException().HResult });
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -513,7 +513,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     maintainers.TryRemove(key, out _);
             if (completed.IsFaulted)
                 diagnostics?.TryWrite(new("service.peer_reconnect_stopped", "peer_network")
-                    { Level = DiagnosticLevel.Error, ErrorCode = completed.Exception?.GetBaseException().GetType().Name });
+                    { Level = DiagnosticLevel.Error, Exception = completed.Exception,
+                        ErrorCode = completed.Exception?.GetBaseException().GetType().Name,
+                        HResult = completed.Exception?.GetBaseException().HResult });
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
@@ -547,14 +549,14 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             {
                 diagnostics?.TryWrite(new("service.peer_session_reset_failed", "folder_membership")
                     { Level = DiagnosticLevel.Warning, SessionId = session.Key,
-                        ErrorCode = error.GetType().Name, HResult = error.HResult });
+                        ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         }
         try { await Task.WhenAll(sessionWorkers.Values.ToArray()).WaitAsync(cancellationToken).ConfigureAwait(false); }
         catch (Exception error) when (error is not OperationCanceledException)
         {
             diagnostics?.TryWrite(new("service.peer_session_worker_failed", "folder_membership")
-                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
         RequestNetworkRecovery("folder_membership_change");
     }
@@ -602,7 +604,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 {
                     diagnostics?.TryWrite(new("service.peer_session_reset_failed", "network_recovery")
                         { Level = DiagnosticLevel.Warning, SessionId = active.Key,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
+                            ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
             }
 
@@ -619,7 +621,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.network_recovery_failed", reason)
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
     }
 
@@ -768,7 +770,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             sessionWorkers.TryRemove(new KeyValuePair<Guid, Task>(connection.SessionId, completed));
             if (completed.IsFaulted)
                 diagnostics?.TryWrite(new("service.peer_session_failed", "peer_network")
-                    { Level = DiagnosticLevel.Warning, SessionId = connection.SessionId,
+                    { Level = DiagnosticLevel.Warning, SessionId = connection.SessionId, Exception = completed.Exception,
                         ErrorCode = completed.Exception?.GetBaseException().GetType().Name,
                         HResult = completed.Exception?.GetBaseException().HResult });
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -853,7 +855,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 {
                     diagnostics?.TryWrite(new("service.folder_sync_failed", "peer_network")
                         { SessionId = sessionId, Transport = transport, Level = DiagnosticLevel.Warning,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult });
+                            ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
                 await Task.Delay(SyncInterval, cancellationToken).ConfigureAwait(false);
             }

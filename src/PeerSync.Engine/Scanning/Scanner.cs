@@ -145,7 +145,7 @@ public sealed partial class Scanner : IDisposable
                     protectedPrefixes.Add(directory.ToUpperInvariant());
                     problems.Add(new(directory, "enumeration-failed", NativeCode(error)));
                     journal?.TryWrite(new("scan.enumeration_failed", "scan") { SessionId = session,
-                        Level = DiagnosticLevel.Warning, HResult = error.HResult, NativeError = NativeCode(error) });
+                        Level = DiagnosticLevel.Warning, Exception = error, HResult = error.HResult, NativeError = NativeCode(error) });
                 }
             }
 
@@ -361,7 +361,7 @@ public sealed partial class Scanner : IDisposable
         catch (Exception error)
         {
             journal?.TryWrite(new("scan.failed", "scan") { SessionId = session, Level = DiagnosticLevel.Error,
-                ErrorCode = error is OperationCanceledException ? "cancelled" : "scan-error", HResult = error.HResult,
+                ErrorCode = error is OperationCanceledException ? "cancelled" : "scan-error", Exception = error, HResult = error.HResult,
                 NativeError = NativeCode(error), ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }

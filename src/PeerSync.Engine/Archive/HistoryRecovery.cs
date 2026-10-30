@@ -65,7 +65,7 @@ public sealed class HistoryRecovery
         catch (Exception error) { Log("history.bootstrap_failed", error.GetType().Name, error); throw; }
 
         void Log(string name, string? code = null, Exception? error = null) => journal?.TryWrite(new(name, "history-bootstrap")
-        { SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = code, HResult = error?.HResult,
+        { SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = code, Exception = error, HResult = error?.HResult,
             NativeError = error switch { Win32Exception native => native.NativeErrorCode, SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null },
             ItemsVisited = verified, ItemsChanged = accounted, RetryInMilliseconds = error is not null || name == "history.bootstrap_wait" ? 10000 : null });
     }

@@ -61,7 +61,7 @@ public sealed class NeededSet
         }
         catch (Exception error)
         {
-            journal?.TryWrite(new("index.range_failed", "index") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult }); throw;
+            journal?.TryWrite(new("index.range_failed", "index") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult }); throw;
         }
     }
 
@@ -104,7 +104,7 @@ public sealed class NeededSet
         catch (Exception error)
         {
             journal?.TryWrite(new("index.receive_failed", "index") { SessionId = session, Level = DiagnosticLevel.Warning,
-                ErrorCode = error.GetType().Name, HResult = error.HResult, ItemsVisited = records.Count, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
+                ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, ItemsVisited = records.Count, ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }
     }

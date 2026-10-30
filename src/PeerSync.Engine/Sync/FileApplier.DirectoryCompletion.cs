@@ -93,7 +93,7 @@ public sealed partial class FileApplier
         catch (SqliteException error)
         {
             journal?.TryWrite(new("apply.case-tree-transaction-failed", "case-tree") { SessionId = session, Level = DiagnosticLevel.Warning,
-                ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error.SqliteExtendedErrorCode }); throw;
+                ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error.SqliteExtendedErrorCode }); throw;
         }
         catch (Exception error) when (error is IOException or Win32Exception or UnauthorizedAccessException or CryptographicException or InvalidOperationException)
         { StagingProbeFailed("case-tree-verification-deferred", session, error); return await Pending(error.GetType().Name).ConfigureAwait(false); }

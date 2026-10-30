@@ -150,7 +150,7 @@ public sealed partial class FileApplier
         catch (Exception error)
         {
             journal?.TryWrite(new("apply.case-member-account-failed", "case-member") { SessionId = intent.Id, Level = DiagnosticLevel.Warning,
-                ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is SqliteException sqlite ? sqlite.SqliteExtendedErrorCode : null }); throw;
+                ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error is SqliteException sqlite ? sqlite.SqliteExtendedErrorCode : null }); throw;
         }
         Signal("case-member-accounted", intent.Id);
     }

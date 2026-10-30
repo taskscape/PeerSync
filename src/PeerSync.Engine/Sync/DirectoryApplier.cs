@@ -216,6 +216,6 @@ public sealed class DirectoryApplier
         Checkpoint?.Invoke(stage);
     }
     private void Failure(Guid session, Exception error) => journal?.TryWrite(new("directory.failed", "directory")
-    { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+    { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult,
         NativeError = error switch { Win32Exception native => native.NativeErrorCode, SqliteException database => database.SqliteExtendedErrorCode, _ => null } });
 }

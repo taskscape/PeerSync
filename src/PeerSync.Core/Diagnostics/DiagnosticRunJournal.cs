@@ -18,6 +18,7 @@ public sealed class DiagnosticRunJournal : IDisposable
     private readonly long maximumBytes;
     private readonly object gate = new();
     private readonly ITimer timer;
+    private readonly ExceptionLog exceptions;
     private bool disposed;
     public string DirectoryPath { get; }
     public DiagnosticJournal Journal { get; }
@@ -25,16 +26,17 @@ public sealed class DiagnosticRunJournal : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumInactiveRuns, 0); ArgumentOutOfRangeException.ThrowIfLessThan(maximumInactiveBytes, 0);
         maximumRuns = maximumInactiveRuns; maximumBytes = maximumInactiveBytes; clock = timeProvider; root = new(logRoot);
+        exceptions = new ExceptionLog(root.Path, clock);
         try
         {
             string name = Guid.NewGuid().ToString("N"); active = DiagnosticDirectory.Open(root.Handle, name, true, 0x00100081, 3, 2);
             DirectoryPath = Path.Combine(root.Path, name);
             using (var marker = DiagnosticDirectory.Open(active, ".run", false, 0x00100183, 0, 2))
             using (var output = new FileStream(marker, FileAccess.ReadWrite)) { output.Write(Marker); output.Flush(flushToDisk: true); }
-            Journal = new(DirectoryPath, component, debugEnabled);
+            Journal = new(DirectoryPath, component, debugEnabled, exceptions: exceptions);
             SweepAndReport(); timer = clock.CreateTimer(_ => SweepAndReport(), null, TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
         }
-        catch { active?.Dispose(); root.Dispose(); throw; }
+        catch { exceptions.Dispose(); active?.Dispose(); root.Dispose(); throw; }
     }
     public static DiagnosticRunJournal Open(string logRoot, string component, bool debugEnabled = false,
         int maximumInactiveRuns = 8, long maximumInactiveBytes = 100_000_000, TimeProvider? timeProvider = null)
@@ -59,7 +61,7 @@ public sealed class DiagnosticRunJournal : IDisposable
                     ItemsDeferred = result.ProtectedRuns, ErrorCode = result.Pressure ? "inactive_quota_pressure" : null });
             }
             catch (Exception error) when (Expected(error))
-            { Journal.TryWrite(new("logs.retention_deferred", "logs") { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult }); }
+            { Journal.TryWrite(new("logs.retention_deferred", "logs") { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult }); }
         }
     }
     private DiagnosticRetentionResult Sweep(bool waitForLease = false)
@@ -141,7 +143,7 @@ public sealed class DiagnosticRunJournal : IDisposable
     {
         lock (gate)
         {
-            if (disposed) return; disposed = true; timer.Dispose(); Journal.Dispose(); active.Dispose();
+            if (disposed) return; disposed = true; timer.Dispose(); Journal.Dispose(); exceptions.Dispose(); active.Dispose();
             // Closing the last process must not leave its newly inactive run
             // outside the shared budget until somebody starts the app again.
             try { Sweep(waitForLease: true); }

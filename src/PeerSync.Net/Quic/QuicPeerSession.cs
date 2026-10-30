@@ -122,7 +122,7 @@ public sealed class QuicPeerSession : IAsyncDisposable
         {
             options.Diagnostics?.TryWrite(new("transport.handshake_failed", "quic_session")
                 { SessionId = sessionId == Guid.Empty ? null : sessionId, Transport = DiagnosticTransport.Quic,
-                    Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), HResult = error.HResult,
+                    Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), Exception = error, HResult = error.HResult,
                     RemoteAddress = (connection.RemoteEndPoint as IPEndPoint)?.Address });
             if (control is not null) await control.DisposeAsync().ConfigureAwait(false);
             throw;
@@ -254,7 +254,7 @@ public sealed class QuicPeerSession : IAsyncDisposable
                 DiagnosticTransport.Quic, SessionId, "quic_session");
         options.Diagnostics?.TryWrite(new("transport.stream_failed", "quic_session")
             { SessionId = SessionId, Transport = DiagnosticTransport.Quic, Level = DiagnosticLevel.Warning,
-                ErrorCode = SafeError(error), HResult = error.HResult,
+                ErrorCode = SafeError(error), Exception = error, HResult = error.HResult,
                 RemoteAddress = (connection.RemoteEndPoint as IPEndPoint)?.Address });
         Interlocked.CompareExchange(ref requestedCloseReason,
             error is TimeoutException ? (int)CloseReason.Timeout
@@ -317,7 +317,7 @@ public sealed class QuicPeerSession : IAsyncDisposable
         {
             options.Diagnostics?.TryWrite(new("transport.close_frame_failed", "quic_session")
                 { SessionId = SessionId, Transport = DiagnosticTransport.Quic, Level = DiagnosticLevel.Debug,
-                    ErrorCode = SafeError(error), HResult = error.HResult });
+                    ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
         }
         try { await lifetime.CancelAsync().ConfigureAwait(false); }
         catch (Exception error) { (failures ??= []).Add(error); }

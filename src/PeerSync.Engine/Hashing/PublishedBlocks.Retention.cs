@@ -142,7 +142,7 @@ public sealed partial class PublishedBlocks
         static bool FileFailure(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception;
         void Signal(string stage, Guid id) { Log("capture.retirement_" + stage, id); checkpoint?.Invoke("capture-" + stage); }
         void Log(string name, Guid id, Exception? error = null) => journal?.TryWrite(new(name, "capture-retirement")
-        { SessionId = id, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = error?.GetType().Name, HResult = error?.HResult,
+        { SessionId = id, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = error?.GetType().Name, Exception = error, HResult = error?.HResult,
             NativeError = error switch { Win32Exception native => native.NativeErrorCode, SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null },
             ItemsChanged = deleted + missing + cancelled, ItemsVisited = visited, ItemsDeferred = deferred, Bytes = bytes, RetryInMilliseconds = error is null ? null : 10000 });
     }

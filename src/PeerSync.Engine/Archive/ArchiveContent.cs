@@ -39,7 +39,7 @@ internal static class ArchiveContent
             catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException)
             {
                 journal?.TryWrite(new("archive.content_recovery_deferred", "archive-content") { SessionId = state.Id, Level = DiagnosticLevel.Warning,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
+                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
                     ItemsDeferred = 1, RetryInMilliseconds = 10000 });
             }
         }
@@ -88,7 +88,7 @@ internal static class ArchiveContent
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException)
         {
             journal?.TryWrite(new("archive.content_deferred", "archive-content") { SessionId = session, Level = DiagnosticLevel.Warning,
-                ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
+                ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
                 ItemsDeferred = 1, RetryInMilliseconds = 10000 });
             return null;
         }

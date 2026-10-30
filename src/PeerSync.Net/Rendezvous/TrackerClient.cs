@@ -86,7 +86,7 @@ internal sealed class TrackerClient : IAsyncDisposable
             {
                 diagnostics?.TryWrite(new("tracker.session_failed", "rendezvous")
                 { Level = DiagnosticLevel.Warning, Transport = DiagnosticTransport.Http2,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
             Volatile.Write(ref connected, 0);
             if (stopping.IsCancellationRequested) break;

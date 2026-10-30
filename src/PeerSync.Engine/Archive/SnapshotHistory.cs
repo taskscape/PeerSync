@@ -186,7 +186,7 @@ internal sealed class SnapshotHistory(FolderIndex index, FolderKeys keys, byte[]
             { journal?.TryWrite(new("history.withhold_failed", "history") { SessionId = intent.Id, Level = DiagnosticLevel.Warning,
                 ErrorCode = Code(withholdingError), HResult = withholdingError.HResult, NativeError = NativeCode(withholdingError) }); }
             journal?.TryWrite(new("history.failed", "history") { SessionId = intent.Id, Level = DiagnosticLevel.Warning,
-                ErrorCode = Code(error), HResult = error.HResult, NativeError = NativeCode(error) });
+                ErrorCode = Code(error), Exception = error, HResult = error.HResult, NativeError = NativeCode(error) });
             throw;
         }
     }

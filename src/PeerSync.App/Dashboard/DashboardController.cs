@@ -54,7 +54,7 @@ internal sealed class DashboardController(DashboardViewModel model,
                 bool unauthorized = IsAuthorizationFailure(error);
                 diagnostics?.TryWrite(new("app.dashboard_connection_failed", "control")
                     { Level = DiagnosticLevel.Warning, ErrorCode = unauthorized ? "not_authorized" : error.GetType().Name,
-                        HResult = error.HResult });
+                        Exception = error, HResult = error.HResult });
                 await dispatch(() => model.Disconnected(unauthorized), cancellationToken).ConfigureAwait(false);
             }
             int seconds = Math.Min(30, 1 << Math.Min(failures++, 5));
@@ -84,7 +84,7 @@ internal sealed class DashboardController(DashboardViewModel model,
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             diagnostics?.TryWrite(new("app.metrics_unavailable", "control")
-                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
     }
 }

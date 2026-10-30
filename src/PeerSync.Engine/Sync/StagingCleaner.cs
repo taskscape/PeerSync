@@ -80,7 +80,7 @@ internal sealed class StagingCleaner(string rootPath, FolderIndex index, TimePro
                 // A failed native removal never loses the ownership witness.
                 await index.CancelStagingRetirementAsync(row, cancellationToken: token).ConfigureAwait(false); deferred++; cycleRetry = true;
                 journal?.TryWrite(new("staging.cleanup_deferred", "staging") { SessionId = session, Level = DiagnosticLevel.Debug,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null });
+                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null });
             }
         }
         await index.AdvanceStagingCleanupCursorAsync(root, page.Cursor, page.MoreWork ? page.Objects[^1].Id : null, token).ConfigureAwait(false);

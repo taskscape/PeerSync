@@ -79,7 +79,7 @@ public sealed class PredefinedHosts : IAsyncDisposable
             catch (Exception error) when (error is SocketException or ArgumentException)
             {
                 diagnostics?.TryWrite(new("discovery.host_resolution_failed", "predefined_hosts")
-                { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 continue;
             }
 
@@ -98,7 +98,7 @@ public sealed class PredefinedHosts : IAsyncDisposable
                 catch (Exception error)
                 {
                     diagnostics?.TryWrite(new("discovery.host_dial_failed", "predefined_hosts")
-                    { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Debug, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
                 finally { active.TryRemove(key, out _); }
             }

@@ -108,6 +108,6 @@ public sealed class PeerIndexSession
     }
 
     private void Failure(string name, Exception error) => journal?.TryWrite(new(name, "index")
-    { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+    { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult,
         NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null } });
 }

@@ -150,7 +150,7 @@ public sealed class BlockRetention
         void Progress() { if (watch.Elapsed >= nextProgress) { Log("block.sweep_progress"); nextProgress = watch.Elapsed + TimeSpan.FromSeconds(5); } }
         void Log(string name, Guid? id = null, Exception? error = null, string? code = null) => journal?.TryWrite(new(name, "block-sweep")
         { SessionId = id ?? session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = code ?? error?.GetType().Name,
-            HResult = error?.HResult, NativeError = error switch { Win32Exception native => native.NativeErrorCode, SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null },
+            Exception = error, HResult = error?.HResult, NativeError = error switch { Win32Exception native => native.NativeErrorCode, SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null },
             ItemsChanged = deleted + missing + cancelled, ItemsVisited = visited, ItemsDeferred = deferred, Bytes = removed, ElapsedMilliseconds = watch.ElapsedMilliseconds,
             RetryInMilliseconds = error is not null || name == "block.sweep_wait" ? 10000 : null });
     }

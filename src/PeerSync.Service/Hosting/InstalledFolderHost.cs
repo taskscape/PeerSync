@@ -82,7 +82,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (CryptographicException error)
         {
             diagnostics?.TryWrite(new("service.device_certificate_load_failed", "startup")
-            { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             throw;
         }
         diagnostics?.TryWrite(new("service.device_certificate_loaded", "startup"));
@@ -180,7 +180,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
                     or System.Security.Cryptography.CryptographicException or ArgumentException)
                 {
                     diagnostics?.TryWrite(new("service.folder_engine_failed", "folder_host")
-                    { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
                 finally
                 {
@@ -390,7 +390,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.auto_resume_failed", "folder_host")
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
         finally
         {
@@ -467,7 +467,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.pending_device_record_failed", "peer_network")
-                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
     }
 
@@ -759,7 +759,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new(eventName, "folder_host")
-                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             if (!stopping.IsCancellationRequested && expectedStop?.IsCancellationRequested != true) completion.TrySetException(error);
         }
     }
@@ -827,7 +827,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("service.resume_scan_failed", reason)
-                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult,
                     ElapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
         }
     }
@@ -854,7 +854,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("service.folder_scheduler_failed", "shutdown")
-                    { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         if (pendingRescans is not null)
             try { await pendingRescans.ConfigureAwait(false); }

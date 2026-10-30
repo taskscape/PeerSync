@@ -126,7 +126,7 @@ internal sealed class DirectoryMetadataWorker(string rootPath, FolderIndex index
             void Log(string stage, int changed = 0, Exception? error = null) => journal?.TryWrite(new("directory.metadata_" + stage, "directory-metadata")
             {
                 SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ItemsVisited = 1, ItemsChanged = changed,
-                ErrorCode = error is OperationCanceledException ? "timeout" : error?.GetType().Name, HResult = error?.HResult,
+                ErrorCode = error is OperationCanceledException ? "timeout" : error?.GetType().Name, Exception = error, HResult = error?.HResult,
                 NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null }
             });
         }

@@ -65,7 +65,7 @@ internal static class RendezvousHost
         string logs = options.LogDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "PeerSync.Rendezvous", "logs");
-        builder.Services.AddSingleton(new DiagnosticJournal(logs, "rendezvous", options.DebugLogging));
+        builder.Services.AddSingleton(new DiagnosticJournal(logs, "rendezvous", options.DebugLogging, exceptions: new ExceptionLog(logs)));
         var ipRateKeys = new EphemeralIpRateKey();
         builder.Services.AddSingleton(ipRateKeys);
         builder.Services.AddRateLimiter(limits =>

@@ -84,7 +84,7 @@ public sealed class ConnectionManager : IAsyncDisposable
                     {
                         diagnostics?.TryWrite(new("connection.cancelled_candidate_dispose_failed", "connection_manager")
                         { Level = DiagnosticLevel.Warning, SessionId = candidate.SessionId,
-                            ErrorCode = SafeError(error), HResult = error.HResult });
+                            ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
                     }
                     cancellationToken.ThrowIfCancellationRequested();
                 }
@@ -119,7 +119,7 @@ public sealed class ConnectionManager : IAsyncDisposable
                 catch (Exception error)
                 {
                     diagnostics?.TryWrite(new("connection.cancelled_winner_dispose_failed", "connection_manager")
-                    { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), HResult = error.HResult });
+                    { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
                 }
             }
             cancellationToken.ThrowIfCancellationRequested();
@@ -175,7 +175,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("connection.reconnect_failed", "connection_manager")
-                { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
             }
 
             TimeSpan backoff = BackoffForFailure(failures);
@@ -223,7 +223,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             diagnostics?.TryWrite(new("connection.candidate_failed", CandidateOperation(candidate))
                 { Level = DiagnosticLevel.Warning, Transport = candidate.Transport,
                     RemoteAddress = candidate.RemoteAddress, RemotePort = candidate.RemotePort,
-                    ErrorCode = SafeError(error), HResult = error.HResult });
+                    ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
             return null;
         }
     }
@@ -327,7 +327,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("connection.authenticated_callback_failed", "connection_manager")
-                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         }
     }

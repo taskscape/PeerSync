@@ -129,7 +129,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                 token.ThrowIfCancellationRequested(); deferred++;
                 var retry = await index.RetryDirectoryPublicationAsync(queued, clock.GetUtcNow().UtcTicks, token).ConfigureAwait(false);
                 journal?.TryWrite(new("directory.publication_retry", "directory-publication") { SessionId = session, Level = DiagnosticLevel.Debug,
-                    ErrorCode = stage + "." + (error?.GetType().Name ?? "pending"), HResult = error?.HResult,
+                    ErrorCode = stage + "." + (error?.GetType().Name ?? "pending"), Exception = error, HResult = error?.HResult,
                     NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null },
                     ItemsDeferred = 1, RetryInMilliseconds = (int)Math.Clamp((retry.NextTicks!.Value - retry.FailedTicks!.Value) / TimeSpan.TicksPerMillisecond, 0, 600000) });
             }

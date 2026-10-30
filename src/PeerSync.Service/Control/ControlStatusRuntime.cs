@@ -86,7 +86,7 @@ public sealed class ControlStatusRuntime
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new(eventName, "service_power")
-                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         }
     }

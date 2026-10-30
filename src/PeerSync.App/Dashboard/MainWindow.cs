@@ -344,7 +344,7 @@ internal sealed class MainWindow : Window, IDisposable
         {
             journal.TryWrite(new("app.action_failed", "dashboard")
                 { Level = DiagnosticLevel.Warning, ErrorCode = error is RpcException rpc
-                    ? "RpcException." + rpc.StatusCode : error.GetType().Name, HResult = error.HResult });
+                    ? "RpcException." + rpc.StatusCode : error.GetType().Name, Exception = error, HResult = error.HResult });
             MessageBox.Show(this, error is RpcException rpcError ? rpcError.Status.Detail : error.Message,
                 "PeerSync", MessageBoxButton.OK, MessageBoxImage.Warning);
         }

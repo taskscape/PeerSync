@@ -319,7 +319,7 @@ internal sealed class RelayPeerProtocolSession : IAsyncDisposable
     {
         diagnostics?.TryWrite(new("transport.stream_failed", "relay_session")
         { SessionId = SessionId, Transport = DiagnosticTransport.Relay,
-            Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         foreach (TaskCompletionSource<IMessage> completion in pendingIndex.Values)
             completion.TrySetException(error);
         blockResponses.Writer.TryComplete(error);

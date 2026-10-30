@@ -107,7 +107,7 @@ public sealed class TcpPeerProtocolSession : IAsyncDisposable
             await connection.DisposeAsync().ConfigureAwait(false);
             options.Diagnostics?.TryWrite(new("transport.handshake_failed", "tcp_session")
                 { Transport = DiagnosticTransport.Tcp, Level = DiagnosticLevel.Warning,
-                    ErrorCode = SafeError(error), HResult = error.HResult,
+                    ErrorCode = SafeError(error), Exception = error, HResult = error.HResult,
                     RemoteAddress = connection.RemoteEndPoint.Address });
             throw;
         }
@@ -460,7 +460,7 @@ public sealed class TcpPeerProtocolSession : IAsyncDisposable
         options.Diagnostics?.TryWrite(new("transport.stream_failed", "tcp_session")
         {
             SessionId = SessionId, Transport = DiagnosticTransport.Tcp, Level = DiagnosticLevel.Warning,
-            ErrorCode = SafeError(error), HResult = error.HResult, RemoteAddress = RemoteEndPoint.Address,
+            ErrorCode = SafeError(error), Exception = error, HResult = error.HResult, RemoteAddress = RemoteEndPoint.Address,
         });
         Interlocked.CompareExchange(ref requestedCloseReason,
             error is TimeoutException ? (int)CloseReason.Timeout
@@ -498,7 +498,7 @@ public sealed class TcpPeerProtocolSession : IAsyncDisposable
         {
             options.Diagnostics?.TryWrite(new("transport.close_frame_failed", "tcp_session")
                 { SessionId = SessionId, Transport = DiagnosticTransport.Tcp, Level = DiagnosticLevel.Debug,
-                    ErrorCode = SafeError(error), HResult = error.HResult });
+                    ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
         }
         try { await lifetime.CancelAsync().ConfigureAwait(false); }
         catch (Exception error) { (failures ??= []).Add(error); }

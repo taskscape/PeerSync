@@ -91,7 +91,7 @@ public sealed class RescanScheduler
                             5 => "sqlite-busy", 6 => "sqlite-locked", 10 => "sqlite-io", 13 => "sqlite-full", 14 => "sqlite-open",
                             _ => "sqlite-error",
                         } : errorCode,
-                        HResult = error.HResult, NativeError = error switch
+                        Exception = error, HResult = error.HResult, NativeError = error switch
                         {
                             Win32Exception native => native.NativeErrorCode,
                             SqliteException databaseError => databaseError.SqliteExtendedErrorCode,
@@ -136,7 +136,7 @@ public sealed class RescanScheduler
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or Win32Exception or ArgumentException)
                 {
                     journal?.TryWrite(new("scheduler.watcher_retry", "watch") { SessionId = session, Level = DiagnosticLevel.Warning,
-                        ErrorCode = "watcher-unavailable", HResult = error.HResult, RetryInMilliseconds = 10000 });
+                        ErrorCode = "watcher-unavailable", Exception = error, HResult = error.HResult, RetryInMilliseconds = 10000 });
                     requests.Writer.TryWrite(true);
                     await Task.Delay(TimeSpan.FromSeconds(10), clock, stopped.Token).ConfigureAwait(false);
                 }

@@ -77,7 +77,7 @@ public sealed class HistoryPolicy
         catch (Exception error) { Log("history.policy_failed", error.GetType().Name, error); throw; }
 
         void Log(string name, string? code = null, Exception? error = null) => journal?.TryWrite(new(name, "history-policy")
-        { SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = code, HResult = error?.HResult,
+        { SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning, ErrorCode = code, Exception = error, HResult = error?.HResult,
             NativeError = error switch { Win32Exception native => native.NativeErrorCode, SqliteException sqlite => sqlite.SqliteExtendedErrorCode, _ => null },
             ItemsChanged = retired + released, ElapsedMilliseconds = watch.ElapsedMilliseconds,
             RetryInMilliseconds = error is not null || name == "history.policy_wait" ? 10000 : null });

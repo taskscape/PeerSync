@@ -83,7 +83,7 @@ internal sealed class DirectorySnapshotGraph(string rootPath, FolderIndex index,
         {
             journal?.TryWrite(new("directory.graph_failed", "directory-graph") { SessionId = session, Level = DiagnosticLevel.Warning,
                 ItemsVisited = processed, ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name,
-                HResult = error.HResult, NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null }, RetryInMilliseconds = 10000 });
+                Exception = error, HResult = error.HResult, NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null }, RetryInMilliseconds = 10000 });
             throw;
         }
         void Log(bool complete) => journal?.TryWrite(new(complete ? "directory.graph_complete" : "directory.graph_pending", "directory-graph")

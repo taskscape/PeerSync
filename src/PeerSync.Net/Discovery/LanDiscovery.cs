@@ -142,7 +142,7 @@ public sealed class LanDiscovery : IAsyncDisposable
             catch (NetworkInformationException error)
             {
                 diagnostics?.TryWrite(new("discovery.lan_membership_refresh_failed", "lan_discovery")
-                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         }
     }
@@ -164,7 +164,7 @@ public sealed class LanDiscovery : IAsyncDisposable
                 catch (Exception error)
                 {
                     diagnostics?.TryWrite(new("discovery.lan_announce_failed", "lan_discovery")
-                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                    { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
                 await Task.Delay(AnnounceInterval, timeProvider, cancellationToken).ConfigureAwait(false);
             }
@@ -221,7 +221,7 @@ public sealed class LanDiscovery : IAsyncDisposable
                 catch (SocketException error)
                 {
                     diagnostics?.TryWrite(new("discovery.lan_send_failed", "lan_discovery")
-                    { Level = DiagnosticLevel.Debug, ErrorCode = error.SocketErrorCode.ToString(), HResult = error.HResult });
+                    { Level = DiagnosticLevel.Debug, ErrorCode = error.SocketErrorCode.ToString(), Exception = error, HResult = error.HResult });
                 }
             }
         }
@@ -267,7 +267,7 @@ public sealed class LanDiscovery : IAsyncDisposable
                     catch (Exception error)
                     {
                         diagnostics?.TryWrite(new("discovery.lan_callback_failed", "lan_discovery")
-                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                     }
                 }
             }
@@ -278,7 +278,7 @@ public sealed class LanDiscovery : IAsyncDisposable
         catch (Exception error)
         {
             diagnostics?.TryWrite(new("discovery.lan_receive_failed", "lan_discovery")
-            { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
         }
     }
 
@@ -287,7 +287,7 @@ public sealed class LanDiscovery : IAsyncDisposable
             && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback);
 
     private void LogSendFailure(SocketException error) => diagnostics?.TryWrite(new("discovery.lan_send_failed", "lan_discovery")
-    { Level = DiagnosticLevel.Debug, ErrorCode = error.SocketErrorCode.ToString(), HResult = error.HResult });
+    { Level = DiagnosticLevel.Debug, ErrorCode = error.SocketErrorCode.ToString(), Exception = error, HResult = error.HResult });
 
     private static IPv4InterfaceProperties? SafeIPv4(NetworkInterface nic)
     { try { return nic.GetIPProperties().GetIPv4Properties(); } catch (NetworkInformationException) { return null; } }

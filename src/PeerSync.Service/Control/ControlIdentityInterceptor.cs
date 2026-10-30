@@ -32,13 +32,14 @@ internal sealed class ControlIdentityInterceptor(ControlCallerPolicy callers, Di
         catch (RpcException error)
         {
             diagnostics?.TryWrite(new("control.caller_rejected", "control")
-                { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.StatusCode.ToString() });
+                { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.StatusCode.ToString(),
+                    Exception = error, HResult = error.HResult });
             throw;
         }
         catch (Exception error) when (error is SecurityException or IOException or UnauthorizedAccessException or Win32Exception)
         {
             diagnostics?.TryWrite(new("control.caller_identification_failed", "control")
-                { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+                { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             throw new RpcException(new(StatusCode.PermissionDenied, "Control caller cannot be identified."));
         }
     }

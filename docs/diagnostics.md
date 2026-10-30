@@ -97,9 +97,21 @@ it does not prove installed SCM operation or production peer synchronization.
 Structured events use UTC timestamps, component, process/run ID, session ID,
 trace ID when present, transport, operation, byte counts, elapsed milliseconds,
 native error number and retry delay. The installed service currently enables
-debug events in its local journal. The event model
+debug events in its local journal. The structured event model
 accepts metadata rather than arbitrary payloads or exception messages. Never
 add folder keys, FolderIds, file contents or record bodies to diagnostics.
+
+Warning and error exceptions are also appended to a local text log named
+`exceptions-yyyy-MM-dd.log` in the log root. The desktop app writes
+`%LocalAppData%\PeerSync\logs\app`, the service writes
+`%ProgramData%\PeerSync\logs\service`, the elevated helper writes
+`%ProgramData%\PeerSync\logs\app-helper`, and rendezvous writes its configured
+log directory. Tray notifications for service faults are raised from these
+service records: the balloon shows only the error code, and the text log holds
+the exception chain, stack trace, HRESULT, socket and native codes, and the
+structured event fields. Files roll by UTC day, keep 30 days, and stay out of
+`psp diagnostics` bundles. Review a text log before sharing it. Messages and
+stacks can contain paths and addresses. Folder keys and private keys are redacted.
 
 The diagnostic journal defaults to seven files of at most 14 MB each. Files
 containing network addresses expire at 24 hours on the next write. Collection

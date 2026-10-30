@@ -91,7 +91,7 @@ public sealed class Puller : IDisposable
             Bytes = bytes,
             ItemsVisited = attempts,
             ErrorCode = error?.GetType().Name,
-            HResult = error?.HResult
+            Exception = error, HResult = error?.HResult
         });
 
     internal void RecordIndexPush(string eventName, long targetSequence, Guid? sessionId = null, Exception? error = null)
@@ -101,7 +101,7 @@ public sealed class Puller : IDisposable
             Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
             ItemsVisited = targetSequence,
             ErrorCode = error?.GetType().Name,
-            HResult = error?.HResult,
+            Exception = error, HResult = error?.HResult,
         });
 
     /// <summary>The caller must authenticate both the TLS device identity and
@@ -302,7 +302,7 @@ public sealed class Puller : IDisposable
     {
         var retry = await index.RecordPullFailureAsync(row.PathKey, rootId!, row.Work!.Fingerprint, Now, token).ConfigureAwait(false);
         journal?.TryWrite(new("puller.work_retry", "pull") { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Debug,
-            ErrorCode = error?.GetType().Name ?? "work-deferred", HResult = error?.HResult, NativeError = NativeError(error),
+            ErrorCode = error?.GetType().Name ?? "work-deferred", Exception = error, HResult = error?.HResult, NativeError = NativeError(error),
             RetryInMilliseconds = retry is null ? 0 : (int)Math.Clamp((retry.NextTicks - retry.FailedTicks) / TimeSpan.TicksPerMillisecond, 0, 600000), ItemsDeferred = 1 });
     }
 
@@ -374,7 +374,7 @@ public sealed class Puller : IDisposable
                     {
                         int seconds = RescanScheduler.BackoffSeconds(attempt); attempt = Math.Min(6, attempt + 1); delay = TimeSpan.FromSeconds(seconds); folderRetry = true;
                         journal?.TryWrite(new("puller.folder_retry", "pull") { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Warning,
-                            ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = NativeError(error), RetryInMilliseconds = seconds * 1000 });
+                            ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = NativeError(error), RetryInMilliseconds = seconds * 1000 });
                     }
                     if (delay == TimeSpan.Zero) { await Task.Yield(); continue; }
                     if (folderRetry) { await Task.Delay(delay, clock, cancellationToken).ConfigureAwait(false); continue; }
@@ -407,7 +407,7 @@ public sealed class Puller : IDisposable
         || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 };
     private static int? NativeError(Exception? error) => error switch { Win32Exception native => native.NativeErrorCode, SqliteException database => database.SqliteExtendedErrorCode, _ => null };
     private void Failure(string name, Guid session, Exception error) => journal?.TryWrite(new(name, "pull")
-    { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = NativeError(error) });
+    { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = NativeError(error) });
     public void Dispose()
     {
         if (Volatile.Read(ref running) != 0) throw new InvalidOperationException("Stop the puller before disposal.");

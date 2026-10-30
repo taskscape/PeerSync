@@ -73,7 +73,7 @@ public sealed partial class PublishedBlocks
                 {
                     deferred++;
                     journal?.TryWrite(new("block.recovery_failed", "block-recovery") { SessionId = session, Level = DiagnosticLevel.Warning,
-                        ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
+                        ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
                         RetryInMilliseconds = 10000 });
                 }
             }
@@ -94,7 +94,7 @@ public sealed partial class PublishedBlocks
             catch (Exception error)
             {
                 journal?.TryWrite(new("block.recovery_catalog_failed", "block-recovery") { SessionId = proof.Id, Level = DiagnosticLevel.Error,
-                    ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, HResult = error.HResult,
+                    ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, Exception = error, HResult = error.HResult,
                     NativeError = error is SqliteException sqlite ? sqlite.SqliteExtendedErrorCode : null, RetryInMilliseconds = 10000 });
                 throw;
             }

@@ -141,7 +141,7 @@ public sealed partial class PublishedBlocks : IDisposable
         catch (Exception error)
         {
             journal?.TryWrite(new("block.catalog_failed", "block-capture") { Level = DiagnosticLevel.Error,
-                ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, HResult = error.HResult,
+                ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, Exception = error, HResult = error.HResult,
                 NativeError = error is SqliteException sqlite ? sqlite.SqliteExtendedErrorCode : null,
                 ItemsChanged = registered, ItemsDeferred = captured.Count, RetryInMilliseconds = 10000 });
             throw;
@@ -160,7 +160,7 @@ public sealed partial class PublishedBlocks : IDisposable
             catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception)
             {
                 journal?.TryWrite(new("block.proof_cleanup_deferred", "block-capture") { SessionId = entry.Key, Level = DiagnosticLevel.Warning,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
+                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, NativeError = error is Win32Exception native ? native.NativeErrorCode : null,
                     RetryInMilliseconds = 10000 });
             }
         }

@@ -193,7 +193,7 @@ public sealed partial class ArchiveManager
         journal?.TryWrite(new(name, "archive") { SessionId = session, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
             ErrorCode = error is SqliteException sqlite ? sqlite.SqliteErrorCode switch
             { 5 => "sqlite-busy", 6 => "sqlite-locked", 10 => "sqlite-io", 13 => "sqlite-full", 14 => "sqlite-open", _ => "sqlite-error" } : code,
-            HResult = error?.HResult, NativeError = error switch
+            Exception = error, HResult = error?.HResult, NativeError = error switch
             { Win32Exception native => native.NativeErrorCode, SqliteException databaseError => databaseError.SqliteExtendedErrorCode, _ => null },
             ItemsVisited = visited, ItemsChanged = changed, ItemsDeferred = deferred, Bytes = bytes,
             RetryInMilliseconds = retry is { } next ? checked((int)next.TotalMilliseconds) : null });

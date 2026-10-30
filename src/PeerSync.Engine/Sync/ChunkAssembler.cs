@@ -150,7 +150,7 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
         catch (Exception error)
         {
             journal?.TryWrite(new("assembly.failed", "assembly") { SessionId = session, Bytes = offset, ItemsHashed = verified,
-                Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult,
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds });
             throw;
         }

@@ -30,6 +30,15 @@ internal static class Program
         string logs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "PeerSync", "logs", "app");
         using var run = DiagnosticRunJournal.Open(logs, "app", debugEnabled: true);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception error) LogUnhandled(run.Journal, "app.unhandled", error);
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            LogUnhandled(run.Journal, "app.unobserved_task", args.Exception);
+            args.SetObserved();
+        };
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(run.Journal);
         builder.Services.AddSingleton<DashboardViewModel>();
@@ -38,6 +47,7 @@ internal static class Program
         using var host = builder.Build();
         host.StartAsync().GetAwaiter().GetResult();
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+        app.DispatcherUnhandledException += (_, args) => LogUnhandled(run.Journal, "app.dispatcher_unhandled", args.Exception);
 #pragma warning disable WPF0001
         app.ThemeMode = ThemeMode.System;
 #pragma warning restore WPF0001
@@ -59,4 +69,13 @@ internal static class Program
             host.StopAsync().GetAwaiter().GetResult();
         }
     }
+
+    private static void LogUnhandled(DiagnosticJournal journal, string eventName, Exception error)
+        => journal.TryWrite(new(eventName, "runtime")
+        {
+            Level = DiagnosticLevel.Error,
+            ErrorCode = error.GetType().Name,
+            HResult = error.HResult,
+            Exception = error,
+        });
 }

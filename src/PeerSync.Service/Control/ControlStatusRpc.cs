@@ -234,11 +234,11 @@ internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, Con
         try { return callers.RequireCaller(context); }
         catch (RpcException error)
         {
-            diagnostics?.TryWrite(new("control.caller_rejected", "control") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.StatusCode.ToString() }); throw;
+            diagnostics?.TryWrite(new("control.caller_rejected", "control") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.StatusCode.ToString(), Exception = error, HResult = error.HResult }); throw;
         }
         catch (Exception error) when (error is SecurityException or IOException or UnauthorizedAccessException or Win32Exception)
         {
-            diagnostics?.TryWrite(new("control.caller_identification_failed", "control") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            diagnostics?.TryWrite(new("control.caller_identification_failed", "control") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             throw new RpcException(new(StatusCode.PermissionDenied, "Control caller cannot be identified."));
         }
     }
@@ -257,7 +257,7 @@ internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, Con
     };
     private void LogFolderFailure(Guid session, Exception error)
         => diagnostics?.TryWrite(new("control.folder_request_failed", "control")
-            { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
     private Wire.ServiceStatus Read(Guid session)
     {
         try
@@ -268,7 +268,7 @@ internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, Con
         }
         catch (Exception error) when (error is ObjectDisposedException or InvalidOperationException or InvalidDataException)
         {
-            diagnostics?.TryWrite(new("control.status_unavailable", "control") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            diagnostics?.TryWrite(new("control.status_unavailable", "control") { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             throw new RpcException(new(StatusCode.Unavailable, "Control status is unavailable."));
         }
     }

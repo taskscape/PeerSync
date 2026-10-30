@@ -76,7 +76,7 @@ internal sealed partial class DirectorySnapshotCapture(string rootPath, FolderIn
         {
             journal?.TryWrite(new("directory.capture_failed", "directory-capture") { SessionId = session, Level = DiagnosticLevel.Warning,
                 ItemsChanged = captured, ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name,
-                HResult = error.HResult, NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null }, RetryInMilliseconds = 10000 });
+                Exception = error, HResult = error.HResult, NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null }, RetryInMilliseconds = 10000 });
             throw;
         }
         void Log(bool complete, long accepted) => journal?.TryWrite(new(complete ? "directory.capture_complete" : "directory.capture_pending", "directory-capture")

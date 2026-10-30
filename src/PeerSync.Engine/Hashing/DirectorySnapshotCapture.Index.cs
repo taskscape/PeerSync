@@ -74,7 +74,7 @@ internal sealed partial class DirectorySnapshotCapture
         catch (Exception error)
         {
             journal?.TryWrite(new("directory.capture_index_failed", "directory-capture-index") { SessionId = session, Level = DiagnosticLevel.Warning,
-                ItemsChanged = captured, ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, HResult = error.HResult,
+                ItemsChanged = captured, ErrorCode = error is OperationCanceledException ? "cancelled" : error.GetType().Name, Exception = error, HResult = error.HResult,
                 NativeError = error switch { SqliteException sqlite => sqlite.SqliteExtendedErrorCode, Win32Exception native => native.NativeErrorCode, _ => null }, RetryInMilliseconds = 10000 });
             throw;
         }

@@ -16,6 +16,18 @@ DiagnosticRunJournal? run = null;
 try
 {
     run = DiagnosticRunJournal.Open(logs, "service", debugEnabled: true); journal = run.Journal;
+    AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+    {
+        if (args.ExceptionObject is Exception unhandled)
+            journal.TryWrite(new("service.unhandled", "runtime")
+            { Level = DiagnosticLevel.Error, ErrorCode = unhandled.GetType().Name, HResult = unhandled.HResult, Exception = unhandled });
+    };
+    TaskScheduler.UnobservedTaskException += (_, args) =>
+    {
+        journal.TryWrite(new("service.unobserved_task", "runtime")
+        { Level = DiagnosticLevel.Error, ErrorCode = args.Exception.GetType().Name, HResult = args.Exception.HResult, Exception = args.Exception });
+        args.SetObserved();
+    };
     journal.TryWrite(new("service.starting", "startup"));
     var settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "config", "settings.json");
     var settings = new SettingsStore(settingsPath).ReadIfPresent(out var settingsRecovered);
@@ -56,12 +68,12 @@ try
 }
 catch (IdentityNotMappedException error)
 {
-    journal?.TryWrite(new("service.control_group_missing", "startup") { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+    journal?.TryWrite(new("service.control_group_missing", "startup") { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
     Console.Error.WriteLine("The PeerSync Users group is missing. Service installation must provision the control group and service paths."); return 1;
 }
 catch (Exception error)
 {
-    journal?.TryWrite(new("service.start_failed", "startup") { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, HResult = error.HResult });
+    journal?.TryWrite(new("service.start_failed", "startup") { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
     Console.Error.WriteLine("PeerSync service failed: " + error.GetType().Name); return 1;
 }
 finally { run?.Dispose(); }

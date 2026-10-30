@@ -71,7 +71,7 @@ public sealed partial class FileApplier
         private void Log(string stage, int length, long elapsed, Exception? error = null) => owner.journal?.TryWrite(new("apply.case-route-" + stage, "case-route")
         {
             SessionId = session, Bytes = length, ElapsedMilliseconds = elapsed, Level = error is null ? DiagnosticLevel.Debug : DiagnosticLevel.Warning,
-            ErrorCode = error is OperationCanceledException ? "timeout" : error?.GetType().Name, HResult = error?.HResult
+            ErrorCode = error is OperationCanceledException ? "timeout" : error?.GetType().Name, Exception = error, HResult = error?.HResult
         });
         public void Dispose() => deadline.Dispose();
     }

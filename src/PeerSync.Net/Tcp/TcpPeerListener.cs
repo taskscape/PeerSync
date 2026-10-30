@@ -118,7 +118,8 @@ public sealed class TcpPeerListener : IAsyncDisposable
                 {
                     handlers.TryRemove(id, out _); handshakes.Release();
                     if (completed.Exception is { } failure)
-                        Log("transport.tcp_accept_failed", "tcp_accept", null, DiagnosticLevel.Warning, failure.GetBaseException().GetType().Name);
+                        Log("transport.tcp_accept_failed", "tcp_accept", null, DiagnosticLevel.Warning,
+                            failure.GetBaseException().GetType().Name, failure.GetBaseException().HResult, failure);
                 }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
         }
@@ -268,10 +269,11 @@ public sealed class TcpPeerListener : IAsyncDisposable
     }
 
     internal void Log(string eventName, string operation, IPAddress? remoteAddress,
-        DiagnosticLevel level = DiagnosticLevel.Debug, string? errorCode = null, int? hResult = null)
+        DiagnosticLevel level = DiagnosticLevel.Debug, string? errorCode = null, int? hResult = null,
+        Exception? exception = null)
         => Options.Diagnostics?.TryWrite(new(eventName, operation)
             { Transport = DiagnosticTransport.Tcp, Level = level, ErrorCode = errorCode,
-                HResult = hResult, RemoteAddress = remoteAddress });
+                HResult = hResult, RemoteAddress = remoteAddress, Exception = exception });
 
     internal void LogFailure(string eventName, string operation, IPAddress? remoteAddress, Exception error)
     {
@@ -291,7 +293,7 @@ public sealed class TcpPeerListener : IAsyncDisposable
             Transport = DiagnosticTransport.Tcp,
             Level = DiagnosticLevel.Warning,
             ErrorCode = category,
-            HResult = error.HResult,
+            Exception = error, HResult = error.HResult,
             NativeError = nativeError,
             RemoteAddress = remoteAddress,
         });

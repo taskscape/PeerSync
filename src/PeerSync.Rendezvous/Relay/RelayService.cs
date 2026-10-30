@@ -63,8 +63,8 @@ internal sealed class RelayService(RelayRegistry registry, DiagnosticJournal dia
         catch (RpcException error)
         {
             diagnostics.TryWrite(new("rendezvous.relay_forward_failed", "relay")
-            { Level = DiagnosticLevel.Warning, SessionId = join.SessionId,
-                Transport = DiagnosticTransport.Relay, ErrorCode = error.StatusCode.ToString() });
+            { Level = DiagnosticLevel.Warning, SessionId = join.SessionId, Exception = error,
+                Transport = DiagnosticTransport.Relay, ErrorCode = error.StatusCode.ToString(), HResult = error.HResult });
             throw;
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
@@ -73,7 +73,7 @@ internal sealed class RelayService(RelayRegistry registry, DiagnosticJournal dia
             diagnostics.TryWrite(new("rendezvous.relay_transport_failed", "relay")
             { Level = DiagnosticLevel.Warning, SessionId = join.SessionId,
                 Transport = DiagnosticTransport.Relay, ErrorCode = error.GetType().Name,
-                HResult = error.HResult });
+                Exception = error, HResult = error.HResult });
             throw;
         }
         finally

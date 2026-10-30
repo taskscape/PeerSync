@@ -37,7 +37,7 @@ internal static class ProtocolViolationStrike
                 Transport = transport,
                 Level = DiagnosticLevel.Warning,
                 ErrorCode = error.GetType().Name,
-                HResult = error.HResult,
+                Exception = error, HResult = error.HResult,
             });
         }
     }

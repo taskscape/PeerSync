@@ -152,7 +152,7 @@ public sealed class InMemoryNetwork(TimeProvider? timeProvider = null, Diagnosti
             catch (Exception error)
             {
                 network.journal?.TryWrite(new("transport.request_failed", operation) { SessionId = session, Level = DiagnosticLevel.Warning,
-                    ErrorCode = error.GetType().Name, HResult = error.HResult, ElapsedMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds }); throw;
+                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult, ElapsedMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds }); throw;
             }
             finally
             {
