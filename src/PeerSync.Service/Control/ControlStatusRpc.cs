@@ -251,6 +251,7 @@ internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, Con
         ArgumentException or FormatException or ValidationException => new(new(StatusCode.InvalidArgument, "Invalid folder request.")),
         DirectoryNotFoundException => new(new(StatusCode.NotFound,
             "The folder path is missing or inaccessible to the PeerSync service. Check folder access.")),
+        InstalledFolderHost.FolderIdentityMismatchException => new(new(StatusCode.FailedPrecondition, error.Message)),
         IOException or UnauthorizedAccessException => new(new(StatusCode.FailedPrecondition, "The folder could not be opened.")),
         InvalidOperationException => new(new(StatusCode.FailedPrecondition, "The folder request conflicts with current service state.")),
         OperationCanceledException => new(new(StatusCode.Cancelled, "Folder request was cancelled.")),
@@ -258,7 +259,9 @@ internal sealed partial class ControlStatusRpc(ControlStatusRuntime runtime, Con
     };
     private void LogFolderFailure(Guid session, Exception error)
         => diagnostics?.TryWrite(new("control.folder_request_failed", "control")
-            { SessionId = session, Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
+            { SessionId = session, Level = error is InstalledFolderHost.FolderIdentityMismatchException ? DiagnosticLevel.Error : DiagnosticLevel.Warning,
+                ErrorCode = error is InstalledFolderHost.FolderIdentityMismatchException
+                ? "folder_identity_mismatch" : error.GetType().Name, Exception = error, HResult = error.HResult });
     private Wire.ServiceStatus Read(Guid session)
     {
         try

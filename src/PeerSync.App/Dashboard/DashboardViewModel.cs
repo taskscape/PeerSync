@@ -102,7 +102,9 @@ internal sealed partial class DashboardViewModel : ObservableObject
             currentErrors.Add(key);
             bool newEvent = seenErrors.Add(key);
             if (hasSnapshot && newEvent && ShouldNotifyError(error.Code, error.Source))
-                Notification?.Invoke($"PeerSync error: {error.Code}");
+                Notification?.Invoke(error.Code == "folder_identity_mismatch"
+                    ? "This folder has metadata from an earlier PeerSync setup. Use Join with the original share key, or see the folder error to start a new sync."
+                    : $"PeerSync error: {error.Code}");
         }
         seenErrors.IntersectWith(currentErrors);
         UpdateFolderActivity();

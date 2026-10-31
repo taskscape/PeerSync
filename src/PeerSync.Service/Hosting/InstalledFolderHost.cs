@@ -749,7 +749,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             try
             {
                 if (!CryptographicOperations.FixedTimeEquals(existing, folderId))
-                    throw new IOException("The folder identity marker does not match the registered key.");
+                    throw new FolderIdentityMismatchException();
             }
             finally { CryptographicOperations.ZeroMemory(existing); }
             return false;
@@ -767,7 +767,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
             try
             {
                 if (!CryptographicOperations.FixedTimeEquals(existing, folderId))
-                    throw new IOException("The folder identity marker does not match the registered key.");
+                    throw new FolderIdentityMismatchException();
             }
             finally { CryptographicOperations.ZeroMemory(existing); }
             return false;
@@ -959,4 +959,8 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
     }
 
     internal sealed class FolderAlreadyRegisteredException() : InvalidOperationException("This folder path is already registered.");
+
+    internal sealed class FolderIdentityMismatchException() : IOException(
+        "This folder contains PeerSync metadata from a different sync setup, possibly left after reinstalling or resetting PeerSync.\n\n"
+        + "Use Join with the original share key to reconnect. To start a new sync, back up and move the hidden .psp folder outside this folder, then use Add again.");
 }

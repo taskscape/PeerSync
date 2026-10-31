@@ -116,6 +116,23 @@ public sealed class DashboardViewModelTests
     }
 
     [Fact]
+    public void FolderIdentityConflictNotificationExplainsRecoveryOnlyOnce()
+    {
+        var model = new DashboardViewModel();
+        var notices = new List<string>(); model.Notification += notices.Add;
+        model.Apply(Snapshot());
+        var update = Snapshot();
+        update.Errors.Add(new ControlError { Code = "folder_identity_mismatch", Source = "control",
+            OccurredUtcTicks = DateTime.UtcNow.Ticks });
+
+        model.Apply(update); model.Apply(update);
+
+        notices.ShouldHaveSingleItem().ShouldContain("Join with the original share key");
+        notices.Single().ShouldContain("earlier PeerSync setup");
+        notices.Single().ShouldNotContain("Exception");
+    }
+
+    [Fact]
     public void PeerRouteReflectsTransportFromControlSnapshot()
     {
         var model = new DashboardViewModel();

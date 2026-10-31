@@ -231,6 +231,47 @@ public sealed class ControlStatusPipeTests : IDisposable
         (await client.ListFoldersAsync(Token)).Folders.ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingFolderIdentityExplainsRecoveryAndPreservesMetadata(bool join)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string statePath = Path.Combine(fixture, "state", "peersync.db");
+        string root = Path.Combine(fixture, "existing");
+        string marker = Path.Combine(root, ".psp", "id");
+        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        byte[] originalId = keys.FolderId();
+        await File.WriteAllBytesAsync(marker, originalId, Token);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "logs"), "service");
+        var runtime = new ControlStatusRuntime(journal);
+        await using var folderHost = await InstalledFolderHost.StartForTestAsync(statePath, Device(10),
+            identity.User!.Value, runtime, diagnostics: journal, cancellationToken: Token);
+        runtime.AttachFolderHost(folderHost);
+        string pipe = Pipe;
+        await using var api = await ControlApiHost.StartFixtureAsync(pipe, runtime, [identity.User!],
+            diagnostics: journal, cancellationToken: Token);
+        using var client = Client(pipe, identity.User!);
+        using var otherKeys = FolderKeys.CreateNew();
+
+        var error = await Should.ThrowAsync<RpcException>(() => join
+            ? client.JoinFolderAsync(otherKeys.ExportText(), root, Token)
+            : client.AddFolderAsync(root, Token));
+
+        error.StatusCode.ShouldBe(StatusCode.FailedPrecondition);
+        error.Status.Detail.ShouldContain("different sync setup");
+        error.Status.Detail.ShouldContain("Join with the original share key");
+        error.Status.Detail.ShouldContain("back up and move the hidden .psp folder");
+        error.Status.Detail.ShouldNotContain(root);
+        (await File.ReadAllBytesAsync(marker, Token)).ShouldBe(originalId);
+        (await client.ListFoldersAsync(Token)).Folders.ShouldBeEmpty();
+        runtime.ReadRecentErrors().ShouldContain(item => item.Code == "folder_identity_mismatch");
+
+        var recovered = await client.JoinFolderAsync(keys.ExportText(), root, Token);
+        recovered.FolderId.ShouldBe(Convert.ToHexString(originalId));
+    }
+
     [Fact]
     public async Task PauseResumeTimedPauseAndRemovePreserveUserFiles()
     {
