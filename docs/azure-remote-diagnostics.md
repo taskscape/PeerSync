@@ -5,8 +5,9 @@ Status: implemented in source on 2026-10-31. The dedicated West Europe
 `PeerSyncDiagnostics-weu` Log Analytics workspace exist in the
 `PeerSyncDiagnostics` resource group. The workspace retains logs for 30 days
 and has a 0.1 GB/day ingestion cap. The local production PC has been upgraded
-to version 1.0.1.0 and its telemetry is reaching Azure. The second PC and
-rendezvous server have not yet been upgraded.
+to version 1.0.1.0, and the rendezvous server at `sync.taskscape.com` has been
+upgraded to version 1.0.43.0 from its separate `p5-hardening` code line. Both
+are sending telemetry to Azure. The second PC has not yet been upgraded.
 
 ## Purpose
 
@@ -178,12 +179,14 @@ should allow several minutes before treating absence as evidence.
   Verify the exporter failure path leaves sync functional and reports local
   queue/export health.
 
-To diagnose the two-PC failure, install the new build on the second PC and the
-rendezvous server, then run the reproduction. The self-contained x64 package at
+To diagnose the two-PC failure, install the client diagnostic build on the
+second PC, then run the reproduction. The self-contained x64 client package at
 `artifacts/deploy/PeerSync-AzureDiagnostics-2026-10-31` contains an elevated
 `Install-DiagnosticBuild.ps1` upgrade script and its README. Close the client
 desktop app before upgrading it. The script backs up old binaries, preserves
-configuration, and restarts the service.
+configuration, and restarts the service. The rendezvous server uses the
+separate `artifacts/deploy/PeerSync-Rendezvous-AzureDiagnostics-1.0.43` package
+built from its installed `b7e4b67` revision, preserving its relay behavior.
 
 ## Verification on 2026-10-31
 
@@ -207,8 +210,20 @@ configuration, and restarts the service.
   the latest observed heartbeat reported zero dropped events. The upgrade
   backed up the previous binaries under
   `%ProgramData%\PeerSync\backups\diagnostic-Client-20261031T153509Z`.
-- The second PC and rendezvous server are still on their existing builds, so
-  the Tailscale failure's root cause is still unknown.
+- The rendezvous server at `sync.taskscape.com` (`100.95.151.81`) was upgraded
+  from version 1.0.42 to the branch-compatible 1.0.43 build. Its service is
+  running, its existing port 99 configuration was preserved, and `/healthz`
+  returned `ok`. Its prior binaries are in
+  `%ProgramData%\PeerSync\backups\diagnostic-Rendezvous-20261031T172358Z`.
+  Azure contains `rendezvous.started` at 17:24:00 UTC, a 17:25:00 UTC
+  heartbeat with zero drops, and folder announcements including fingerprints
+  also seen on the local client. The server-side source changes live in the
+  `codex/server-azure-diagnostics` worktree at
+  `C:\Projects\PeerSync-server-diagnostics` (commit `9d52190`); its release
+  build had zero warnings/errors and all 26 rendezvous tests passed.
+- The second PC is still on its existing build. The Tailscale failure's root
+  cause is still unknown until its telemetry and a controlled reproduction
+  are available.
 
 ## Reference documentation
 
