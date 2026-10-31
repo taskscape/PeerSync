@@ -61,29 +61,29 @@ upgrading an earlier development installation.
 
 ### Replace a newer test build with a release package
 
-The GitHub development-release workflow currently builds version `1.0.0.0`.
-A server used for testing may already have a higher file version, so setup
-rejects that package as a downgrade even if its source commit is newer.
-Updated installers show both versions in the setup error and log.
+The GitHub development-release workflow uses the version in
+`Directory.Build.props`. Updated installers allow replacing any installed
+version with the selected package, including a downgrade or repair of a
+leftover service registration with a missing executable.
 
 For an intentional rollback, back up the installed `appsettings.json` outside
-the installation directory, then run a setup containing the recovery switch
+the installation directory, then run an updated setup
 from an elevated PowerShell:
 
 ```powershell
-$setup = '.\PeerSync-Rendezvous-Setup-1.0.0.0-x64.exe'
-$process = Start-Process -FilePath $setup -ArgumentList '/ALLOWDOWNGRADE=1',
+$setup = '.\PeerSync-Rendezvous-Setup-1.0.44.0-x64.exe'
+$process = Start-Process -FilePath $setup -ArgumentList `
     '/LOG="C:\Windows\Temp\PeerSync-Rendezvous-setup.log"' -Wait -PassThru
 $process.ExitCode
 ```
 
-Only `/ALLOWDOWNGRADE=1` permits a lower version. Normal installs still reject
-downgrades, and the switch does not bypass certificate or service-stop checks.
+No `/ALLOWDOWNGRADE` switch is required. Certificate and service-stop checks
+still run before any files are replaced.
 Setup preserves the existing `appsettings.json`, data directory and logs.
 Check that the older service supports any settings added by the test build,
 then verify the service and listeners using the commands below.
 
-Packages built before this switch was added cannot use it. With those packages,
+Older packages retain their original downgrade policy. With those packages,
 back up `appsettings.json`, uninstall **PeerSync Rendezvous** through Installed
 apps, then run the downloaded setup. If uninstall requests a reboot, complete
 it first. Uninstall stops and removes the rendezvous service and its firewall

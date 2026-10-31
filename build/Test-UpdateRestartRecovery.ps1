@@ -18,6 +18,9 @@ $root = Join-Path $env:TEMP ('PeerSync-update-attempt-' + [guid]::NewGuid().ToSt
 $ready = [guid]::NewGuid().ToString('N') + '.ready'
 $attempt = Join-Path $root ([guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $attempt -Force | Out-Null
+# Compare the filesystem's canonical spelling, as returned by the helper's
+# directory enumeration. Runner TEMP can contain a short-name or dot alias.
+$attempt = (Get-ChildItem -LiteralPath $root -Directory).FullName
 try {
     $bootTicks = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().Ticks
     Write-UpdateAttempt $attempt $ready ($bootTicks + 1) 'restartRequired'

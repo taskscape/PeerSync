@@ -11,6 +11,19 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  version:
+    name: Require a version increase for every main commit
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Validate the shared version and main commit increases
+        shell: pwsh
+        env:
+          MAIN_BEFORE: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && github.event.before || '' }}
+        run: ./build/Test-VersionBump.ps1 -BaseRef $env:MAIN_BEFORE
   build:
     strategy:
       fail-fast: false
@@ -247,7 +260,7 @@ jobs:
           if-no-files-found: warn
   release:
     name: Publish development prerelease
-    needs: [build, fuzz-smoke, retained-simulation, boundary-aggregate, service-security, installer]
+    needs: [version, build, fuzz-smoke, retained-simulation, boundary-aggregate, service-security, installer]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: windows-latest
     timeout-minutes: 10
@@ -257,6 +270,7 @@ jobs:
       group: release-${{ github.sha }}
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: PeerSync-*-win-*-${{ github.sha }}
@@ -268,23 +282,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $version = ./build/Get-Version.ps1
+          $fileVersion = ./build/Get-Version.ps1 -FileVersion
           $assets = @()
-          foreach ($name in @('PeerSync-Setup-1.0.0.0-x64.exe',
-              'PeerSync-Setup-1.0.0.0-arm64.exe', 'PeerSync-Rendezvous-Setup-1.0.0.0-x64.exe')) {
+          foreach ($name in @("PeerSync-Setup-$fileVersion-x64.exe",
+              "PeerSync-Setup-$fileVersion-arm64.exe", "PeerSync-Rendezvous-Setup-$fileVersion-x64.exe")) {
             $setup = Join-Path 'artifacts/release' $name
             foreach ($file in @($setup, "$setup.manifest.json", "$setup.cer")) {
               if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing release asset: $file" }
               $assets += $file
             }
             $manifest = Get-Content -LiteralPath "$setup.manifest.json" -Raw | ConvertFrom-Json
-            if ($manifest.sourceRevision -ne $env:GITHUB_SHA -or $manifest.workingTreeDirty -ne $false -or
+            if ($manifest.version -ne $fileVersion -or
+                $manifest.sourceRevision -ne $env:GITHUB_SHA -or $manifest.workingTreeDirty -ne $false -or
                 $manifest.signed -ne $true -or $manifest.localDevelopmentOnly -ne $true -or
                 $manifest.installerSha256 -ne (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash) {
               throw "Release asset does not match this signed development build: $name"
             }
           }
           $tag = "build-$env:GITHUB_SHA"
-          $title = "PeerSync development build $($env:GITHUB_SHA.Substring(0, 12))"
+          $title = "PeerSync $version development build $($env:GITHUB_SHA.Substring(0, 12))"
           $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           @"
           Experimental development packages from main at commit $env:GITHUB_SHA.

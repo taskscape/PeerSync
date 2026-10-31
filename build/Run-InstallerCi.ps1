@@ -2,6 +2,8 @@
 param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$version = & (Join-Path $PSScriptRoot 'Get-Version.ps1')
+$fileVersion = & (Join-Path $PSScriptRoot 'Get-Version.ps1') -FileVersion
 $tools = Join-Path $root 'artifacts/tools'
 $inno = Join-Path $tools 'Inno7'
 $download = Join-Path $tools 'innosetup-7.1.0-x64.exe'
@@ -19,6 +21,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $inno 'ISCC.exe') -PathType Leaf)) {
 }
 $iscc = Join-Path $inno 'ISCC.exe'
 if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) { throw 'Inno Setup 7 ISCC.exe is missing.' }
+& (Join-Path $PSScriptRoot 'Test-InstallerPolicy.ps1') -IsccPath $iscc
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-ServiceReplacement.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Service replacement regression checks failed.' }
 
 $certificate = $null
 try {
@@ -35,10 +41,10 @@ try {
     } finally { $trust.Dispose(); $publicOnly.Dispose() }
 
     foreach ($arch in @('x64', 'arm64')) {
-        & (Join-Path $PSScriptRoot 'Build-Installer.ps1') -Arch $arch -Version 1.0.0 `
+        & (Join-Path $PSScriptRoot 'Build-Installer.ps1') -Arch $arch -Version $version `
             -IsccPath $iscc -CertificateThumbprint $certificate.Thumbprint -DevelopmentSigning
         if ($LASTEXITCODE -ne 0) { throw "Installer build failed: $arch" }
-        $setup = Join-Path $root "artifacts/installer/PeerSync-Setup-1.0.0.0-$arch.exe"
+        $setup = Join-Path $root "artifacts/installer/PeerSync-Setup-$fileVersion-$arch.exe"
         $signature = Get-AuthenticodeSignature -LiteralPath $setup
         if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint `
             -or $null -eq $signature.TimeStamperCertificate) {
@@ -91,10 +97,10 @@ try {
             }
         }
     }
-    & (Join-Path $PSScriptRoot 'Build-RendezvousInstaller.ps1') -Version 1.0.0 `
+    & (Join-Path $PSScriptRoot 'Build-RendezvousInstaller.ps1') -Version $version `
         -IsccPath $iscc -CertificateThumbprint $certificate.Thumbprint -DevelopmentSigning
     if ($LASTEXITCODE -ne 0) { throw 'Rendezvous installer build failed' }
-    $serverSetup = Join-Path $root 'artifacts/installer/PeerSync-Rendezvous-Setup-1.0.0.0-x64.exe'
+    $serverSetup = Join-Path $root "artifacts/installer/PeerSync-Rendezvous-Setup-$fileVersion-x64.exe"
     $serverSignature = Get-AuthenticodeSignature -LiteralPath $serverSetup
     if ($serverSignature.Status -ne 'Valid' -or
         $serverSignature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint -or

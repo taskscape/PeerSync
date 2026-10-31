@@ -63,7 +63,7 @@ public sealed class RendezvousFlowTests
             .GetProperty("sessionId").GetGuid();
         Event(clientLogs, "tracker.session_disconnected")
             .GetProperty("sessionId").GetGuid().ShouldBe(closedSession);
-        File.ReadAllText(Path.Combine(clientLogs, "debug.jsonl"))
+        string.Join('\n', ReadJournalLines(Path.Combine(clientLogs, "debug.jsonl")))
             .ShouldNotContain("\"eventName\":\"tracker.session_failed\"");
         Event(serverLogs, "rendezvous.session_closed")
             .GetProperty("elapsedMs").GetDouble().ShouldBeGreaterThan(0);
@@ -81,7 +81,7 @@ public sealed class RendezvousFlowTests
         byte[] separate = RandomNumberGenerator.GetBytes(32);
         int port = RendezvousTestPort.Allocate();
         var origin = new Uri($"https://127.0.0.1:{port}");
-        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-flow"));
+        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-flow", Guid.NewGuid().ToString("N")));
         using var aliceJournal = new DiagnosticJournal(Path.Combine(logs, "alice-client"), "net");
         await using WebApplication app = RendezvousHost.Build(
             ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
@@ -111,7 +111,7 @@ public sealed class RendezvousFlowTests
         {
             string[] serverEvents = Directory.GetFiles(logs, "debug.jsonl", SearchOption.AllDirectories)
                 .Where(path => !path.Contains("alice-client", StringComparison.OrdinalIgnoreCase))
-                .SelectMany(File.ReadAllLines).ToArray();
+                .SelectMany(ReadJournalLines).ToArray();
             return new[] { aliceId, bobId }.All(id => serverEvents.Any(line =>
             {
                 using JsonDocument record = JsonDocument.Parse(line);
@@ -122,7 +122,7 @@ public sealed class RendezvousFlowTests
             }));
         }, TimeSpan.FromSeconds(5)).ShouldBeTrue();
         aliceTracker.Refresh();
-        SpinWait.SpinUntil(() => File.ReadAllLines(Path.Combine(logs, "alice-client", "debug.jsonl"))
+        SpinWait.SpinUntil(() => ReadJournalLines(Path.Combine(logs, "alice-client", "debug.jsonl"))
             .Count(line => line.Contains("\"eventName\":\"tracker.announcement_sent\"", StringComparison.Ordinal)) >= 2,
             TimeSpan.FromSeconds(5)).ShouldBeTrue();
 
@@ -134,7 +134,8 @@ public sealed class RendezvousFlowTests
         aliceOffer.Initiator.ShouldBeTrue();
         bobOffer.Initiator.ShouldBeFalse();
         aliceOffer.Token.ShouldBe(bobOffer.Token);
-        string aliceLog = File.ReadAllText(Path.Combine(logs, "alice-client", "debug.jsonl"));
+        aliceJournal.DroppedEvents.ShouldBe(0);
+        string aliceLog = string.Join('\n', ReadJournalLines(Path.Combine(logs, "alice-client", "debug.jsonl")));
         aliceLog.ShouldContain("tracker.announcement_sent");
         aliceLog.ShouldContain("tracker.relay_request_sent");
         aliceLog.ShouldContain(DiagnosticFingerprint.FromId(shared));
@@ -212,13 +213,29 @@ public sealed class RendezvousFlowTests
 
     private static JsonElement Event(string directory, string eventName)
     {
-        foreach (string line in File.ReadLines(Path.Combine(directory, "debug.jsonl")))
+        foreach (string line in ReadJournalLines(Path.Combine(directory, "debug.jsonl")))
         {
             using JsonDocument document = JsonDocument.Parse(line);
             if (document.RootElement.GetProperty("eventName").GetString() == eventName)
                 return document.RootElement.Clone();
         }
         throw new InvalidOperationException($"Missing diagnostic event {eventName}.");
+    }
+
+    private static string[] ReadJournalLines(string path)
+    {
+        // These assertions observe a live writer. ReadAllLines denies writes
+        // while its reader is open, causing TryWrite to drop the very event
+        // being awaited. Only parse records whose newline has been written.
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            string snapshot = reader.ReadToEnd();
+            int end = snapshot.LastIndexOf('\n');
+            return end < 0 ? [] : snapshot[..end].Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        }
+        catch (FileNotFoundException) { return []; }
     }
 
     private static X509Certificate2 Certificate(bool server)

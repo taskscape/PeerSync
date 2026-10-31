@@ -18,9 +18,14 @@ records the missing-runtime reproduction and the successful bundled fix.
 
 ```powershell
 $thumbprint = 'YOUR_LOCALMACHINE_CODE_SIGNING_CERTIFICATE_THUMBPRINT'
-./build/Build-Installer.ps1 -Arch x64 -Version 1.0.0 -CertificateThumbprint $thumbprint -DevelopmentSigning
-./build/Build-Installer.ps1 -Arch arm64 -Version 1.0.0 -CertificateThumbprint $thumbprint -DevelopmentSigning
+./build/Build-Installer.ps1 -Arch x64 -CertificateThumbprint $thumbprint -DevelopmentSigning
+./build/Build-Installer.ps1 -Arch arm64 -CertificateThumbprint $thumbprint -DevelopmentSigning
 ```
+
+The version defaults to `Directory.Build.props`, shared by assemblies, both
+installer builders, CI, and release asset validation. Every new main commit
+must increase this version; CI checks each commit in a push. `-Version` can
+override it for compatibility tests or an intentional package build.
 
 The default build performs a locked solution restore. If a local development
 machine already has restored assets but another process temporarily locks a
@@ -97,7 +102,14 @@ separately from the P3 installer check.
 
 After an upgrade, confirm that the service restarts, `--init` preserves the
 existing thumbprint, and `psp status --json` still lists both folders. A
-lower-version setup must refuse the downgrade before replacing files. For
+lower-version setup must install its packaged version without an override.
+Test upgrade, same-version reinstall, downgrade, and reinstall after uninstall.
+Also test a stopped service registration pointing at a missing or unversioned
+executable: Setup must repair it without reading the previous file version.
+It still waits for SCM and any matching old process to stop before replacement.
+Manual setup permits version replacement; automatic signed-update offers retain
+their separate newer-version policy. Older setup packages keep their original
+behavior; use an updated package for the repair. For
 uninstall, test both answers to the data prompt. The default No answer keeps
 `%ProgramData%\PeerSync`; Yes invokes `--remove-data` before deleting the
 service executable. Silent uninstall keeps data. Synced folder contents are

@@ -1,7 +1,6 @@
 #define StageRoot AddBackslash(SourcePath) + "..\publish\rendezvous\x64"
 #define ServiceExe StageRoot + "\PeerSync.Rendezvous.exe"
-#define NewVersionPacked 0
-#define AppVer GetPackedVersion(ServiceExe, NewVersionPacked)
+#define AppVer GetFileVersion(ServiceExe)
 #if AppVer == ""
   #error Publish PeerSync.Rendezvous.exe before compiling the installer
 #endif
@@ -104,37 +103,9 @@ begin
 end;
 
 function InitializeSetup: Boolean;
-var PreviousDir: String;
-    InstalledVersion, NewVersion: Int64;
 begin
-  Result := False;
-  if ServiceExists then
-  begin
-    if not RegQueryStringValue(HKLM64,
-      'Software\Microsoft\Windows\CurrentVersion\Uninstall\{347EEC9C-2B64-4B93-889A-6F57142E1F76}_is1',
-      'InstallLocation', PreviousDir) then PreviousDir := ExpandConstant('{autopf}\PeerSync Rendezvous');
-    if not GetPackedVersion(AddBackslash(PreviousDir) + 'PeerSync.Rendezvous.exe', InstalledVersion) then
-    begin
-      SuppressibleMsgBox('The installed rendezvous service has no readable version. Repair it before upgrading.', mbError, MB_OK, IDOK);
-      Exit;
-    end;
-    NewVersion := {#NewVersionPacked};
-    Log('Rendezvous version check: installed=' + VersionToStr(InstalledVersion) +
-      ', setup=' + VersionToStr(NewVersion));
-    if ComparePackedVersion(NewVersion, InstalledVersion) < 0 then
-    begin
-      if ExpandConstant('{param:ALLOWDOWNGRADE|0}') <> '1' then
-      begin
-        SuppressibleMsgBox('PeerSync Rendezvous ' + VersionToStr(InstalledVersion) +
-          ' is installed. This setup contains ' + VersionToStr(NewVersion) + '.' + #13#10#13#10 +
-          'To intentionally replace a newer test build, back up appsettings.json and rerun ' +
-          'this setup with /ALLOWDOWNGRADE=1. Otherwise, install the same or a newer version.',
-          mbError, MB_OK, IDOK);
-        Exit;
-      end;
-      Log('Rendezvous downgrade explicitly allowed by /ALLOWDOWNGRADE=1.');
-    end;
-  end;
+  { Manual setup always permits the selected package version. Certificate and
+    service/process checks still run before replacing the installed files. }
   Result := True;
 end;
 

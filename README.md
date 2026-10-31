@@ -155,9 +155,9 @@ To build installers locally with a development signing identity:
 
 ```powershell
 $thumbprint = 'YOUR_LOCALMACHINE_CODE_SIGNING_CERTIFICATE_THUMBPRINT'
-./build/Build-Installer.ps1 -Arch x64 -Version 1.0.0 `
+./build/Build-Installer.ps1 -Arch x64 `
   -CertificateThumbprint $thumbprint -DevelopmentSigning
-./build/Build-RendezvousInstaller.ps1 -Version 1.0.0 `
+./build/Build-RendezvousInstaller.ps1 `
   -CertificateThumbprint $thumbprint -DevelopmentSigning
 ```
 

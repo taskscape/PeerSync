@@ -34,9 +34,14 @@ if ($imagePath -match '^\s*"([^"]+\.exe)"(?:\s|$)') {
 }
 $imagePath = [IO.Path]::GetFullPath($imagePath)
 $imageName = [IO.Path]::GetFileName($imagePath)
-if ($imageName -ne $expectedImageName -or
-    -not (Test-Path -LiteralPath $imagePath -PathType Leaf)) {
+if ($imageName -ne $expectedImageName) {
     throw "The $ServiceName service image is not the expected installed executable. Refusing to replace files."
+}
+if (-not (Test-Path -LiteralPath $imagePath -PathType Leaf)) {
+    # An interrupted/older uninstall can leave SCM pointing at deleted files.
+    # No version or on-disk image is needed to stop that registration safely.
+    # Still check SCM and all matching processes below before replacing files.
+    Write-Output "SERVICE_IMAGE_MISSING name=$ServiceName"
 }
 if ($InspectOnly) {
     Write-Output "SERVICE_IMAGE_VALIDATED name=$ServiceName"

@@ -6,8 +6,7 @@
 #endif
 #define StageRoot AddBackslash(SourcePath) + "..\publish\" + Arch
 #define ServiceExe StageRoot + "\service\PeerSync.Service.exe"
-#define NewVersionPacked 0
-#define AppVer GetPackedVersion(ServiceExe, NewVersionPacked)
+#define AppVer GetFileVersion(ServiceExe)
 #if AppVer == ""
   #error Publish PeerSync.Service.exe before compiling the installer
 #endif
@@ -153,35 +152,18 @@ end;
 
 function InitializeSetup: Boolean;
 var
-  InstalledVersion, NewVersion: Int64;
-  Account, PreviousDir: String;
+  Account: String;
 begin
   Result := False;
   Account := ExpandConstant('{param:SERVICEACCOUNT|NT SERVICE\PeerSync}');
   if (CompareText(Account, 'LocalSystem') <> 0) and
      (CompareText(Account, 'NT SERVICE\PeerSync') <> 0) then
   begin
-    MsgBox('SERVICEACCOUNT must be LocalSystem or NT SERVICE\PeerSync.', mbError, MB_OK);
+    SuppressibleMsgBox('SERVICEACCOUNT must be LocalSystem or NT SERVICE\PeerSync.', mbError, MB_OK, IDOK);
     Exit;
   end;
-  if ServiceExists then
-  begin
-    if not RegQueryStringValue(HKLM64,
-      'Software\Microsoft\Windows\CurrentVersion\Uninstall\{F6E23D72-1DFD-49D6-933B-A9B1FF63E6B5}_is1',
-      'InstallLocation', PreviousDir) then
-      PreviousDir := ExpandConstant('{autopf}\PeerSync');
-    if not GetPackedVersion(AddBackslash(PreviousDir) + 'service\PeerSync.Service.exe', InstalledVersion) then
-    begin
-      MsgBox('The installed PeerSync service has no readable version. Repair or remove it before installing.', mbError, MB_OK);
-      Exit;
-    end;
-    NewVersion := {#NewVersionPacked};
-    if ComparePackedVersion(NewVersion, InstalledVersion) < 0 then
-    begin
-      MsgBox('PeerSync cannot be downgraded. Install the same or a newer version.', mbError, MB_OK);
-      Exit;
-    end;
-  end;
+  { Manual setup installs the selected package, including an older version or
+    repair of a service whose executable was removed by an earlier uninstall. }
   Result := True;
 end;
 

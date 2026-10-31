@@ -43,9 +43,6 @@ if (-not $signature.SignerCertificate -or
 $oldVersion = if ([IO.File]::Exists($serviceExe)) {
     ([IO.FileInfo]::new($serviceExe)).VersionInfo.FileVersion
 } else { $null }
-if ($oldVersion -and [version]$oldVersion -gt [version]$Version) {
-    throw 'A newer PeerSync service is already installed; refusing a downgrade.'
-}
 if ($PreflightOnly) {
     "READY_TO_INSTALL version=$Version source=$($manifest.sourceRevision) setupSha256=$setupHash"
     exit 0

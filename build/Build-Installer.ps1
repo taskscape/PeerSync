@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('x64', 'arm64')][string]$Arch = 'x64',
-    [ValidatePattern('^\d+\.\d+\.\d+(?:\.\d+)?$')][string]$Version = '1.0.0',
+    [ValidatePattern('^\d+\.\d+\.\d+(?:\.\d+)?$')][string]$Version = (& (Join-Path $PSScriptRoot 'Get-Version.ps1')),
     [string]$IsccPath,
     [string]$CertificateThumbprint = $env:PEERSYNC_SIGNING_THUMBPRINT,
     [switch]$DevelopmentSigning,
