@@ -179,8 +179,9 @@ should allow several minutes before treating absence as evidence.
   Verify the exporter failure path leaves sync functional and reports local
   queue/export health.
 
-To diagnose the two-PC failure, run the controlled reproduction now that both
-clients and the server are instrumented. The self-contained x64 client package at
+For any further intermittent failure, repeat the controlled reproduction with
+a file inside the registered joined root and record its creation time. The
+self-contained x64 client package at
 `artifacts/deploy/PeerSync-AzureDiagnostics-2026-10-31` contains an elevated
 `Install-DiagnosticBuild.ps1` upgrade script and its README. Close the client
 desktop app before upgrading it. The script backs up old binaries, preserves
@@ -230,9 +231,38 @@ built from its installed `b7e4b67` revision, preserving its relay behavior.
   `553514448BFBAF67`, which matches the peer fingerprint previously seen in
   this PC's logs. The 17:56:42 UTC heartbeat reported zero dropped events.
 - Azure showed recent heartbeats from both clients and the server at the same
-  time, each reporting zero dropped events. The Tailscale failure's root
-  cause remains unknown until a controlled Tailscale-off reproduction is
-  captured on this three-source timeline.
+  time, each reporting zero dropped events.
+- The healthy baseline for folder fingerprint `116EC47A70D2C2E7` contains
+  `rendezvous.folder_announced` from both client fingerprints,
+  `tracker.peer_seen` on each PC for the other, and
+  `service.folder_peer_ready` on both. This is the comparison point for the
+  Tailscale-off reproduction.
+
+## Tailscale-off reproduction on 2026-10-31
+
+The local PC disconnected Tailscale shortly after 18:03 UTC while both
+PeerSync services remained running. Direct QUIC and TCP candidates failed,
+but the rendezvous server offered a relay and both clients reported ready
+relay sessions. Azure heartbeats continued from all three processes.
+
+The first test file, created at 18:07 UTC under `C:\taskscape.com\tmp`, was
+outside either registered PeerSync folder on the local PC. The relevant
+joined root here is `C:\Temp\S` and its remote mapping is
+`C:\Install\Zalando_Sans_Expanded\static` on `R5-7600X`. The out-of-folder
+file was therefore not eligible for transfer.
+
+A 101-byte file was created at 18:12:37 UTC under the actual local joined
+root. The local client logged `scan.complete` with one changed item at
+18:12:40 UTC. The remote client logged `assembly.remote_verified` for 101
+bytes, `apply.committed`, and `service.folder_sync_pass` with one changed item
+over `Relay` at 18:13:38 UTC. After Tailscale reconnected, both clients
+reported ready QUIC sessions. The exact remote file exists under its mapped
+root, has length 101 bytes, and has the same SHA-256 as the source file.
+
+This run confirms local-to-remote transfer over the relay on the diagnostic
+build. It does not establish the cause of any earlier intermittent failure or
+cover transfer in the reverse direction. The out-of-folder path explains why
+the first file in this run produced no sync activity.
 
 ## Reference documentation
 
