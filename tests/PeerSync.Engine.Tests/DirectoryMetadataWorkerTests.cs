@@ -65,13 +65,14 @@ public sealed partial class DirectorySnapshotCaptureTests
             [source], DateTime.UtcNow.Ticks, Token);
         using var published = new PublishedBlocks(Root, producer);
         using var journal = new DiagnosticJournal(Path.Combine(fixture, "metadata-yield-logs"), "metadata-fetch", debugEnabled: true);
+        async ValueTask<ReadOnlyMemory<byte>> Fetch(ReadOnlyMemory<byte> peer, ReadOnlyMemory<byte> hash, int length, CancellationToken token)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50), token);
+            return published.TryRead(hash.Span, length, token)
+                ?? throw new IOException("Expected metadata block is unavailable.");
+        }
         var worker = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice,
-            TimeProvider.System, async (_, hash, length, token) =>
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(50), token);
-                return published.TryRead(hash.Span, length, token)
-                    ?? throw new IOException("Expected metadata block is unavailable.");
-            }, journal) { PassDeadline = TimeSpan.FromSeconds(1) };
+            TimeProvider.System, Fetch, journal) { PassDeadline = TimeSpan.FromSeconds(1) };
 
         var timer = System.Diagnostics.Stopwatch.StartNew();
         var first = await worker.RunAsync(token: Token);
@@ -88,8 +89,13 @@ public sealed partial class DirectorySnapshotCaptureTests
         log.ShouldNotContain("directory.graph_failed");
         log.ShouldContain("directory.metadata_progress");
 
+        // The one-second pass above verifies yielding and no failure backoff.
+        // Resume its durable graph with the normal production pass budget;
+        // loaded CI disks need more than ten one-second slices to drain it.
+        var drain = new DirectoryMetadataWorker(MetadataRoot, receiver, keys, MetadataDevice,
+            TimeProvider.System, Fetch, journal);
         for (int pass = 0; pass < 10 && receiver.ReadDirectoryMetadataSource(source.SourceId) is not null; pass++)
-            (await worker.RunAsync(token: Token)).Deferred.ShouldBe(0);
+            (await drain.RunAsync(token: Token)).Deferred.ShouldBe(0);
         receiver.ReadDirectoryMetadataSource(source.SourceId).ShouldBeNull();
         receiver.ReadDirectoryGraph(source.SourceId)!.Complete.ShouldBeTrue();
     }
