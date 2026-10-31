@@ -27,7 +27,7 @@ internal static class RendezvousDiagnosticsCommand
         {
             DiagnosticBundleResult result = DiagnosticBundleCollector.Collect(logs, output, addresses);
             Console.WriteLine(JsonSerializer.Serialize(new
-            { bundle = result.Destination, eventsIncluded = result.EventsIncluded,
+            { bundle = result.Destination, eventsIncluded = result.EventsIncluded, eventsOmitted = result.EventsOmitted,
                 expiredEvents = result.ExpiredEvents, invalidEvents = result.InvalidEvents,
                 networkAddressesIncluded = addresses }));
             return 0;

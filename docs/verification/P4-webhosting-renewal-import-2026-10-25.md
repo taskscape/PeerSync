@@ -1,0 +1,115 @@
+# P4 win-acme WebHosting renewal fallback, 2026-10-25
+
+The physical server's first installation exposed a win-acme certificate in
+`LocalMachine\WebHosting` with a working machine private key, while Rendezvous
+requires that certificate in `LocalMachine\My`. A public `.cer` copy lost the
+key association. Copying the Windows certificate context with `X509Store.Add`
+made the existing server certificate usable in `My`, but a later win-acme
+renewal could repeat the mismatch.
+
+`Import-RendezvousWebHostingCertificate.ps1` now selects a current certificate
+with the configured DNS name, Server Authentication EKU, a usable machine
+private key and a valid sign/verify challenge. It compares the usable
+`WebHosting` and `My` candidates by expiry and copies only a newer
+`WebHosting` certificate context into `My`. It rechecks the imported key with
+the existing grant preflight. No private key is exported. Setup invokes this
+helper before its certificate check and before stopping an older service; the
+win-acme post-renewal hook invokes it before granting the service key ACL and
+restarting the service. The service loader still reads `LocalMachine\My`, as
+required by the plan. An absent or unusable `WebHosting` candidate leaves the
+existing `My` path to the original preflight.
+
+All three changed PowerShell scripts parsed with zero errors. The helper's
+absent-store branch ran under Windows PowerShell 5.1 with exit 0 and no output
+on the development host. Inno Setup 7.1 compiled the changed installer,
+including the new helper in both installed and renewal-hook locations, to an
+**unsigned validation output** under
+`artifacts/installer-validation-webhosting/`. That output contains the older
+staged 1.0.25.0 service and must not be deployed. The existing signed
+installer outputs were not overwritten.
+
+The development host initially had no `LocalMachine\WebHosting` store. The
+first native control correctly failed at the missing store and cleaned up its
+unique test certificate. An empty standard `WebHosting` store was then created
+through `X509Store.Open(ReadWrite)`. The Windows PowerShell 5.1 native control
+passed: it moved a unique one-day, nonexportable server-authentication
+certificate into `WebHosting`, imported its context into `My`, verified the
+matching machine key through the grant preflight, and confirmed that a second
+import was idempotent. `WEBHOSTING_IMPORT_PASSED` was printed. Follow-up reads
+found zero test certificates in either store and zero certificates in the
+`WebHosting` store. The test's exact certificate and key were removed.
+
+An attempt to remove the now-empty test-created `WebHosting` store was rejected
+by automatic approval review (`blocked by policy`). Its root and empty
+`Certificates`, `CRLs` and `CTLs` subkeys remain on the development host; no
+alternate deletion path was attempted. This native check covers Windows store
+copy and key association, not the physical server's win-acme renewal. The
+current-source signed setup and the configured post-renewal hook still need
+installed validation on a Windows Server before claiming this repair deployed.
+The native control remains in `build/Test-RendezvousWebHostingImport.ps1` for
+reproduction with a unique `.invalid` certificate. Do not substitute the
+local compile or synthetic certificate for a real renewal.
+
+The current-source development-signed Rendezvous 1.0.27.0 installer was then
+built from revision `fa88cc88415003c023a77fe8de8897094114b27f`. Its
+manifest records a self-contained x64 package, development-only signing, and
+SHA-256 `7F71A0D5E1848760C1CD351F16341F462275098B1E199D3C961EA271FDB81CC0`.
+The computed installer hash matches; Windows reports a valid Authenticode
+signature by `CN=PeerSync Development`. The manifest's `workingTreeDirty=true`
+reflects the pre-existing untracked `Sync.zip.tmp`, which was not changed by
+this repair. This build is available at
+`artifacts/installer/PeerSync-Rendezvous-Setup-1.0.27.0-x64.exe`. Its
+signature is not a public release signature.
+
+The signed installer, its public-only development signing certificate and
+manifest were packaged with the existing elevated setup/preflight launcher
+and server instructions in
+`artifacts/deploy/PeerSync-Rendezvous-1.0.27.0-x64-field.zip`. The three
+installer artifacts in the ZIP are byte-for-byte identical to those under
+`artifacts/installer`. The 65,765,650-byte ZIP has SHA-256
+`C8EA8471A8B4A7428357928D21BC29FB1489A9C6846C281FA0E79FEC34DE467B`.
+Tailscale reported the physical `i9-win-iis` server online, and Taildrop
+returned exit code 0 for this exact ZIP. The launcher writes `setup.log`,
+prints `SETUP_EXIT`, and runs the installed deployment preflight on successful
+setup, printing `PREFLIGHT_EXIT`. The 1.0.27.0 package supersedes the delivered
+1.0.25.0 field kit. Recipient extraction, installation, preflight, service
+restart and actual win-acme renewal were still unverified at delivery time.
+
+## Physical Server 2025 upgrade
+
+On 2026-10-25, an elevated WinRM session authenticated as the server's
+built-in Administrator connected to `WIN-8UU4IA5PEQV` at `100.95.151.81`.
+Before replacement, `PeerSyncRendezvous` was running version 1.0.17.0. The
+current `sync.taskscape.com` certificate was present in both
+`LocalMachine\WebHosting` and `LocalMachine\My`, with `HasPrivateKey=True`.
+This inventory alone did not establish key usability; the installed preflight
+checked it after setup.
+
+The signed installer was transferred to
+`C:\Temp\PeerSync-Rendezvous-1.0.27.0`. Its server-side SHA-256 was exactly
+`7F71A0D5E1848760C1CD351F16341F462275098B1E199D3C961EA271FDB81CC0`,
+matching the locally authenticated installer. The server reported
+`Get-AuthenticodeSignature` status `UnknownError` for the development signer;
+the matching hash of the locally Valid package was the integrity check used
+for deployment. No private key or signing credential was transferred.
+
+Unattended setup exited 0 and retained
+`C:\Temp\PeerSync-Rendezvous-1.0.27.0\setup.log`. The installed executable
+reports 1.0.27.0; `PeerSyncRendezvous` restarted and is Running under a new
+process ID. The installed `Test-RendezvousDeployment.ps1` exited 0 with
+`issues=[]` and `localReady=true`. It verified a usable machine private key
+for its caller, service-owned TCP and UDP 99 listeners, both inbound rules,
+and TLS-validated local health. A fresh first-PC
+`psp probe sync.taskscape.com:99` returned exit 0 with correlated HTTP/2/TCP
+and HTTP/3/UDP sessions. The local WinRM service was returned to Stopped and
+the temporary TrustedHosts value was restored. The sanitized local operator
+record is
+`artifacts/field/remote-rendezvous-upgrade-20261025-run-7429/upgrade-transcript.txt`;
+the package log remains on the server.
+
+This establishes the physical installed upgrade and startup/preflight path.
+The new copy-on-renewal behavior has not been exercised by a real win-acme
+issuance because the current certificate was already in `My`. The fresh
+post-upgrade public probe used the first PC's existing LAN path; an
+independent outside-network post-upgrade probe remains to be recorded. The
+development signature is not release signing.

@@ -49,7 +49,7 @@ public static class StatusCommand
         {
             $"Service instance: {status.InstanceId:N}",
             $"Production sync: {(status.ProductionSyncAvailable ? "available" : "unavailable")}",
-            $"Authenticated peer folders: {status.Clocks.Count}",
+            $"Peer clock sessions shown: {status.Clocks.Count}",
         };
         foreach (FolderPeerClockStatus row in status.Clocks)
         {

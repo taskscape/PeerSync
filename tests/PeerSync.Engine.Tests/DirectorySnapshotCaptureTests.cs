@@ -59,6 +59,127 @@ public sealed partial class DirectorySnapshotCaptureTests : IDisposable
         File.ReadAllText(Path.Combine(fixture, "logs", "debug.jsonl")).ShouldContain("publication-pending");
     }
 
+    [Fact]
+    public async Task ParentProofMayReceiveItsMissingDirectChildWithoutPublishingAnOldSnapshot()
+    {
+        WriteFiles("a"); await using var index = await Open();
+        var originalDraft = await AdvanceIndex(index, 1000);
+        var originalParent = index.LocalFiles.Find("topic")!;
+        await Publish(index, originalDraft, Publication(index, originalDraft), originalParent.LocalSequence);
+        var signedParent = index.LocalFiles.Find("topic")!.Record!;
+        using (var published = new PublishedBlocks(Root, index))
+        using (await FolderOperationGate.AcquireAsync(index, Token))
+            (await new DirectorySnapshotGraph(Root, index, keys, device).AdvanceUnderGateAsync(
+                signedParent, (hash, length, token) => ValueTask.FromResult<ReadOnlyMemory<byte>>(
+                    published.TryRead(hash.Span, length, token) ?? throw new IOException("Published graph block is missing.")),
+                1000, Token)).Complete.ShouldBeTrue();
+
+        File.WriteAllText(Path.Combine(Root, "topic", "b"), "local change");
+        using (var scanner = new Scanner(Root, index, keys, device) { StageDirectorySnapshots = true })
+            (await scanner.ScanAsync(Token)).Problems.ShouldBeEmpty();
+        index.ReadDirectoryPublication("topic")!.ReconstructionOnly.ShouldBeFalse();
+        // Model a signed child whose bytes have not yet been installed. The
+        // parent proof must wait for the receipt instead of absorbing its clock.
+        Sql("UPDATE local_files SET content_ready=0 WHERE path_key='TOPIC/A';");
+        byte[] remote = [2, .. new byte[31]], content = "child recovered"u8.ToArray();
+        var body = VersionView.Open(index.LocalFiles.Find("topic/a")!.Record!, keys, device).ExportBody();
+        body.ModifiedBy = ByteString.CopyFrom(remote); body.ChangedTicks++;
+        body.Size = (ulong)content.Length;
+        body.FileHash = ByteString.CopyFrom(Blake3.Hasher.Hash(content).AsSpan());
+        body.Chunks.Clear(); body.Chunks.Add(new Chunk { Hash = body.FileHash, Length = (uint)content.Length });
+        body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        var needed = new NeededSet(index, keys, device);
+        await needed.ApplyIndexUpdateAsync(remote, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        await needed.AnnounceIndexRangeAsync(remote, 1, Token);
+        await new DirectoryPublicationWorker(Root, index, keys, device, new(), TimeProvider.System).RunAsync(token: Token);
+        index.HasUnprovenDirectoryParentMember("topic/a").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/b").ShouldBeFalse();
+        var waiting = index.ReadDirectoryPublication("topic")!;
+        waiting.NextTicks.ShouldNotBeNull();
+        long beforeEpoch = index.ReadDirectoryCaptureEpoch();
+        var outcome = await new FileApplier(Root, index, keys, device).ApplyScheduledAsync("topic/a",
+            (_, _, length, _) => ValueTask.FromResult<ReadOnlyMemory<byte>>(content), Token);
+        outcome.Outcome.ShouldBe(FileApplyOutcome.Applied);
+        File.ReadAllBytes(Path.Combine(Root, "topic", "a")).ShouldBe(content);
+        index.ReadDirectoryCaptureEpoch().ShouldBeGreaterThan(beforeEpoch);
+        var woken = index.ReadDirectoryPublication("topic")!;
+        woken.NextTicks.ShouldBeNull();
+        woken.Attempts.ShouldBe(0);
+        woken.Version.ShouldBe(waiting.Version);
+    }
+
+    [Theory]
+    [InlineData("eligible")]
+    [InlineData("native-target")]
+    [InlineData("incomplete-range")]
+    [InlineData("unrelated-member")]
+    [InlineData("interrupted")]
+    public async Task MissingSignedChildTombstoneAdvancesOnlyItsExactParentProof(string obstacle)
+    {
+        WriteFiles("a"); await using var index = await Open();
+        var draft = await AdvanceIndex(index, 1000);
+        var originalParent = index.LocalFiles.Find("topic")!;
+        await Publish(index, draft, Publication(index, draft), originalParent.LocalSequence);
+        var signedParent = index.LocalFiles.Find("topic")!.Record!;
+        using (var published = new PublishedBlocks(Root, index))
+        using (await FolderOperationGate.AcquireAsync(index, Token))
+            (await new DirectorySnapshotGraph(Root, index, keys, device).AdvanceUnderGateAsync(
+                signedParent, (hash, length, token) => ValueTask.FromResult<ReadOnlyMemory<byte>>(
+                    published.TryRead(hash.Span, length, token) ?? throw new IOException("Missing graph block.")),
+                1000, Token)).Complete.ShouldBeTrue();
+
+        File.WriteAllText(Path.Combine(Root, "topic", "b"), "local change");
+        using (var scanner = new Scanner(Root, index, keys, device) { StageDirectorySnapshots = true })
+            (await scanner.ScanAsync(Token)).Problems.ShouldBeEmpty();
+        Sql("UPDATE local_files SET content_ready=0 WHERE path_key='TOPIC/A';");
+        string target = obstacle == "unrelated-member" ? "topic/b" : "topic/a";
+        var original = index.LocalFiles.Find(target)!.Record!;
+        var body = VersionView.Open(original, keys, device).ExportBody();
+        byte[] remote = [2, .. new byte[31]];
+        body.Deleted = true; body.Size = 0; body.FileHash = ByteString.Empty; body.Chunks.Clear();
+        body.ModifiedBy = ByteString.CopyFrom(remote); body.ChangedTicks++;
+        body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+        var needed = new NeededSet(index, keys, device);
+        await needed.ApplyIndexUpdateAsync(remote, 0, 1, [SignedRecordFactory.Create(body, keys, 1)], Token);
+        if (obstacle != "incomplete-range") await needed.AnnounceIndexRangeAsync(remote, 1, Token);
+        await new DirectoryPublicationWorker(Root, index, keys, device, new(), TimeProvider.System).RunAsync(token: Token);
+        index.HasUnprovenDirectoryParentMember("topic/a").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/b").ShouldBeFalse();
+        var queued = index.ReadDirectoryPublication("topic")!;
+
+        if (obstacle != "native-target") File.Delete(Path.Combine(Root, target.Replace('/', Path.DirectorySeparatorChar)));
+        Sql($"DELETE FROM local_files WHERE path_key='{target.ToUpperInvariant()}';");
+        var applier = new FileApplier(Root, index, keys, device);
+        if (obstacle == "interrupted")
+        {
+            applier.Checkpoint = stage => { if (stage == "prepared") throw new IOException("injected"); };
+            await Should.ThrowAsync<IOException>(() => applier.ApplyScheduledAsync(target,
+                (_, _, _, _) => throw new InvalidOperationException("Tombstone must not fetch bytes."), Token));
+            index.ReadApplyIntents().Count().ShouldBe(1);
+            (await new FileApplier(Root, index, keys, device).RecoverAsync(Token)).ShouldBe(1);
+            index.LocalFiles.Find(target).ShouldBeNull();
+            index.ReadDirectoryPublication("topic")!.Version.ShouldBe(queued.Version);
+            applier.Checkpoint = null;
+        }
+        var outcome = await applier.ApplyScheduledAsync(target,
+            (_, _, _, _) => throw new InvalidOperationException("A tombstone must not fetch bytes."), Token);
+        outcome.Outcome.ShouldBe(obstacle is "eligible" or "interrupted" ? FileApplyOutcome.Applied : FileApplyOutcome.Blocked);
+        index.ReadDirectoryPublication("topic")!.Version.ShouldBe(queued.Version);
+        if (obstacle is "eligible" or "interrupted")
+        {
+            index.LocalFiles.Find(target)!.Deleted.ShouldBeTrue();
+            index.Needed.Find(target).ShouldBeNull();
+            index.ReadDirectoryPublication("topic")!.NextTicks.ShouldBeNull();
+        }
+        else
+        {
+            index.LocalFiles.Find(target).ShouldBeNull();
+            index.Needed.Find(target).ShouldNotBeNull();
+            if (obstacle == "native-target") File.Exists(Path.Combine(Root, "topic", "a")).ShouldBeTrue();
+        }
+        index.ReadApplyIntents().ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

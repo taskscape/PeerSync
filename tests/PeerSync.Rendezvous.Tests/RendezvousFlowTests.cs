@@ -25,6 +25,51 @@ namespace PeerSync.Rendezvous.Tests;
 public sealed class RendezvousFlowTests
 {
     [Fact]
+    public async Task TrackerAndServerJournalsShareTheObservedSessionId()
+    {
+        using X509Certificate2 server = Certificate(server: true);
+        using X509Certificate2 device = Certificate(server: false);
+        int port = RendezvousTestPort.Allocate();
+        var origin = new Uri($"https://127.0.0.1:{port}");
+        string root = Path.GetFullPath(Path.Combine("artifacts", "tests", "tracker-session-correlation",
+            Guid.NewGuid().ToString("N")));
+        string serverLogs = Path.Combine(root, "server");
+        string clientLogs = Path.Combine(root, "client");
+        await using WebApplication app = RendezvousHost.Build(
+            ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
+                "--Rendezvous:LogDirectory=" + serverLogs], server, IPAddress.Loopback);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        using var journal = new DiagnosticJournal(clientLogs, "tracker");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var messages = Channel.CreateUnbounded<ServerMessage>();
+        var announcement = new Announce { ListenPort = 47821 };
+        await using (var tracker = new TrackerClient(origin, device, () => announcement.Clone(),
+            (message, _) => { messages.Writer.TryWrite(message.Clone()); return ValueTask.CompletedTask; },
+            diagnostics: journal, loopbackServerCertificate: server))
+        {
+            tracker.Start();
+            ServerMessage observed = await ReadUntilAsync(messages.Reader,
+                message => message.ObservedAddress is not null, timeout.Token);
+            observed.ObservedAddress.SessionId.Length.ShouldBe(16);
+            Guid sessionId = new(observed.ObservedAddress.SessionId.Span);
+            Event(clientLogs, "tracker.session_identified")
+                .GetProperty("sessionId").GetGuid().ShouldBe(sessionId);
+            Event(serverLogs, "rendezvous.session_opened")
+                .GetProperty("sessionId").GetGuid().ShouldBe(sessionId);
+        }
+        await app.StopAsync(timeout.Token);
+        Guid closedSession = Event(serverLogs, "rendezvous.session_closed")
+            .GetProperty("sessionId").GetGuid();
+        Event(clientLogs, "tracker.session_disconnected")
+            .GetProperty("sessionId").GetGuid().ShouldBe(closedSession);
+        File.ReadAllText(Path.Combine(clientLogs, "debug.jsonl"))
+            .ShouldNotContain("\"eventName\":\"tracker.session_failed\"");
+        Event(serverLogs, "rendezvous.session_closed")
+            .GetProperty("elapsedMs").GetDouble().ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
     public async Task TwoDeviceTrackersIsolateFoldersAndRelayCarriesEndToEndTls()
     {
         if (!System.Net.Quic.QuicListener.IsSupported) return;
@@ -163,6 +208,17 @@ public sealed class RendezvousFlowTests
         await foreach (ServerMessage message in messages.ReadAllAsync(cancellationToken))
             if (match(message)) return message;
         throw new EndOfStreamException("Tracker session closed before the expected message.");
+    }
+
+    private static JsonElement Event(string directory, string eventName)
+    {
+        foreach (string line in File.ReadLines(Path.Combine(directory, "debug.jsonl")))
+        {
+            using JsonDocument document = JsonDocument.Parse(line);
+            if (document.RootElement.GetProperty("eventName").GetString() == eventName)
+                return document.RootElement.Clone();
+        }
+        throw new InvalidOperationException($"Missing diagnostic event {eventName}.");
     }
 
     private static X509Certificate2 Certificate(bool server)

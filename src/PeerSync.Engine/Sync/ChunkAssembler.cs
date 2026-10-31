@@ -94,7 +94,10 @@ internal sealed class ChunkAssembler(SafeFileTree tree, FolderIndex index, Diagn
                         try
                         {
                             PeerBlockRequest[] requests = batch.Select(item => new PeerBlockRequest(item.Hash, item.Length)).ToArray();
-                            bool endgame = chunkIndex == body.Chunks.Count && batchIndex == batches.Length - 1;
+                            // A one-chunk file has no straggling tail. Racing every
+                            // tiny file against an unseeded peer doubles requests and
+                            // produces a NotFound storm during fresh-peer convergence.
+                            bool endgame = body.Chunks.Count > 1 && chunkIndex == body.Chunks.Count && batchIndex == batches.Length - 1;
                             IReadOnlyList<PeerBlockResult> received = await fetchBatch(requests, endgame, cancellationToken).ConfigureAwait(false);
                             if (received.Count != batch.Length) throw new InvalidDataException("Remote peer returned the wrong block batch size.");
                             for (int i = 0; i < batch.Length; i++)

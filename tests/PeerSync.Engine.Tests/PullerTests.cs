@@ -54,6 +54,81 @@ public sealed class PullerTests : IDisposable
     }
 
     [Fact]
+    public async Task FileIndexPageBeforeParentDirectoryWaitsWithoutNativeFailureThenApplies()
+    {
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var puller = Coordinator(index);
+        await puller.RunPassAsync(Token);
+        await puller.AnnounceIndexRangeAsync(Peer, 2, Token);
+        await puller.ReceiveIndexAsync(Peer, 0, 1, [Record(index, "folder/child", 1, New)], Token);
+
+        var waiting = await puller.RunPassAsync(Token);
+        waiting.Visited.ShouldBe(0);
+        waiting.Failed.ShouldBe(0);
+        index.Needed.Find("folder/child").ShouldNotBeNull();
+        index.ReadPullRetry("folder/child").ShouldBeNull();
+        Directory.Exists(Disk("folder")).ShouldBeFalse();
+
+        await puller.ReceiveIndexAsync(Peer, 1, 2, [Record(index, "folder", 2, type: 1)], Token);
+        var applied = await puller.RunPassAsync(Token);
+        applied.Applied.ShouldBe(2);
+        applied.Failed.ShouldBe(0);
+        File.ReadAllBytes(Disk("folder/child")).ShouldBe(New);
+        index.Needed.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ConsecutiveLiveFileBatchesCoalesceOwnWatcherEventsButScanForForeignChanges()
+    {
+        Directory.CreateDirectory(Disk("parent"));
+        await using var index = await FolderIndex.OpenAsync(Database, Token);
+        using var journal = new DiagnosticJournal(Path.Combine(fixture, "batch-logs"), "puller", debugEnabled: true);
+        var clock = new MutableClock();
+        using var puller = Coordinator(index, clock: clock, journal: journal);
+        await puller.RunPassAsync(Token);
+        while (index.HasPendingDirectoryPublications()) await puller.RunPassAsync(Token);
+
+        var records = Enumerable.Range(0, 2001)
+            .Select(i => Record(index, $"parent/file-{i:D4}", (ulong)i + 1, New)).ToArray();
+        await puller.AnnounceIndexRangeAsync(Peer, records.Length, Token);
+        await puller.ReceiveIndexAsync(Peer, 0, 1000, records[..1000], Token);
+        await puller.ReceiveIndexAsync(Peer, 1000, 2000, records[1000..2000], Token);
+        await puller.ReceiveIndexAsync(Peer, 2000, 2001, records[2000..], Token);
+
+        var first = await puller.RunPassAsync(Token);
+        first.Visited.ShouldBe(1000);
+        first.Applied.ShouldBe(1000);
+        first.Scans.ShouldBe(0);
+        index.HasPendingDirectoryPublications().ShouldBeFalse();
+        File.ReadAllBytes(Disk("parent/file-0000")).ShouldBe(New);
+
+        puller.RequestWatcherScan(new(["parent/file-0000", "parent"], false));
+        var second = await puller.RunPassAsync(Token);
+        second.Applied.ShouldBe(1000);
+        second.Scans.ShouldBe(0);
+        index.HasPendingDirectoryPublications().ShouldBeFalse();
+
+        puller.RequestWatcherScan(new(["unrelated-local-name"], false));
+        var third = await puller.RunPassAsync(Token);
+        third.Scans.ShouldBe(1);
+        File.Exists(Disk("parent/file-2000")).ShouldBeFalse();
+        for (int pass = 0; pass < 8 && index.Needed.Count() != 0; pass++)
+        {
+            var result = await puller.RunPassAsync(Token);
+            if (!result.MoreWork && result.NextAttemptTicks is long next && next > clock.GetUtcNow().UtcTicks)
+                clock.Advance(TimeSpan.FromTicks(next - clock.GetUtcNow().UtcTicks));
+        }
+        index.Needed.Count().ShouldBe(0);
+        index.HasPendingDirectoryPublications().ShouldBeTrue();
+        File.ReadAllBytes(Disk("parent/file-2000")).ShouldBe(New);
+        string events = File.ReadAllText(Path.Combine(fixture, "batch-logs", "debug.jsonl"));
+        events.ShouldContain("puller.own_write_watch_coalesced");
+        events.ShouldContain("puller.publication_scan_deferred");
+        events.ShouldContain("puller.publication_scan_flushed");
+        events.ShouldNotContain("parent/file-0000");
+    }
+
+    [Fact]
     public async Task LockedTargetBacksOffAcrossCoordinatorRestartWhileIndependentPathProgresses()
     {
         File.WriteAllBytes(Disk("locked"), Old); File.WriteAllBytes(Disk("good"), Old);

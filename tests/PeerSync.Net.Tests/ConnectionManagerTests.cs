@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
@@ -251,7 +252,8 @@ public sealed class ConnectionManagerTests
         try
         {
             await manager.ConnectAsync(remote,
-            [new(ConnectionSource.Lan, DiagnosticTransport.Quic, endpoint, _ => throw new IOException("unavailable")),
+            [new(ConnectionSource.Lan, DiagnosticTransport.Quic, endpoint,
+                _ => throw new IOException("unavailable", new SocketException((int)SocketError.NetworkUnreachable))),
              new(ConnectionSource.Public, DiagnosticTransport.Tcp, endpoint, _ => ValueTask.FromResult(winner))],
                 TestContext.Current.CancellationToken);
 
@@ -269,8 +271,52 @@ public sealed class ConnectionManagerTests
             failed.RootElement.GetProperty("errorCode").GetString().ShouldBe("IOException");
             failed.RootElement.GetProperty("peerFingerprint").GetString()
                 .ShouldBe(DiagnosticFingerprint.FromId(remote));
+            failed.RootElement.GetProperty("nativeError").GetInt32().ShouldBe((int)SocketError.NetworkUnreachable);
             records.ShouldContain(line => line.Contains("candidate.public.tcp", StringComparison.Ordinal)
                 && line.Contains("\"transport\":\"Tcp\"", StringComparison.Ordinal));
+            foreach (string eventName in new[] { "connection.candidate_authenticated", "connection.candidate_selected" })
+            {
+                using JsonDocument path = JsonDocument.Parse(records.Single(line => line.Contains(eventName, StringComparison.Ordinal)));
+                path.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.public.tcp");
+                path.RootElement.GetProperty("sessionId").GetGuid().ShouldBe(winner.SessionId);
+                path.RootElement.GetProperty("transport").GetString().ShouldBe("Tcp");
+                if (eventName == "connection.candidate_selected")
+                {
+                    path.RootElement.GetProperty("remoteAddress").GetString().ShouldBe("203.0.113.42");
+                    path.RootElement.GetProperty("remotePort").GetInt32().ShouldBe(47821);
+                }
+                else path.RootElement.TryGetProperty("remoteAddress", out _).ShouldBeFalse();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task IncomingSelectionDiagnosticExcludesRejectedDuplicate()
+    {
+        byte[] local = Id(2), remote = Id(1);
+        string directory = Path.Combine(Path.GetTempPath(), "PeerSync-IncomingDiagnostics-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        using var journal = new DiagnosticJournal(directory, "net", debugEnabled: true);
+        await using var manager = new ConnectionManager(local, journal);
+        var selected = Session(local, remote, initiator: false,
+            sessionId: Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var rejected = Session(local, remote, initiator: false,
+            sessionId: Guid.Parse("00000000-0000-0000-0000-000000000002"));
+        try
+        {
+            (await manager.RegisterIncomingAsync(selected, TestContext.Current.CancellationToken)).ShouldBe(selected);
+            (await manager.RegisterIncomingAsync(rejected, TestContext.Current.CancellationToken)).ShouldBe(selected);
+            rejected.Closed.IsCompleted.ShouldBeTrue();
+
+            string[] records = File.ReadAllLines(Path.Combine(directory, "debug.jsonl"));
+            using JsonDocument path = JsonDocument.Parse(records.Single(line => line.Contains("connection.incoming_selected", StringComparison.Ordinal)));
+            path.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.incoming");
+            path.RootElement.GetProperty("sessionId").GetGuid().ShouldBe(selected.SessionId);
+            path.RootElement.TryGetProperty("remoteAddress", out _).ShouldBeFalse();
         }
         finally
         {

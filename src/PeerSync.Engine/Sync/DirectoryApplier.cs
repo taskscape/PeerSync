@@ -52,8 +52,8 @@ public sealed class DirectoryApplier
             Signal("selected", session);
             var known = selection.Known; var decision = selection.Decision;
             if (decision.BlockedReason is not null) { Signal(decision.BlockedReason == "directory-publication-pending" ? "publication-pending" : "blocked", session); return new(FileApplyOutcome.Blocked); }
-            if (scheduled && decision.Winner is { Deleted: true } && index.HasBlockingDirectoryPublication(key, includeDescendants: true))
-                Signal("ancestor-publication-bypassed", session);
+            if (scheduled && index.HasBlockingDirectoryPublication(key, includeDescendants: true))
+                Signal(decision.Winner is { Deleted: true } ? "ancestor-publication-bypassed" : "ancestor-publication-child-recovery", session);
             if (!decision.RequiresApply) { Signal("unchanged", session); return new(FileApplyOutcome.Unchanged); }
             if (!selection.RangeComplete) { Signal("index-range-pending", session); return new(FileApplyOutcome.Deferred); }
             if (decision.Winner!.Type != 1) { Signal("unsupported-type", session); return new(FileApplyOutcome.Deferred); }

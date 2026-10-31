@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Microsoft.Data.Sqlite;
@@ -36,6 +37,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
             if (remaining == 0) break;
             token.ThrowIfCancellationRequested(); visited++; int offered = remaining; Guid session = initial.Version; string stage = "dependencies";
             var queued = initial;
+            Stopwatch? timing = journal is null ? null : Stopwatch.StartNew();
             try
             {
                 if (index.HasIncompleteDirectoryCaseCopy(queued.Path)) { stage = "case-copy-members"; await Retry(null).ConfigureAwait(false); continue; }
@@ -49,9 +51,11 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                     Checkpoint?.Invoke("before-key-bind");
                     queued = await index.BindDirectoryPublicationKeysAsync(queued, inventory.Epoch, clock.GetUtcNow().UtcTicks, token).ConfigureAwait(false);
                 }
+                StageTime("prepare");
                 stage = "capture"; var before = index.ReadDirectoryCapture(queued.Path);
                 var capture = new DirectorySnapshotCapture(rootPath, index, keys, source, journal) { Checkpoint = Checkpoint };
                 var draft = await capture.AdvancePublishedUnderGateAsync(queued.Path, remaining, token).ConfigureAwait(false);
+                StageTime("capture", draft.Accepted);
                 // Empty/completed roots also consume a scheduling unit, so one
                 // pass is bounded even if no new member bytes were captured.
                 long accepted = before is not null && before.InputHash.AsSpan().SequenceEqual(draft.InputHash) ? before.Accepted : 0;
@@ -86,6 +90,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                         DirectoryRebasePass proof;
                         try { proof = await DirectoryRebaseProof.AdvanceAsync(rootPath, index, keys, source, queued, draft, remaining, token).ConfigureAwait(false); }
                         catch { remaining = 0; throw; } // Failure may follow a fully persisted offered prefix.
+                        StageTime("rebase", proof.Visited);
                         remaining -= proof.Visited;
                         journal?.TryWrite(new(proof.Complete ? "directory.rebase_complete" : "directory.rebase_pending", "directory-publication")
                         { SessionId = session, Level = DiagnosticLevel.Debug, ItemsVisited = proof.Visited, ItemsDeferred = proof.Waiting ? 1 : 0 });
@@ -97,6 +102,7 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                     DirectoryRebasePass parents;
                     try { parents = await DirectoryParentRootProof.AdvanceAsync(rootPath, index, keys, source, queued, draft, remaining, clock, journal, token).ConfigureAwait(false); }
                     catch { remaining = 0; throw; }
+                    StageTime("parent_roots", parents.Visited);
                     remaining -= parents.Visited;
                     journal?.TryWrite(new(parents.Complete ? "directory.parent_roots_complete" : "directory.parent_roots_pending", "directory-publication")
                     { SessionId = session, Level = DiagnosticLevel.Debug, ItemsVisited = parents.Visited, ItemsDeferred = parents.Waiting ? 1 : 0 });
@@ -113,8 +119,10 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
                     }
                 }
                 if (remaining == offered) remaining--; // Completed captures still consume one scheduling unit.
+                StageTime("publication");
                 stage = "commit";
                 var committed = await capture.CommitQueuedUnderGateAsync(queued, draft, publication, clock.GetUtcNow().UtcTicks, token).ConfigureAwait(false);
+                StageTime("commit");
                 if (committed.Changed)
                 {
                     changed.Add(committed.Row.Path);
@@ -123,6 +131,15 @@ internal sealed class DirectoryPublicationWorker(string rootPath, FolderIndex in
             }
             catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException or SqliteException or InvalidOperationException)
             { await Retry(error).ConfigureAwait(false); }
+
+            void StageTime(string phase, long members = 0)
+            {
+                if (timing is null) return;
+                journal!.TryWrite(new("directory.publication_time_" + phase, "directory-publication")
+                { SessionId = session, Level = DiagnosticLevel.Debug, ElapsedMilliseconds = timing.Elapsed.TotalMilliseconds,
+                    ItemsVisited = members });
+                timing.Restart();
+            }
 
             async Task Retry(Exception? error)
             {

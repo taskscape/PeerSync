@@ -1,9 +1,11 @@
 using PeerSync.Crypto;
 using Microsoft.Data.Sqlite;
+using System.Security.Authentication;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Settings;
 using PeerSync.Engine.Scanning;
+using PeerSync.Engine.Sync;
 using PeerSync.Storage.FolderDb;
 using Shouldly;
 using Xunit;
@@ -101,6 +103,36 @@ public sealed class RescanSchedulerTests : IDisposable
             await File.WriteAllTextAsync(Path.Combine(root, "new"), "watcher data", Token);
             var changed = await Next(scheduler);
             changed.Result!.Hashed.ShouldBe(1); index.LocalFiles.Find("new").ShouldNotBeNull();
+        }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
+    }
+
+    [Fact]
+    public async Task CoordinatedWatcherScansThroughFolderPassWithoutNestingScanPermit()
+    {
+        string root = Tree("coordinated");
+        using var keys = FolderKeys.CreateNew();
+        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "coordinated.db"), Token);
+        await using var folder = new TransportFolder(root, index, keys, new byte[32]);
+        var scheduler = new RescanScheduler([new(folder.Scanner, Coordinator: folder)]);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        Task running = scheduler.RunAsync(stopping.Token);
+        try
+        {
+            var initial = await Next(scheduler);
+            initial.Scanner.ShouldBeSameAs(folder.Scanner);
+            initial.Result.ShouldBeNull();
+            initial.Pass.ShouldNotBeNull();
+            initial.Pass.ScansCompleted.ShouldBe(1);
+
+            await File.WriteAllTextAsync(Path.Combine(root, "new"), "coordinated watcher data", Token);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            ScanOutcome changed;
+            do { changed = await scheduler.Outcomes.ReadAsync(timeout.Token); }
+            while (changed.Pass?.ScansCompleted == 0 || index.LocalFiles.Find("new") is null);
+            changed.ErrorCode.ShouldBeNull();
+            changed.Pass!.ScannedEntries.ShouldBeGreaterThan(0);
         }
         finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
     }
@@ -216,6 +248,28 @@ public sealed class RescanSchedulerTests : IDisposable
                 json.RootElement.GetProperty("nativeError").GetInt32().ShouldBe(extendedCode);
             }
             found.ShouldBeTrue();
+        }
+        finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
+    }
+
+    [Fact]
+    public async Task AuthenticationFailureBacksOffWithoutStoppingTheInstalledScheduler()
+    {
+        string root = Tree("auth-retry");
+        File.WriteAllText(Path.Combine(root, "file"), "content");
+        using var keys = FolderKeys.CreateNew();
+        await using var index = await FolderIndex.OpenAsync(Path.Combine(fixture, "auth-retry.db"), Token);
+        using var scanner = new Scanner(root, index, keys, new byte[32],
+            timeProvider: new CallbackClock(() => throw new AuthenticationException("Peer session failed.")));
+        var scheduler = new RescanScheduler([new(scanner, WatchChanges: false)]);
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        Task running = scheduler.RunAsync(stopping.Token);
+        try
+        {
+            ScanOutcome outcome = await Next(scheduler);
+            outcome.ErrorCode.ShouldBe("scan-unavailable");
+            outcome.RetryInSeconds.ShouldBe(10);
+            running.IsCompleted.ShouldBeFalse();
         }
         finally { stopping.Cancel(); await running.WaitAsync(TimeSpan.FromSeconds(5), Token); }
     }

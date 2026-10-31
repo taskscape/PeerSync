@@ -21,6 +21,7 @@ public sealed partial class FolderIndex
                 + "ON CONFLICT(path_key) DO UPDATE SET graph_id=excluded.graph_id,input_hash=excluded.input_hash,input_epoch=excluded.input_epoch,cursor=NULL,complete=0;";
             command.Parameters.AddWithValue("$path", PathRules.Key(publication.Path)); command.Parameters.AddWithValue("$graph", graph);
             command.Parameters.AddWithValue("$hash", capture.InputHash); command.Parameters.AddWithValue("$epoch", capture.InputEpoch!.Value); command.ExecuteNonQuery();
+            WakeGraphMemberPullRetries(connection, transaction, publication.RootId, graph, PathRules.Key(publication.Path), null);
             return new DirectoryRebase(graph, capture.InputHash, capture.InputEpoch.Value, null, false);
         }, cancellationToken);
     }

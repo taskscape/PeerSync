@@ -1,0 +1,7 @@
+# P4 presence fanout hardening — 2026-10-24
+
+The central presence registry used to build a full `PeerList` for every affected folder and receiver on each announcement. A receiver's 2,048-entry drop-oldest queue could retain repeated large lists and silently discard an older folder update under a burst. The 500-folder-per-device allowance made this a realistic memory and stale-presence risk.
+
+The queue now holds one small pending folder signal per receiver and folder. Repeated announcements update registry state without adding duplicate signals. The gRPC writer builds the current list under the registry lock immediately before sending it; an expired, replaced or no-longer-subscribed session's signal is skipped. Control messages still share the bounded 2,048-entry channel. A full channel rejects a new signal rather than dropping an older one; the pending marker is cleared so a later announcement can retry.
+
+The local regression announces 500 folders repeatedly, confirms exactly 500 queued signals with empty peer payloads, and then reads each current peer list with the latest advertised port. A separate full-queue case confirms existing messages are preserved, the pending marker is cleared, and a later announcement publishes the current list. The complete Release rendezvous suite, including the hosted gRPC tracker check, passed 21/21. This is source-level evidence; no deployed high-fanout load test or physical WAN gate is claimed.

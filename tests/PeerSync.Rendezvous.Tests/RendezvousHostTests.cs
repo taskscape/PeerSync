@@ -1,13 +1,21 @@
+using System.IO.Compression;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using PeerSync.Core.Diagnostics;
+using PeerSync.Net.Security;
 using PeerSync.Rendezvous.Contracts.V1;
 using PeerSync.Rendezvous.Hosting;
+using PeerSync.Rendezvous.Relay;
+using PeerSync.Rendezvous.Tracker;
 using Shouldly;
 using Xunit;
 
@@ -25,12 +33,32 @@ public sealed class RendezvousHostTests
         using X509Certificate2 deviceCertificate = DeviceCertificate(deviceKey);
         int port = RendezvousTestPort.Allocate();
         string origin = $"https://127.0.0.1:{port}";
-        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-host"));
+        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-host",
+            Guid.NewGuid().ToString("N")));
+        var measurements = new System.Collections.Concurrent.ConcurrentDictionary<string, long>();
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == RendezvousMetrics.MeterName)
+                listener.EnableMeasurementEvents(instrument);
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
+            measurements.AddOrUpdate(instrument.Name, value, (_, previous) => previous + value));
+        meterListener.Start();
         await using WebApplication app = RendezvousHost.Build(
         ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
             "--Rendezvous:LogDirectory=" + logs,
             "--Logging:LogLevel:Microsoft.AspNetCore.Server.Kestrel=Debug"], serverCertificate, IPAddress.Loopback);
         await app.StartAsync(TestContext.Current.CancellationToken);
+        Guid probeSession = Guid.NewGuid();
+        var probes = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
+        app.Services.GetRequiredService<DiagnosticJournal>().EntryWritten += (entry, _) =>
+        {
+            if (entry.Event == "rendezvous.probed") probes.Enqueue(entry);
+            if (entry.Event is "rendezvous.session_failed" or "rendezvous.relay_join_rejected")
+                failures.Enqueue(entry);
+        };
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
 
@@ -43,14 +71,41 @@ public sealed class RendezvousHostTests
             healthResponse.IsSuccessStatusCode.ShouldBeTrue();
             healthResponse.Version.ShouldBe(HttpVersion.Version20);
 
+            using var bootstrap = new HttpRequestMessage(HttpMethod.Get,
+                origin + "/.well-known/peersync.json")
+            { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            using HttpResponseMessage bootstrapResponse = await client.SendAsync(bootstrap, timeout.Token);
+            bootstrapResponse.IsSuccessStatusCode.ShouldBeTrue();
+            using JsonDocument bootstrapBody = JsonDocument.Parse(
+                await bootstrapResponse.Content.ReadAsStringAsync(timeout.Token));
+            bootstrapBody.RootElement.GetProperty("schema").GetString().ShouldBe("peersync-bootstrap-v1");
+            bootstrapBody.RootElement.GetProperty("tracker").GetString().ShouldBe(origin);
+            bootstrapBody.RootElement.GetProperty("relay").GetString().ShouldBe(origin);
+
             using var probe = new HttpRequestMessage(HttpMethod.Get, origin + "/probe")
             { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            probe.Headers.Add(ProbeCorrelation.HeaderName, ProbeCorrelation.Format(probeSession));
             using HttpResponseMessage probeResponse = await client.SendAsync(probe, timeout.Token);
             probeResponse.IsSuccessStatusCode.ShouldBeTrue();
             probeResponse.Version.ShouldBe(HttpVersion.Version30);
-            string body = await probeResponse.Content.ReadAsStringAsync(timeout.Token);
-            body.ShouldContain("HTTP/3");
-            body.ShouldContain("127.0.0.1");
+            using JsonDocument body = JsonDocument.Parse(await probeResponse.Content.ReadAsStringAsync(timeout.Token));
+            body.RootElement.GetProperty("httpVersion").GetString().ShouldBe("HTTP/3");
+            body.RootElement.GetProperty("observedAddress").GetString().ShouldBe("127.0.0.1");
+            body.RootElement.GetProperty("probeSessionId").GetString().ShouldBe(ProbeCorrelation.Format(probeSession));
+            probes.Count.ShouldBe(1);
+            probes.Single().SessionId.ShouldBe(probeSession);
+            probes.Single().Transport.ShouldBe(DiagnosticTransport.Http3);
+
+            using var invalidProbe = new HttpRequestMessage(HttpMethod.Get, origin + "/probe")
+            { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            invalidProbe.Headers.Add(ProbeCorrelation.HeaderName, "invalid-id");
+            using HttpResponseMessage invalidResponse = await client.SendAsync(invalidProbe, timeout.Token);
+            invalidResponse.IsSuccessStatusCode.ShouldBeTrue();
+            using JsonDocument invalidBody = JsonDocument.Parse(
+                await invalidResponse.Content.ReadAsStringAsync(timeout.Token));
+            invalidBody.RootElement.GetProperty("probeSessionId").ValueKind.ShouldBe(JsonValueKind.Null);
+            probes.Count.ShouldBe(2);
+            probes.Last().SessionId.ShouldBeNull();
         }
 
         using (var anonymousHandler = Handler(serverCertificate))
@@ -70,12 +125,184 @@ public sealed class RendezvousHostTests
         observed.SessionId.Length.ShouldBe(16);
         observed.Endpoint.Address.ShouldBe("127.0.0.1");
         var announce = new Announce { ListenPort = 47821 };
-        announce.FolderIds.Add(ByteString.CopyFrom(new byte[32]));
+        byte[] folderId = RandomNumberGenerator.GetBytes(32);
+        announce.FolderIds.Add(ByteString.CopyFrom(folderId));
         await session.RequestStream.WriteAsync(new ClientMessage { Announce = announce }, timeout.Token);
         (await session.ResponseStream.MoveNext(timeout.Token)).ShouldBeTrue();
         session.ResponseStream.Current.PeerList.FolderId.Length.ShouldBe(32);
         session.ResponseStream.Current.PeerList.Peers.ShouldBeEmpty();
         await session.RequestStream.CompleteAsync();
+
+        Guid rejectedSessionId;
+        using (var invalidSession = new PeerSync.Rendezvous.Contracts.V1.Rendezvous.RendezvousClient(deviceChannel)
+            .Session(cancellationToken: timeout.Token))
+        {
+            (await invalidSession.ResponseStream.MoveNext(timeout.Token)).ShouldBeTrue();
+            rejectedSessionId = new(invalidSession.ResponseStream.Current.ObservedAddress.SessionId.ToByteArray());
+            await invalidSession.RequestStream.WriteAsync(new ClientMessage(), timeout.Token);
+            RpcException invalid = await Should.ThrowAsync<RpcException>(async () =>
+                await invalidSession.ResponseStream.MoveNext(timeout.Token));
+            invalid.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+            DiagnosticEvent trackerFailure = failures.Single(entry => entry.Event == "rendezvous.session_failed");
+            trackerFailure.SessionId.ShouldBe(rejectedSessionId);
+            trackerFailure.ErrorCode.ShouldBe("InvalidArgument");
+            trackerFailure.Transport.ShouldBe(DiagnosticTransport.Http2);
+        }
+
+        using (var invalidRelay = new PeerSync.Rendezvous.Contracts.V1.Relay.RelayClient(deviceChannel)
+            .Pipe(cancellationToken: timeout.Token))
+        {
+            RpcException rejected = await Should.ThrowAsync<RpcException>(async () =>
+                await invalidRelay.ResponseStream.MoveNext(timeout.Token));
+            rejected.StatusCode.ShouldBe(StatusCode.Unauthenticated);
+            DiagnosticEvent relayFailure = failures.Single(entry => entry.Event == "rendezvous.relay_join_rejected");
+            relayFailure.ErrorCode.ShouldBe("missing-or-invalid-token");
+            relayFailure.Transport.ShouldBe(DiagnosticTransport.Http2);
+            relayFailure.RemoteAddress.ShouldBe(IPAddress.Loopback);
+            relayFailure.RemotePort.GetValueOrDefault().ShouldBeGreaterThan(0);
+        }
+
+        string bundle = Path.Combine(Path.GetDirectoryName(logs)!, "rendezvous-" + Guid.NewGuid().ToString("N") + ".zip");
+        DiagnosticBundleResult collected = DiagnosticBundleCollector.Collect(logs, bundle);
+        collected.EventsIncluded.ShouldBeGreaterThan(0);
+        using ZipArchive archive = ZipFile.OpenRead(bundle);
+        string bundleLog = string.Join("\n", archive.Entries
+            .Where(entry => entry.FullName.EndsWith(".jsonl", StringComparison.Ordinal))
+            .Select(entry =>
+            {
+                using var reader = new StreamReader(entry.Open());
+                return reader.ReadToEnd();
+            }));
+        bundleLog.ShouldContain("\"sessionId\":\"" + probeSession + "\"");
+        bundleLog.ShouldContain("\"sessionId\":\"" + rejectedSessionId + "\"");
+        bundleLog.ShouldContain("rendezvous.session_failed");
+        bundleLog.ShouldContain("rendezvous.relay_join_rejected");
+        bundleLog.ShouldNotContain("\"remoteAddress\"");
+        bundleLog.ShouldNotContain("\"remotePort\"");
+        bundleLog.ShouldNotContain("\"folderId\"");
+        bundleLog.ShouldNotContain(Convert.ToHexString(folderId));
+        bundleLog.ShouldNotContain(Convert.ToBase64String(folderId));
+        string rawLog = string.Join("\n", Directory.GetFiles(logs, "*.jsonl")
+            .Select(File.ReadAllText));
+        rawLog.ShouldNotContain(Convert.ToHexString(folderId));
+        rawLog.ShouldNotContain(Convert.ToBase64String(folderId));
+        measurements.TryGetValue("peersync.probe.requests", out long probeMeasurements).ShouldBeTrue();
+        probeMeasurements.ShouldBeGreaterThanOrEqualTo(1);
+        measurements.TryGetValue("peersync.tracker.sessions.opened", out long trackerMeasurements).ShouldBeTrue();
+        trackerMeasurements.ShouldBeGreaterThanOrEqualTo(1);
+        measurements.TryGetValue("peersync.authentication.rejected", out long authMeasurements).ShouldBeTrue();
+        authMeasurements.ShouldBeGreaterThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public async Task RelayFailureRetainsSessionInSanitizedCentralBundle()
+    {
+        using RSA serverKey = RSA.Create(2048);
+        using X509Certificate2 serverCertificate = ServerCertificate(serverKey);
+        using ECDsa firstKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using ECDsa secondKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using X509Certificate2 firstCertificate = DeviceCertificate(firstKey);
+        using X509Certificate2 secondCertificate = DeviceCertificate(secondKey);
+        int port = RendezvousTestPort.Allocate();
+        string origin = $"https://127.0.0.1:{port}";
+        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-relay-failure",
+            Guid.NewGuid().ToString("N")));
+        await using WebApplication app = RendezvousHost.Build(
+            ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
+                "--Rendezvous:LogDirectory=" + logs], serverCertificate, IPAddress.Loopback);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+
+        var first = new PresenceSession(PeerTls.DeviceId(firstCertificate),
+            new IPEndPoint(IPAddress.Loopback, 52001));
+        var second = new PresenceSession(PeerTls.DeviceId(secondCertificate),
+            new IPEndPoint(IPAddress.Loopback, 52002));
+        RelayRegistry registry = app.Services.GetRequiredService<RelayRegistry>();
+        registry.TryOffer(first, second).ShouldBeTrue();
+        first.Outgoing.Reader.TryRead(out ServerMessage? offered).ShouldBeTrue();
+        RelayOffer offer = offered!.RelayOffer;
+        Guid session = new(offer.SessionId.ToByteArray());
+        var headers = new Metadata { { "psp-relay-token", Convert.ToHexString(offer.Token.Span) } };
+
+        using var firstHandler = Handler(serverCertificate, firstCertificate);
+        using var secondHandler = Handler(serverCertificate, secondCertificate);
+        using var firstChannel = Channel(origin, firstHandler);
+        using var secondChannel = Channel(origin, secondHandler);
+        using var firstPipe = new PeerSync.Rendezvous.Contracts.V1.Relay.RelayClient(firstChannel)
+            .Pipe(headers, cancellationToken: timeout.Token);
+        using var secondPipe = new PeerSync.Rendezvous.Contracts.V1.Relay.RelayClient(secondChannel)
+            .Pipe(headers, cancellationToken: timeout.Token);
+        await firstPipe.RequestStream.WriteAsync(new RelayChunk { Data = ByteString.CopyFrom([1]) }, timeout.Token);
+        (await secondPipe.ResponseStream.MoveNext(timeout.Token)).ShouldBeTrue();
+        secondPipe.ResponseStream.Current.Data.Span.SequenceEqual(new byte[] { 1 }).ShouldBeTrue();
+
+        RpcException rejected = await Should.ThrowAsync<RpcException>(async () =>
+        {
+            await firstPipe.RequestStream.WriteAsync(new RelayChunk { Data = ByteString.CopyFrom(new byte[65537]) },
+                timeout.Token);
+            await firstPipe.ResponseStream.MoveNext(timeout.Token);
+        });
+        rejected.StatusCode.ShouldBe(StatusCode.InvalidArgument);
+        string bundle = Path.Combine(Path.GetDirectoryName(logs)!, "relay-failure-" + Guid.NewGuid().ToString("N") + ".zip");
+        DiagnosticBundleCollector.Collect(logs, bundle);
+        using ZipArchive archive = ZipFile.OpenRead(bundle);
+        string bundleLog = string.Join("\n", archive.Entries
+            .Where(entry => entry.FullName.EndsWith(".jsonl", StringComparison.Ordinal))
+            .Select(entry =>
+            {
+                using var reader = new StreamReader(entry.Open());
+                return reader.ReadToEnd();
+            }));
+        bundleLog.ShouldContain("rendezvous.relay_forward_failed");
+        bundleLog.ShouldContain("\"sessionId\":\"" + session + "\"");
+        bundleLog.ShouldContain("\"errorCode\":\"InvalidArgument\"");
+        bundleLog.ShouldNotContain(Convert.ToHexString(offer.Token.Span));
+        bundleLog.ShouldNotContain("\"remoteAddress\"");
+    }
+
+    [Fact]
+    public async Task RateLimitedHttpRequestIsRecordedForCentralDiagnosis()
+    {
+        using RSA serverKey = RSA.Create(2048);
+        using X509Certificate2 serverCertificate = ServerCertificate(serverKey);
+        int port = RendezvousTestPort.Allocate();
+        string origin = $"https://127.0.0.1:{port}";
+        string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-rate-limit",
+            Guid.NewGuid().ToString("N")));
+        await using WebApplication app = RendezvousHost.Build(
+            ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
+                "--Rendezvous:LogDirectory=" + logs], serverCertificate, IPAddress.Loopback);
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        var rejected = new System.Collections.Concurrent.ConcurrentQueue<DiagnosticEvent>();
+        app.Services.GetRequiredService<DiagnosticJournal>().EntryWritten += (entry, _) =>
+        {
+            if (entry.Event == "rendezvous.http_rate_limited") rejected.Enqueue(entry);
+        };
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        using var handler = Handler(serverCertificate);
+        using var client = new HttpClient(handler);
+        for (int i = 0; i < 123; i++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, origin + "/healthz")
+            { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
+            using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+            response.StatusCode.ShouldBe(i < 120 ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests);
+        }
+        rejected.Count.ShouldBe(1);
+        DiagnosticEvent eventData = rejected.Single();
+        eventData.ErrorCode.ShouldBe("http-429");
+        eventData.Transport.ShouldBe(DiagnosticTransport.Http2);
+        eventData.RemoteAddress.ShouldBe(IPAddress.Loopback);
+        string bundle = Path.Combine(Path.GetDirectoryName(logs)!, "rate-limit-" + Guid.NewGuid().ToString("N") + ".zip");
+        DiagnosticBundleCollector.Collect(logs, bundle);
+        using ZipArchive archive = ZipFile.OpenRead(bundle);
+        using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
+        string bundleLog = reader.ReadToEnd();
+        bundleLog.ShouldContain("rendezvous.http_rate_limited");
+        bundleLog.ShouldContain("http-429");
+        bundleLog.ShouldNotContain("\"remoteAddress\"");
     }
 
     private static GrpcChannel Channel(string origin, SocketsHttpHandler handler)

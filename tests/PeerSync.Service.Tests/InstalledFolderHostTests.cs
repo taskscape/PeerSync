@@ -4,11 +4,16 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using Google.Protobuf;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Settings;
 using PeerSync.Core.Sync;
 using PeerSync.Crypto;
 using PeerSync.Engine.Sync;
+using PeerSync.Engine.Scanning;
+using PeerSync.Crypto.Chunking;
+using PeerSync.Protocol.Records;
+using PeerSync.Protocol.Signing;
 using PeerSync.Service.Control;
 using PeerSync.Service.Hosting;
 using PeerSync.Net.Connections;
@@ -20,6 +25,7 @@ using Xunit;
 
 namespace PeerSync.Service.Tests;
 
+[Collection("InstalledFolderHostNativeQuic")]
 public sealed class InstalledFolderHostTests
 {
     [Fact]
@@ -35,6 +41,141 @@ public sealed class InstalledFolderHostTests
         loaded.Thumbprint.ShouldBe(certificate.Thumbprint);
         loaded.HasPrivateKey.ShouldBeTrue();
         loaded.Dispose();
+    }
+
+    [Fact]
+    public async Task UnknownDeviceWaitsForApprovalAndBlockedDeviceCannotReconnect()
+    {
+        if (!System.Net.Quic.QuicListener.IsSupported) return;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-ServiceApproval-" + Guid.NewGuid().ToString("N"));
+        string leftData = Path.Combine(root, "left", "data"), rightData = Path.Combine(root, "right", "data");
+        string leftShare = Path.Combine(root, "left", "share"), rightShare = Path.Combine(root, "right", "share");
+        Directory.CreateDirectory(leftData); Directory.CreateDirectory(rightData);
+        Directory.CreateDirectory(leftShare); Directory.CreateDirectory(rightShare);
+        const string firstContent = "approved transfer";
+        File.WriteAllText(Path.Combine(leftShare, "approval.txt"), firstContent);
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            string actorSid = identity.User!.Value;
+            using var leftCertificate = CreateDeviceCertificate();
+            using var rightCertificate = CreateDeviceCertificate();
+            byte[] leftId = PeerTls.DeviceId(leftCertificate), rightId = PeerTls.DeviceId(rightCertificate);
+            using var keys = FolderKeys.CreateNew();
+            int leftPort = ReservePeerPort(), rightPort = ReservePeerPort();
+            string leftState = Path.Combine(leftData, "peersync.db"), rightState = Path.Combine(rightData, "peersync.db");
+            await PrepareNodeAsync(leftState, leftData, leftShare, actorSid, keys, rightId, timeout.Token);
+            await PrepareNodeAsync(rightState, rightData, rightShare, actorSid, keys, leftId, timeout.Token,
+                approveRemote: false);
+
+            var leftStatus = new ControlStatusRuntime(); var rightStatus = new ControlStatusRuntime();
+            await using var left = await InstalledFolderHost.StartForTestWithNetworkAsync(leftState, leftId, actorSid,
+                leftCertificate, new DeviceSettings { ListenPort = leftPort, LanDiscovery = false },
+                leftStatus, cancellationToken: timeout.Token);
+            await using var right = await InstalledFolderHost.StartForTestWithNetworkAsync(rightState, rightId, actorSid,
+                rightCertificate, new DeviceSettings { ListenPort = rightPort, LanDiscovery = false },
+                rightStatus, cancellationToken: timeout.Token);
+
+            await left.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, rightPort), timeout.Token);
+            await UntilAsync(() => right.ListPendingDevices().Any(row => row.DeviceId.SequenceEqual(leftId)), timeout.Token);
+            File.Exists(Path.Combine(rightShare, "approval.txt")).ShouldBeFalse();
+            await right.DecideDeviceAsync(Convert.ToHexString(keys.FolderId()), leftId, DeviceApproval.Approved,
+                actorSid, timeout.Token);
+            await UntilAsync(() => !right.ListPendingDevices().Any(row => row.DeviceId.SequenceEqual(leftId)), timeout.Token);
+            await left.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, rightPort), timeout.Token);
+            await UntilAsync(() => FileMatches(Path.Combine(rightShare, "approval.txt"), firstContent), timeout.Token);
+
+            string folderId = Convert.ToHexString(keys.FolderId());
+            var oldRuntime = right.ResolveFolder(folderId);
+            var changed = await right.UpdateFolderSettingsAsync(folderId,
+                right.GetFolderSettings(folderId) with { ArchiveDays = 7 }, actorSid, timeout.Token);
+            changed.RestartRequired.ShouldBeFalse();
+            right.ResolveFolder(folderId).ShouldNotBeSameAs(oldRuntime);
+            right.ResolveFolder(folderId).Settings.ArchiveDays.ShouldBe(7);
+            File.WriteAllText(Path.Combine(leftShare, "after-policy.txt"), "transfer after live policy change");
+            await UntilAsync(() => FileMatches(Path.Combine(rightShare, "after-policy.txt"),
+                "transfer after live policy change"), timeout.Token);
+
+            await right.DecideDeviceAsync(folderId, leftId, DeviceApproval.Blocked,
+                actorSid, timeout.Token);
+            await UntilAsync(() => !rightStatus.ReadStatus().ProductionSyncAvailable, timeout.Token);
+            File.WriteAllText(Path.Combine(leftShare, "after-block.txt"), "must not cross a blocked connection");
+            try { await left.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, rightPort), timeout.Token); }
+            catch (IOException) { }
+            await Task.Delay(1200, timeout.Token);
+            File.Exists(Path.Combine(rightShare, "after-block.txt")).ShouldBeFalse();
+        }
+        finally
+        {
+            await DeleteTemporaryRootAsync(root);
+        }
+    }
+
+    [Fact]
+    public async Task AddingFolderToConnectedPeersRenegotiatesApprovalBeforeTransfer()
+    {
+        if (!System.Net.Quic.QuicListener.IsSupported) return;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(90));
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-ServiceDynamic-" + Guid.NewGuid().ToString("N"));
+        string leftData = Path.Combine(root, "left", "data"), rightData = Path.Combine(root, "right", "data");
+        string leftBase = Path.Combine(root, "left", "base"), rightBase = Path.Combine(root, "right", "base");
+        string leftAdded = Path.Combine(root, "left", "added"), rightAdded = Path.Combine(root, "right", "added");
+        foreach (string path in new[] { leftData, rightData, leftBase, rightBase, leftAdded, rightAdded })
+            Directory.CreateDirectory(path);
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            string actorSid = identity.User!.Value;
+            using var leftCertificate = CreateDeviceCertificate();
+            using var rightCertificate = CreateDeviceCertificate();
+            byte[] leftId = PeerTls.DeviceId(leftCertificate), rightId = PeerTls.DeviceId(rightCertificate);
+            using var baseKeys = FolderKeys.CreateNew();
+            using var addedKeys = FolderKeys.CreateNew();
+            string leftState = Path.Combine(leftData, "peersync.db"), rightState = Path.Combine(rightData, "peersync.db");
+            await PrepareNodeAsync(leftState, leftData, leftBase, actorSid, baseKeys, rightId, timeout.Token);
+            await PrepareNodeAsync(rightState, rightData, rightBase, actorSid, baseKeys, leftId, timeout.Token);
+            int leftPort = ReservePeerPort(), rightPort = ReservePeerPort();
+            var leftStatus = new ControlStatusRuntime(); var rightStatus = new ControlStatusRuntime();
+            await using var left = await InstalledFolderHost.StartForTestWithNetworkAsync(leftState, leftId, actorSid,
+                leftCertificate, new DeviceSettings { ListenPort = leftPort, LanDiscovery = false },
+                leftStatus, cancellationToken: timeout.Token);
+            await using var right = await InstalledFolderHost.StartForTestWithNetworkAsync(rightState, rightId, actorSid,
+                rightCertificate, new DeviceSettings { ListenPort = rightPort, LanDiscovery = false },
+                rightStatus, cancellationToken: timeout.Token);
+
+            await left.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, rightPort), timeout.Token);
+            await UntilAsync(() => leftStatus.ReadStatus().ProductionSyncAvailable
+                && rightStatus.ReadStatus().ProductionSyncAvailable, timeout.Token);
+
+            string keyText = addedKeys.ExportReadWriteText();
+            await right.AddFolderAsync(FolderKeys.FromText(keyText), rightAdded, actorSid, timeout.Token);
+            string addedId = Convert.ToHexString(addedKeys.FolderId());
+            await right.UpdateFolderSettingsAsync(addedId,
+                right.GetFolderSettings(addedId) with { RequireApproval = true }, actorSid, timeout.Token);
+            const string content = "must wait for approval on a newly added folder";
+            File.WriteAllText(Path.Combine(leftAdded, "pending.txt"), content);
+            await left.AddFolderAsync(FolderKeys.FromText(keyText), leftAdded, actorSid, timeout.Token);
+            await UntilAsync(() => right.ListPendingDevices().Any(row => row.DeviceId.SequenceEqual(leftId)
+                && row.FolderId.SequenceEqual(addedKeys.FolderId())), timeout.Token);
+            File.Exists(Path.Combine(rightAdded, "pending.txt")).ShouldBeFalse();
+
+            await right.DecideDeviceAsync(addedId, leftId, DeviceApproval.Approved, actorSid, timeout.Token);
+            await UntilAsync(() => FileMatches(Path.Combine(rightAdded, "pending.txt"), content), timeout.Token);
+
+            await right.PauseFolderAsync(addedId, actorSid, timeout.Token);
+            await UntilAsync(() => leftStatus.ReadStatus().ProductionSyncAvailable
+                && rightStatus.ReadStatus().ProductionSyncAvailable, timeout.Token);
+            const string resumedContent = "resumed membership must be announced";
+            File.WriteAllText(Path.Combine(leftAdded, "after-resume.txt"), resumedContent);
+            File.Exists(Path.Combine(rightAdded, "after-resume.txt")).ShouldBeFalse();
+            await right.ResumeFolderAsync(addedId, actorSid, timeout.Token);
+            await UntilAsync(() => FileMatches(Path.Combine(rightAdded, "after-resume.txt"),
+                resumedContent), timeout.Token);
+        }
+        finally { await DeleteTemporaryRootAsync(root); }
     }
 
     [Fact]
@@ -385,15 +526,20 @@ public sealed class InstalledFolderHostTests
             await using (var host = await InstalledFolderHost.StartForTestAsync(statePath, deviceId, actorSid, status,
                 journal, TestContext.Current.CancellationToken))
             {
+                var folder = host.ResolveFolder(Convert.ToHexString(keys.FolderId()));
+                ReferenceEquals(folder.Scanner, folder.Transport.Scanner).ShouldBeTrue();
                 var deadline = DateTime.UtcNow.AddSeconds(15);
                 bool scanCompleted = false;
                 while (DateTime.UtcNow < deadline && !scanCompleted)
                 {
                     string journalFile = Path.Combine(logPath, "debug.jsonl");
-                    scanCompleted = File.Exists(journalFile) && File.ReadAllText(journalFile).Contains("\"eventName\":\"scan.complete\"", StringComparison.Ordinal);
+                    scanCompleted = File.Exists(journalFile) && ReadDiagnosticLog(journalFile).Contains("\"eventName\":\"scan.complete\"", StringComparison.Ordinal);
                     if (!scanCompleted) await Task.Delay(100, TestContext.Current.CancellationToken);
                 }
                 scanCompleted.ShouldBeTrue("the service scheduler should complete its startup scan");
+                string events = ReadDiagnosticLog(Path.Combine(logPath, "debug.jsonl"));
+                events.ShouldContain("scheduler.pass_start");
+                events.ShouldNotContain("scheduler.scan_start");
                 status.ReadStatus().ProductionSyncAvailable.ShouldBeFalse();
             }
         }
@@ -401,6 +547,70 @@ public sealed class InstalledFolderHostTests
         {
             await DeleteTemporaryRootAsync(root);
         }
+    }
+
+    [Fact]
+    public async Task InstalledHostRecoversPreparedApplyBeforeStartingItsIndependentScanner()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-ServiceHostRecovery-" + Guid.NewGuid().ToString("N"));
+        string data = Path.Combine(root, "data"), share = Path.Combine(root, "share");
+        string statePath = Path.Combine(data, "peersync.db"), logPath = Path.Combine(root, "logs");
+        byte[] oldBytes = "original local bytes"u8.ToArray(), newBytes = "verified remote bytes"u8.ToArray();
+        Directory.CreateDirectory(data); Directory.CreateDirectory(share);
+        File.WriteAllBytes(Path.Combine(share, "file"), oldBytes);
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            string actorSid = identity.User!.Value;
+            using var keys = FolderKeys.CreateNew();
+            byte[] own = new byte[32], remote = new byte[32]; own[0] = 1; remote[0] = 2;
+            await using (var state = await StateStore.OpenAsync(statePath, cancellationToken: TestContext.Current.CancellationToken))
+                await state.RegisterFolderAsync(keys, share, new FolderSettings { RescanIntervalSeconds = 3600 }, actorSid,
+                    cancellationToken: TestContext.Current.CancellationToken);
+            string indexPath = Path.Combine(data, "folders", Convert.ToHexString(keys.FolderId()) + ".db");
+            Directory.CreateDirectory(Path.GetDirectoryName(indexPath)!);
+            await using (var index = await FolderIndex.OpenAsync(indexPath, TestContext.Current.CancellationToken))
+            {
+                using (var scanner = new Scanner(share, index, keys, own))
+                    await scanner.ScanAsync(TestContext.Current.CancellationToken);
+                byte[] hash = Blake3.Hasher.Hash(newBytes).AsSpan().ToArray();
+                long now = DateTime.UtcNow.Ticks;
+                var body = new FileRecordBody { Path = "file", Type = 0, MtimeTicks = now, ChangedTicks = now,
+                    ModifiedBy = ByteString.CopyFrom(remote), Size = (ulong)newBytes.Length,
+                    ChunkClass = ChunkParameters.ClassFor(newBytes.Length), FileHash = ByteString.CopyFrom(hash) };
+                body.Vv.Add(new VvEntry { Device = 2, Counter = 1 });
+                body.Chunks.Add(new Chunk { Hash = body.FileHash, Length = (uint)newBytes.Length });
+                await new NeededSet(index, keys, own).ApplyIndexUpdateAsync(remote, 0, 1,
+                    [SignedRecordFactory.Create(body, keys, 1)], TestContext.Current.CancellationToken);
+                var interrupted = new FileApplier(share, index, keys, own)
+                    { Checkpoint = stage => { if (stage == "archived") throw new IOException("injected"); } };
+                await Should.ThrowAsync<IOException>(() => interrupted.ApplyAsync("file",
+                    (_, _, _) => ValueTask.FromResult<ReadOnlyMemory<byte>>(newBytes), TestContext.Current.CancellationToken));
+                index.ReadApplyIntents().ShouldHaveSingleItem();
+                File.Exists(Path.Combine(share, "file")).ShouldBeFalse();
+            }
+
+            using var journal = new DiagnosticJournal(logPath, "service", debugEnabled: true);
+            var status = new ControlStatusRuntime();
+            await using (var host = await InstalledFolderHost.StartForTestAsync(statePath, own, actorSid, status,
+                journal, TestContext.Current.CancellationToken))
+            {
+                File.ReadAllBytes(Path.Combine(share, "file")).ShouldBe(newBytes);
+                host.ResolveFolder(Convert.ToHexString(keys.FolderId())).Index.ReadApplyIntents().ShouldBeEmpty();
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+                deadline.CancelAfter(TimeSpan.FromSeconds(15));
+                await UntilAsync(() => File.Exists(Path.Combine(logPath, "debug.jsonl"))
+                    && ReadDiagnosticLog(Path.Combine(logPath, "debug.jsonl")).Contains("\"eventName\":\"scan.complete\"", StringComparison.Ordinal),
+                    deadline.Token);
+                string events = ReadDiagnosticLog(Path.Combine(logPath, "debug.jsonl"));
+                int recovery = events.IndexOf("puller.startup_recovery_complete", StringComparison.Ordinal);
+                int scan = events.IndexOf("\"eventName\":\"scan.start\"", StringComparison.Ordinal);
+                recovery.ShouldBeGreaterThanOrEqualTo(0);
+                scan.ShouldBeGreaterThan(recovery);
+                events.ShouldNotContain("scheduler.scan_failed");
+            }
+        }
+        finally { await DeleteTemporaryRootAsync(root); }
     }
 
     private static async Task DeleteTemporaryRootAsync(string root)
@@ -434,7 +644,7 @@ public sealed class InstalledFolderHostTests
     }
 
     private static async Task PrepareNodeAsync(string statePath, string dataPath, string share, string actorSid,
-        FolderKeys keys, byte[] remoteId, CancellationToken token)
+        FolderKeys keys, byte[] remoteId, CancellationToken token, bool approveRemote = true)
     {
         await using (var state = await StateStore.OpenAsync(statePath, cancellationToken: token))
             await state.RegisterFolderAsync(keys, share, new PeerSync.Core.Settings.FolderSettings
@@ -442,7 +652,8 @@ public sealed class InstalledFolderHostTests
         string indexPath = Path.Combine(dataPath, "folders", Convert.ToHexString(keys.FolderId()) + ".db");
         Directory.CreateDirectory(Path.GetDirectoryName(indexPath)!);
         await using var index = await FolderIndex.OpenAsync(indexPath, token);
-        await index.Devices.UpsertAsync([new DeviceRow(remoteId, Approval: DeviceApproval.Approved, Pinned: true)], token);
+        if (approveRemote)
+            await index.Devices.UpsertAsync([new DeviceRow(remoteId, Approval: DeviceApproval.Approved, Pinned: true)], token);
     }
 
     private static X509Certificate2 CreateDeviceCertificate()
@@ -534,3 +745,6 @@ public sealed class InstalledFolderHostTests
         public void Dispose() { }
     }
 }
+
+[CollectionDefinition("InstalledFolderHostNativeQuic", DisableParallelization = true)]
+public sealed class InstalledFolderHostNativeQuicGroup { }

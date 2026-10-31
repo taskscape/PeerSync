@@ -117,6 +117,63 @@ public sealed class DirectoryPublicationTests : IDisposable
     }
 
     [Fact]
+    public async Task ChildCommitWakesOnlyItsWaitingParentInTheSameTransaction()
+    {
+        await using var index = await Open();
+        var localChild = new LocalFileRow("topic/child", 1, 0, Now, 16, false, Now, null,
+            new Dictionary<ulong, ulong>(), new SignedRecord([2], new byte[64]), new byte[16]);
+        await index.LocalFiles.UpsertAsync([localChild], Token);
+        var childRow = index.LocalFiles.Find("topic/child")!;
+        var parent = await index.StageDirectoryPublicationAsync(Spec("topic"), Token);
+        var unrelated = await index.StageDirectoryPublicationAsync(Spec("other"), Token);
+        var child = await index.StageDirectoryPublicationAsync(Spec("topic/child") with
+            { ExpectedChildren = 0, ExpectedLocalSequence = childRow.LocalSequence }, Token);
+        for (int attempt = 0; attempt < 7; attempt++)
+        {
+            parent = await index.RetryDirectoryPublicationAsync(parent, Now, Token);
+            unrelated = await index.RetryDirectoryPublicationAsync(unrelated, Now, Token);
+        }
+        child = await index.BindDirectoryPublicationKeysAsync(child, index.ReadDirectoryCaptureEpoch(), Now, Token);
+        var draft = await index.BeginDirectoryCaptureAsync(child.Path, Root, child.NativeId, new byte[32], 0, new byte[16], Token);
+        draft = await index.AdvanceDirectoryCaptureAsync(draft, 0, null, null, new byte[32], 12, Token);
+        draft = await index.BindDirectoryCaptureEpochAsync(draft, child.KeysEpoch!.Value, Token);
+
+        using (var connection = Connect()) using (var trigger = connection.CreateCommand())
+        {
+            trigger.CommandText = "CREATE TRIGGER fail_parent_wake BEFORE UPDATE ON directory_publications WHEN OLD.path_key='TOPIC' BEGIN SELECT RAISE(ABORT,'wake rollback'); END;";
+            trigger.ExecuteNonQuery();
+        }
+        await Should.ThrowAsync<SqliteException>(() => index.CommitDirectoryPublicationAsync(child, draft, null, Now, Token));
+        index.ReadDirectoryPublication("topic/child").ShouldNotBeNull();
+        index.ReadDirectoryCapture("topic/child").ShouldNotBeNull();
+        index.ReadDirectoryPublication("topic")!.NextTicks.ShouldBe(Now + 600 * TimeSpan.TicksPerSecond);
+        using (var connection = Connect()) using (var trigger = connection.CreateCommand())
+        { trigger.CommandText = "DROP TRIGGER fail_parent_wake;"; trigger.ExecuteNonQuery(); }
+
+        (await index.CommitDirectoryPublicationAsync(child, draft, null, Now, Token)).Changed.ShouldBeFalse();
+        index.ReadDirectoryPublication("topic/child").ShouldBeNull();
+        var awakened = index.ReadDirectoryPublication("topic")!;
+        awakened.Attempts.ShouldBe(0); awakened.NextTicks.ShouldBeNull();
+        index.ReadDirectoryPublication("other")!.NextTicks.ShouldBe(Now + 600 * TimeSpan.TicksPerSecond);
+        index.ReadDueDirectoryPublications(Now).Single().Path.ShouldBe("topic");
+    }
+
+    [Fact]
+    public async Task DiscardingAnObsoleteChildWakesItsWaitingParent()
+    {
+        await using var index = await Open();
+        var parent = await index.StageDirectoryPublicationAsync(Spec("topic"), Token);
+        var child = await index.StageDirectoryPublicationAsync(Spec("topic/child"), Token);
+        parent = await index.RetryDirectoryPublicationAsync(parent, Now, Token);
+        index.ReadDueDirectoryPublications(Now).Single().Path.ShouldBe("topic/child");
+
+        await index.DiscardDirectoryPublicationAsync(child, Token);
+        index.ReadDirectoryPublication("topic")!.NextTicks.ShouldBeNull();
+        index.ReadDirectoryPublication("topic")!.Attempts.ShouldBe(0);
+        index.ReadDueDirectoryPublications(Now).Single().Path.ShouldBe("topic");
+    }
+
+    [Fact]
     public async Task ChildKeyWitnessCannotBindAcrossAnInputMutation()
     {
         await using var index = await Open(); var staged = await index.StageDirectoryPublicationAsync(Spec("topic"), Token);
@@ -194,6 +251,49 @@ public sealed class DirectoryPublicationTests : IDisposable
         queued = await reopened.StageDirectoryPublicationAsync(queued with { Version = Guid.NewGuid() }, Token);
         queued = await reopened.BindDirectoryPublicationKeysAsync(queued, draft.InputEpoch!.Value, Now, Token);
         (await reopened.BeginDirectoryRebaseAsync(queued, draft, graph, Token)).Cursor.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task OnlyUnprovenDirectRebaseGraphMembersMayAdvanceAWaitingReconstruction()
+    {
+        await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 3);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
+        var proof = await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeTrue();
+        index.HasUnprovenDirectoryParentMember("topic/other").ShouldBeFalse();
+        index.HasUnprovenDirectoryParentMember("topic/0001/grandchild").ShouldBeFalse();
+        proof = await index.AdvanceDirectoryRebaseAsync(queued, draft, proof,
+            index.ReadDirectoryGraphMemberPage(graph, limit: 1), Token);
+        index.HasUnprovenDirectoryParentMember("topic/0000").ShouldBeFalse();
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeTrue();
+        await index.PauseDirectoryPublicationAsync(queued, true, Now, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeFalse();
+        await index.DiscardDirectoryPublicationAsync(index.ReadDirectoryPublication("topic")!, Token);
+        index.HasUnprovenDirectoryParentMember("topic/0001").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task NewRebaseProofWakesOnlyDelayedExactDirectMembersOnce()
+    {
+        await using var index = await Open(); var (queued, draft, graph) = await RebaseInputs(index, 2);
+        byte[] fingerprint = new byte[32]; fingerprint[0] = 7;
+        await index.Needed.UpsertAsync([
+            new("topic/0001", new byte[32], 0) { Work = new(0, 0, Now, fingerprint) },
+            new("topic/other", new byte[32], 0) { Work = new(0, 0, Now, fingerprint) }
+        ], Token);
+        await index.RecordPullFailureAsync("topic/0001", Root, fingerprint, Now, Token);
+        await index.RecordPullFailureAsync("topic/other", Root, fingerprint, Now, Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(Now + 10 * TimeSpan.TicksPerSecond);
+
+        await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(Now);
+        index.ReadPullRetry("topic/other")!.NextTicks.ShouldBe(Now + 10 * TimeSpan.TicksPerSecond);
+
+        await index.RecordPullFailureAsync("topic/0001", Root, fingerprint, Now + 1, Token);
+        long retry = index.ReadPullRetry("topic/0001")!.NextTicks;
+        await index.BeginDirectoryRebaseAsync(queued, draft, graph, Token);
+        index.ReadPullRetry("topic/0001")!.NextTicks.ShouldBe(retry);
     }
 
     [Fact]

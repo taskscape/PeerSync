@@ -49,6 +49,12 @@ function Invoke-UserProbe([string]$Executable, [string[]]$Arguments, [string]$La
         $process.Dispose()
     }
 }
+function Invoke-ServiceStateProbe([string]$Executable, [string[]]$Arguments, [string]$Label) {
+    $log = Join-Path $out "$Label.log"
+    & $Executable @Arguments *> $log
+    if ($LASTEXITCODE -ne 0) { throw "$Label failed; inspect $log" }
+    Write-Host "$Label passed"
+}
 
 try {
     New-Item -ItemType Directory -Force "$workspace/DeviceCert","$workspace/ControlPipe","$workspace/output","$workspace/service-report" | Out-Null
@@ -70,6 +76,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to grant probe output access' }
     $certExe = Join-Path $workspace 'DeviceCert/DeviceCert.exe'
     $pipeExe = Join-Path $workspace 'ControlPipe/ControlPipe.exe'
+    Invoke-ServiceStateProbe $pipeExe @('service-state','missing',"PeerSyncControlMissing-$tag") 'control-missing-service-rejected'
     # Verify both protocols: TCP's dynamic allocation alone may choose a UDP-excluded port on Hyper-V hosts.
     $port = 0
     for($attempt=0; $attempt -lt 100; $attempt++) {
@@ -106,16 +113,21 @@ try {
     Invoke-Sc @('start','PeerSyncControlSpike')
     Wait-Service 'PeerSyncControlSpike' Running
     Wait-ReadyFile 'PeerSyncControlSpike' $pipeReady
+    $pipePid = (Get-Content -LiteralPath $pipeReady -Raw | ConvertFrom-Json).processId
+    Invoke-ServiceStateProbe $pipeExe @('service-state','running','PeerSyncControlSpike',$pipeOwner,"$pipePid") 'control-running-identity-verified'
     Invoke-UserProbe $pipeExe @('client',$pipe,$pipeOwner) 'unauthorized-standard-user' 1
     Invoke-Sc @('stop','PeerSyncControlSpike')
     Wait-Service 'PeerSyncControlSpike' Stopped
+    Invoke-ServiceStateProbe $pipeExe @('service-state','stopped','PeerSyncControlSpike') 'control-stopped-service-rejected'
     Remove-Item -LiteralPath $pipeReady
     Invoke-Sc @('config','PeerSyncControlSpike','binPath=',"`"$pipeExe`" server $pipe $userSid `"$pipeReady`"")
     Invoke-Sc @('start','PeerSyncControlSpike')
     Wait-Service 'PeerSyncControlSpike' Running
     Wait-ReadyFile 'PeerSyncControlSpike' $pipeReady
+    $pipePid = (Get-Content -LiteralPath $pipeReady -Raw | ConvertFrom-Json).processId
+    Invoke-ServiceStateProbe $pipeExe @('service-state','running','PeerSyncControlSpike',$pipeOwner,"$pipePid") 'control-restarted-identity-verified'
     Invoke-UserProbe $pipeExe @('client',$pipe,$pipeOwner) 'authorized-standard-user'
-    @{status='passed';utc=[DateTime]::UtcNow.ToString('O');virtualAccount=$true;privateKeyDenied=$true;unauthorizedPipeDenied=$true;authorizedPipeCallerSidVerified=$true} | ConvertTo-Json | Set-Content (Join-Path $out 'summary.json')
+    @{status='passed';utc=[DateTime]::UtcNow.ToString('O');virtualAccount=$true;privateKeyDenied=$true;missingServiceRejected=$true;runningIdentityVerified=$true;stoppedServiceRejected=$true;restartIdentityVerified=$true;unauthorizedPipeDenied=$true;authorizedPipeCallerSidVerified=$true} | ConvertTo-Json | Set-Content (Join-Path $out 'summary.json')
 }
 finally {
     foreach ($name in $created) {

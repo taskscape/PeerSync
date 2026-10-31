@@ -23,11 +23,60 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (args.Length is not (3 or 4 or 5) || !int.TryParse(args[1], out int servicePort) || servicePort is < 1 or > 65535 ||
-            args.Length >= 4 && (!int.TryParse(args[3], out int requestedPort) || requestedPort is < 20000 or > 45000) ||
-            args.Length == 5 && args[4] != "--render-ui")
+        if (args is ["--client-archive", var clientExecutable])
         {
-            Console.Error.WriteLine("Usage: PeerSync.InstalledProbe <registered-folder-path> <service-port> <existing-file-name> [peer-port] [--render-ui]");
+            try
+            {
+                object result = await InstalledClientArchiveProbe.RunAsync(clientExecutable).ConfigureAwait(false);
+                Console.WriteLine(JsonSerializer.Serialize(new { target = "installed Archive client", status = "passed", result }));
+                return 0;
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine(JsonSerializer.Serialize(new { target = "installed Archive client", status = "failed",
+                    error = error.GetType().Name, hResult = error.HResult }));
+                return 1;
+            }
+        }
+        if (args is ["--archive-ui"])
+        {
+            try
+            {
+                await InstalledArchiveUiProbe.RunAsync().ConfigureAwait(false);
+                Console.WriteLine(JsonSerializer.Serialize(new { target = "installed Archive UI", status = "passed",
+                    originalRestored = true, copyRestored = true, pixelRender = true }));
+                return 0;
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine(JsonSerializer.Serialize(new { target = "installed Archive UI", status = "failed",
+                    error = error.GetType().Name, hResult = error.HResult }));
+                return 1;
+            }
+        }
+        bool renderUi = false;
+        bool tcp = false;
+        int requestedPort = 0;
+        int servicePort = 0;
+        bool valid = args.Length is >= 3 and <= 6 &&
+            int.TryParse(args[1], out servicePort) && servicePort is >= 1 and <= 65535;
+        if (valid)
+        {
+            for (int i = 3; i < args.Length; i++)
+            {
+                if (i == 3 && int.TryParse(args[i], out int port) && port is >= 20000 and <= 45000)
+                    requestedPort = port;
+                else if (args[i] == "--render-ui" && !renderUi)
+                    renderUi = true;
+                else if (args[i] == "--tcp" && !tcp)
+                    tcp = true;
+                else
+                    valid = false;
+            }
+        }
+        if (!valid)
+        {
+            Console.Error.WriteLine("Usage: PeerSync.InstalledProbe <registered-folder-path> <service-port> <existing-file-name> [peer-port] [--tcp] [--render-ui] | --archive-ui | --client-archive <app-exe>");
             return 2;
         }
 
@@ -50,8 +99,7 @@ internal static class Program
             CancellationToken token = timeout.Token;
             using var installed = ControlStatusClient.CreateForInstalledService();
             var baseline = await installed.GetStatusAsync(token).ConfigureAwait(false);
-            if (baseline.ProductionSyncAvailable || baseline.Clocks.Count != 0)
-                throw new InvalidOperationException("The installed service must have no active peer during this probe.");
+            bool quietBaseline = !baseline.ProductionSyncAvailable && baseline.Clocks.Count == 0;
             var registered = (await installed.ListFoldersAsync(token).ConfigureAwait(false)).Folders
                 .SingleOrDefault(row => !row.Paused && string.Equals(
                     Path.TrimEndingDirectorySeparator(Path.GetFullPath(row.Path)), folder,
@@ -84,23 +132,40 @@ internal static class Program
                         actorSid, cancellationToken: token).ConfigureAwait(false);
                 var peerStatus = new ControlStatusRuntime();
                 var clock = new AdjustableClock(TimeSpan.FromMinutes(11));
-                int peerPort = args.Length >= 4 ? int.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture)
-                    : ReservePeerPort();
-                await using var ui = args.Length == 5 ? await InstalledUiProbe.StartAsync(token).ConfigureAwait(false) : null;
+                int peerPort = requestedPort != 0 ? requestedPort : ReservePeerPort();
+                string observedTransport = "";
+                await using var ui = renderUi ? await InstalledUiProbe.StartAsync(token).ConfigureAwait(false) : null;
                 await using (var peer = await InstalledFolderHost.StartForTestWithNetworkAsync(statePath, peerId,
                     actorSid, certificate, new DeviceSettings { ListenPort = peerPort, LanDiscovery = false },
                     peerStatus, timeProvider: clock, cancellationToken: token).ConfigureAwait(false))
                 {
                     stage = "skew";
-                    await peer.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, servicePort), token)
-                        .ConfigureAwait(false);
+                    if (tcp)
+                    {
+                        try
+                        {
+                            await peer.ConnectToPeerOverTcpForTestAsync(new IPEndPoint(IPAddress.Loopback, servicePort), token)
+                                .ConfigureAwait(false);
+                        }
+                        catch (IOException)
+                        {
+                            // Clock admission closes the TCP session before the dial call can
+                            // return. The installed status check below must prove this was skew.
+                        }
+                    }
+                    else
+                        await peer.ConnectToPeerForTestAsync(new IPEndPoint(IPAddress.Loopback, servicePort), token)
+                            .ConfigureAwait(false);
                     ControlStatusSnapshot skewed = await WaitForStatusAsync(installed, snapshot =>
-                        snapshot.InstanceId == baseline.InstanceId && !snapshot.ProductionSyncAvailable &&
-                        FindPeer(snapshot, keys.FolderId(), peerId)?.Clock.State == PeerClockState.Skewed,
+                        snapshot.InstanceId == baseline.InstanceId &&
+                        (!quietBaseline || !snapshot.ProductionSyncAvailable) &&
+                        MatchingPeers(snapshot, keys.FolderId(), peerId)
+                            .Any(session => session.Clock.State == PeerClockState.Skewed),
                         token).ConfigureAwait(false);
                     if (File.Exists(target)) throw new InvalidDataException("Index exchange occurred during clock rejection.");
-                    if (FindPeer(skewed, keys.FolderId(), peerId)?.Clock.OffsetTicks is not long offset ||
-                        Math.Abs((double)offset) < TimeSpan.FromMinutes(10).Ticks)
+                    long? offset = MatchingPeers(skewed, keys.FolderId(), peerId)
+                        .FirstOrDefault(session => session.Clock.State == PeerClockState.Skewed)?.Clock.OffsetTicks;
+                    if (offset is null || Math.Abs((double)offset.Value) < TimeSpan.FromMinutes(10).Ticks)
                         throw new InvalidDataException("The fixed client did not receive the expected clock difference.");
                     if (ui is not null)
                     {
@@ -110,11 +175,17 @@ internal static class Program
 
                     stage = "recovery";
                     clock.SetOffset(TimeSpan.Zero);
+                    if (tcp)
+                        await peer.ConnectToPeerOverTcpForTestAsync(new IPEndPoint(IPAddress.Loopback, servicePort), token)
+                            .ConfigureAwait(false);
                     await WaitForStatusAsync(installed, snapshot =>
                         snapshot.InstanceId == baseline.InstanceId && snapshot.ProductionSyncAvailable &&
-                        FindPeer(snapshot, keys.FolderId(), peerId) is { Clock.State: PeerClockState.Accepted,
-                            IsConnected: true }, token).ConfigureAwait(false);
+                        MatchingPeers(snapshot, keys.FolderId(), peerId)
+                            .Any(session => session is { Clock.State: PeerClockState.Accepted,
+                                IsConnected: true }), token).ConfigureAwait(false);
                     await WaitForFileAsync(target, expectedHash, token).ConfigureAwait(false);
+                    observedTransport = await WaitForTransportAsync(installed, registered.FolderId,
+                        peerId, tcp ? "Tcp" : "Quic", token).ConfigureAwait(false);
                     if (!peerStatus.ReadStatus().ProductionSyncAvailable)
                         throw new InvalidDataException("The test peer did not admit the recovered session.");
                     if (ui is not null)
@@ -126,8 +197,9 @@ internal static class Program
 
                 stage = "disconnect";
                 await WaitForStatusAsync(installed, snapshot =>
-                    snapshot.InstanceId == baseline.InstanceId && !snapshot.ProductionSyncAvailable &&
-                    FindPeer(snapshot, keys.FolderId(), peerId) is not { IsConnected: true },
+                    snapshot.InstanceId == baseline.InstanceId &&
+                    (!quietBaseline || !snapshot.ProductionSyncAvailable) &&
+                    MatchingPeers(snapshot, keys.FolderId(), peerId).All(session => !session.IsConnected),
                     token).ConfigureAwait(false);
                 if (ui is not null)
                 {
@@ -138,7 +210,8 @@ internal static class Program
                 {
                     status = "passed", scmInstanceVerified = true, authenticatedClockRejected = true,
                     recoveredTransferVerified = true, disconnectObserved = true, renderedUiVerified = ui is not null,
-                    bytes = sourceInfo.Length, elapsedSeconds = watch.Elapsed.TotalSeconds,
+                    transport = observedTransport, quietBaseline, bytes = sourceInfo.Length,
+                    elapsedSeconds = watch.Elapsed.TotalSeconds,
                 }));
                 return 0;
             }
@@ -159,9 +232,10 @@ internal static class Program
         }
     }
 
-    private static PeerSessionClockStatus? FindPeer(ControlStatusSnapshot snapshot, byte[] folderId, byte[] deviceId)
-        => snapshot.Clocks.FirstOrDefault(row => row.FolderId.AsSpan().SequenceEqual(folderId) &&
-            row.Session.RemoteDeviceId.AsSpan().SequenceEqual(deviceId))?.Session;
+    private static IEnumerable<PeerSessionClockStatus> MatchingPeers(ControlStatusSnapshot snapshot,
+        byte[] folderId, byte[] deviceId)
+        => snapshot.Clocks.Where(row => row.FolderId.AsSpan().SequenceEqual(folderId) &&
+            row.Session.RemoteDeviceId.AsSpan().SequenceEqual(deviceId)).Select(row => row.Session);
 
     private static async Task<ControlStatusSnapshot> WaitForStatusAsync(ControlStatusClient client,
         Func<ControlStatusSnapshot, bool> condition, CancellationToken token)
@@ -184,6 +258,22 @@ internal static class Program
                     SHA256.HashData(await File.ReadAllBytesAsync(path, token).ConfigureAwait(false)), expectedHash)) return;
             }
             catch (IOException) { }
+            await Task.Delay(100, token).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<string> WaitForTransportAsync(ControlStatusClient client, string folderId,
+        byte[] deviceId, string expected, CancellationToken token)
+    {
+        string deviceHex = Convert.ToHexString(deviceId);
+        while (true)
+        {
+            var peers = await client.ListPeersAsync(folderId, token).ConfigureAwait(false);
+            string? actual = peers.Peers.FirstOrDefault(peer =>
+                string.Equals(peer.DeviceId, deviceHex, StringComparison.OrdinalIgnoreCase))?.Transport;
+            if (actual == expected) return actual;
+            if (!string.IsNullOrEmpty(actual) && actual != expected)
+                throw new InvalidDataException("The installed service selected a different transport.");
             await Task.Delay(100, token).ConfigureAwait(false);
         }
     }

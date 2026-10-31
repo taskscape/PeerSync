@@ -7,7 +7,8 @@ Status: implemented and deployed on 2026-10-31. The dedicated West Europe
 and has a 0.1 GB/day ingestion cap. The local production PC has been upgraded
 to version 1.0.1.0, the second PC (`R5-7600X`) to version 1.0.1.0, and the
 rendezvous server at `sync.taskscape.com` to version 1.0.43.0 from its
-separate `p5-hardening` code line. All three are sending telemetry to Azure.
+`p5-hardening` code line, which has since been merged into `main`. All three
+are sending telemetry to Azure.
 
 ## Purpose
 
@@ -218,10 +219,11 @@ built from its installed `b7e4b67` revision, preserving its relay behavior.
   `%ProgramData%\PeerSync\backups\diagnostic-Rendezvous-20261031T172358Z`.
   Azure contains `rendezvous.started` at 17:24:00 UTC, a 17:25:00 UTC
   heartbeat with zero drops, and folder announcements including fingerprints
-  also seen on the local client. The server-side source changes live in the
-  `codex/server-azure-diagnostics` worktree at
-  `C:\Projects\PeerSync-server-diagnostics` (commit `9d52190`); its release
-  build had zero warnings/errors and all 26 rendezvous tests passed.
+  also seen on the local client. The server-side source changes were developed
+  in the `codex/server-azure-diagnostics` worktree at
+  `C:\Projects\PeerSync-server-diagnostics` (commit `9d52190`) and have since
+  been merged into `main`; its original release build had zero warnings/errors
+  and all 26 rendezvous tests passed.
 - The second PC, `R5-7600X` (`100.118.160.63`), was upgraded from the same
   `2f99521` source revision as the local PC to version 1.0.1.0. Its service is
   running and its desktop app was reopened in the logged-in user's session.

@@ -34,8 +34,14 @@ public sealed partial class FolderIndex
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT source_id,source_path,record_body,signature,node_hash,node_length,source_device,seen_generation,cursor,complete,proof_input_hash,proof_child_epoch "
                 + "FROM directory_parent_roots WHERE path_key=$path AND source_id=$source;";
-            command.Parameters.AddWithValue("$path", proof.PathKey); command.Parameters.AddWithValue("$source", source.SourceId); DirectoryParentRoot current;
-            using (var reader = command.ExecuteReader()) current = reader.Read() ? ReadParentRoot(reader, actual) : throw new InvalidOperationException("Parent root disappeared.");
+            command.Parameters.AddWithValue("$path", proof.PathKey); command.Parameters.AddWithValue("$source", source.SourceId); DirectoryParentRoot current; bool newWitness;
+            using (var reader = command.ExecuteReader())
+            {
+                if (!reader.Read()) throw new InvalidOperationException("Parent root disappeared.");
+                newWitness = reader.IsDBNull(10) || !reader.GetFieldValue<byte[]>(10).AsSpan().SequenceEqual(proof.InputHash)
+                    || reader.GetInt64(11) != proof.ChildEpoch;
+                current = ReadParentRoot(reader, actual);
+            }
             if (current.Complete || item.Complete || item.PathKey != proof.PathKey || current.Generation != proof.Generation || current.Generation != item.Generation || current.Cursor != item.Cursor
                 || !current.Source.Hash.AsSpan().SequenceEqual(source.Hash) || current.Source.Length != source.Length || current.Source.Path != source.Path
                 || !current.Source.Record.Body.SequenceEqual(source.Record.Body) || !current.Source.Record.Signature.SequenceEqual(source.Record.Signature))
@@ -59,6 +65,8 @@ public sealed partial class FolderIndex
             command.CommandText = "UPDATE directory_parent_roots SET cursor=$cursor,complete=$complete,proof_input_hash=$input,proof_child_epoch=$child WHERE path_key=$path AND source_id=$source;";
             command.Parameters.AddWithValue("$cursor", (object?)cursor ?? DBNull.Value); command.Parameters.AddWithValue("$complete", complete ? 1 : 0);
             command.Parameters.AddWithValue("$input", proof.InputHash); command.Parameters.AddWithValue("$child", proof.ChildEpoch); command.ExecuteNonQuery();
+            if (newWitness && !complete)
+                WakeGraphMemberPullRetries(connection, transaction, proof.RootId, source.SourceId, proof.PathKey, cursor);
             return current with { Cursor = cursor, Complete = complete };
         }, cancellationToken);
     }

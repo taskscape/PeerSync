@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -90,10 +91,25 @@ internal static class RendezvousHost
             "PeerSync.Rendezvous", "logs");
         builder.Services.AddSingleton(new DiagnosticJournal(logs, "rendezvous", options.DebugLogging, exceptions: new ExceptionLog(logs)));
         var ipRateKeys = new EphemeralIpRateKey();
+        var rejectionLogGate = new RejectionLogGate();
         builder.Services.AddSingleton(ipRateKeys);
         builder.Services.AddRateLimiter(limits =>
         {
             limits.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            limits.OnRejected = (rejection, _) =>
+            {
+                HttpContext context = rejection.HttpContext;
+                RendezvousMetrics.RequestsRateLimited.Add(1);
+                if (rejectionLogGate.TryEnter())
+                    context.RequestServices.GetRequiredService<DiagnosticJournal>().TryWrite(
+                        new("rendezvous.http_rate_limited", "http")
+                        {
+                            Level = DiagnosticLevel.Warning, ErrorCode = "http-429", Transport = Transport(context),
+                            RemoteAddress = context.Connection.RemoteIpAddress,
+                            RemotePort = context.Connection.RemotePort,
+                        });
+                return ValueTask.CompletedTask;
+            };
             limits.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 RateLimitPartition.GetTokenBucketLimiter(
                 ipRateKeys.For(context.Connection.RemoteIpAddress), _ => new TokenBucketRateLimiterOptions
@@ -119,6 +135,10 @@ internal static class RendezvousHost
         });
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
+            // Long-lived tracker and relay streams can be silent between peer
+            // events. Ping idle HTTP/2 connections before typical NAT expiry.
+            kestrel.Limits.Http2.KeepAlivePingDelay = TimeSpan.FromSeconds(60);
+            kestrel.Limits.Http2.KeepAlivePingTimeout = TimeSpan.FromSeconds(30);
             if (testListenAddress is null) kestrel.ListenAnyIP(options.Port, ConfigureListener);
             else kestrel.Listen(testListenAddress, options.Port, ConfigureListener);
         });
@@ -164,8 +184,11 @@ internal static class RendezvousHost
         });
         app.MapGet("/probe", (HttpContext context, DiagnosticJournal journal) =>
         {
+            Guid? probeSession = ProbeCorrelation.TryParse(
+                context.Request.Headers[ProbeCorrelation.HeaderName].ToString(), out Guid parsed)
+                ? parsed : null;
             journal.TryWrite(new("rendezvous.probed", "probe")
-            { Level = DiagnosticLevel.Debug, Transport = Transport(context),
+            { SessionId = probeSession, Level = DiagnosticLevel.Debug, Transport = Transport(context),
                 RemoteAddress = context.Connection.RemoteIpAddress, RemotePort = context.Connection.RemotePort });
             RendezvousMetrics.Probes.Add(1);
             return Results.Json(new
@@ -173,6 +196,7 @@ internal static class RendezvousHost
                 observedAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 observedPort = context.Connection.RemotePort,
                 httpVersion = context.Request.Protocol,
+                probeSessionId = probeSession is Guid session ? ProbeCorrelation.Format(session) : null,
             });
         });
         app.Lifetime.ApplicationStarted.Register(() =>
@@ -195,4 +219,17 @@ internal static class RendezvousHost
             "HTTP/2" => DiagnosticTransport.Http2,
             _ => DiagnosticTransport.Tcp,
         };
+
+    private sealed class RejectionLogGate
+    {
+        private long lastTicks = Stopwatch.GetTimestamp() - 5 * Stopwatch.Frequency;
+
+        internal bool TryEnter()
+        {
+            long now = Stopwatch.GetTimestamp();
+            long previous = Volatile.Read(ref lastTicks);
+            return now - previous >= 5 * Stopwatch.Frequency
+                && Interlocked.CompareExchange(ref lastTicks, now, previous) == previous;
+        }
+    }
 }

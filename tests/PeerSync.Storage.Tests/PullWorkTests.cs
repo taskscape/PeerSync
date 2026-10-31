@@ -26,11 +26,16 @@ public sealed class PullWorkTests : IDisposable
         await using var index = await PrepareAsync();
         await index.Needed.UpsertAsync([
             Row("z/child", 0), Row("z", 0), Row("a", size: 30, mtime: 20), Row("b", size: 10, mtime: 30), Row("c", size: 20, mtime: 10),
-            Row("delete-file", 2), Row("delete-dir", 3), Row("delete-dir/child", 3), new("legacy", Peer, 0)
+            Row("delete-file", 2) with { SourceDevice = Hash(9) }, Row("delete-dir", 3) with { SourceDevice = Hash(9) },
+            Row("delete-dir/child", 3) with { SourceDevice = Hash(9) }, new("legacy", Peer, 0)
         ], Token);
         string[] expected = ["Z", "Z/CHILD", first, second, third, "DELETE-FILE", "DELETE-DIR/CHILD", "DELETE-DIR"];
         index.ReadDuePullWork(Root, Now, priority).Select(r => r.PathKey).ShouldBe(expected);
         index.ReadDuePullWork(Root, Now, priority, 3).Select(r => r.PathKey).ShouldBe(expected.Take(3));
+        await index.LocalFiles.UpsertAsync([new LocalFileRow("z", 1, 0, Now, 0, false, Now, null,
+            new Dictionary<ulong, ulong>(), null, new byte[16])], Token);
+        index.ReadScheduledPullWork(Root, Hash(9), Now, priority).Select(r => r.PathKey).ShouldBe(expected);
+        index.ReadScheduledPullWork(Root, Hash(9), Now, priority, 3).Select(r => r.PathKey).ShouldBe(expected.Take(3));
         index.Needed.Find("legacy")!.Work.ShouldBeNull();
     }
 
@@ -246,6 +251,38 @@ public sealed class PullWorkTests : IDisposable
         Should.Throw<ArgumentException>(()=>index.ReadScheduledPullWork(Root,new byte[1],Now));
         await index.ApplyRemoteIndexAsync(Peer,0,1,[],_=>null,Token);
         index.ReadNextScheduledPullTicks(Root,own,Now).ShouldBe(Now);
+    }
+
+    [Fact]
+    public async Task ScheduledChildrenWaitForInstalledParentWithoutHidingRootWorkOrDeletes()
+    {
+        await using var index = await PrepareAsync(); byte[] own = Hash(9);
+        await index.Needed.UpsertAsync(Enumerable.Range(0, 1000)
+            .Select(i => Row($"missing/{i:D4}")).Append(Row("folder/sub", 0))
+            .Append(Row("folder/child")).Append(Row("root-dir", 0))
+            .Append(Row("root-file")).Append(Row("gone/child", 2)).ToArray(), Token);
+
+        index.ReadScheduledPullWork(Root, own, Now, limit: 2).Select(row => row.PathKey)
+            .ShouldBe(["ROOT-DIR", "ROOT-FILE"]);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBe(Now);
+        await index.Needed.DeleteAsync(["root-dir"], Token);
+        await index.Needed.DeleteAsync(["root-file"], Token);
+        await index.Needed.DeleteAsync(["gone/child"], Token);
+        index.ReadScheduledPullWork(Root, own, Now).ShouldBeEmpty();
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+
+        var parent = new LocalFileRow("folder", 1, 0, Now, 0, false, Now, null,
+            new Dictionary<ulong, ulong>(), null, null);
+        await index.LocalFiles.UpsertAsync([parent], Token);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+        await index.LocalFiles.UpsertAsync([parent with { FileId = new byte[16], Flags = LocalFileState.NeedsRescan }], Token);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
+        await index.LocalFiles.UpsertAsync([parent with { FileId = new byte[16] }], Token);
+        index.ReadScheduledPullWork(Root, own, Now, limit: 2).Select(row => row.PathKey)
+            .ShouldBe(["FOLDER/SUB", "FOLDER/CHILD"]);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBe(Now);
+        await index.LocalFiles.UpsertAsync([parent with { FileId = new byte[16], Deleted = true }], Token);
+        index.ReadNextScheduledPullTicks(Root, own, Now).ShouldBeNull();
     }
 
     private async Task<FolderIndex> PrepareAsync()

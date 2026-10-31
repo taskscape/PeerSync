@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Security.Authentication;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using PeerSync.Core.Diagnostics;
@@ -17,7 +19,12 @@ using Envelope = PeerSync.Core.Sync.SignedRecord;
 
 namespace PeerSync.Engine.Sync;
 
-public sealed record PullPassResult(int Visited, int Applied, int Deferred, int Failed, int Recovered, int Scans, bool MoreWork, long? NextAttemptTicks);
+public sealed record PullPassResult(int Visited, int Applied, int Deferred, int Failed, int Recovered, int Scans, bool MoreWork, long? NextAttemptTicks)
+{
+    public int ScansCompleted { get; init; }
+    public int ScannedEntries { get; init; }
+    public int ScanProblems { get; init; }
+}
 
 /// <summary>One host-owned coordinator per folder. Caller owns index, keys and
 /// transport. Cancel and await hosted/direct work before disposing this object.
@@ -25,6 +32,8 @@ public sealed record PullPassResult(int Visited, int Applied, int Deferred, int 
 /// ReceiveIndexAsync/AnnounceIndexRangeAsync so pending work wakes promptly.</summary>
 public sealed class Puller : IDisposable
 {
+    private const int PublicationScanBatchSize = 10_000;
+    private const int PublicationScanMaximumSeconds = 300;
     private static readonly ConditionalWeakTable<FolderIndex, SemaphoreSlim> PassGates = new();
     private readonly FolderIndex index;
     private readonly string rootPath;
@@ -32,6 +41,7 @@ public sealed class Puller : IDisposable
     private readonly FolderSettings settings;
     private readonly NeededSet needed;
     private readonly Scanner scanner;
+    private readonly ConcurrentDictionary<string, byte> recentRemoteWrites = new(StringComparer.Ordinal);
     private readonly FileApplier files;
     private readonly DirectoryApplier directories;
     private readonly StagingCleaner staging;
@@ -47,11 +57,14 @@ public sealed class Puller : IDisposable
     private readonly Channel<PullPassResult> outcomes = Channel.CreateBounded<PullPassResult>(new BoundedChannelOptions(128)
     { SingleReader = false, SingleWriter = false, FullMode = BoundedChannelFullMode.DropOldest, AllowSynchronousContinuations = false });
     public ChannelReader<PullPassResult> Outcomes => outcomes.Reader;
+    internal Scanner Scanner => scanner;
     private byte[]? rootId;
     private bool initialized;
     private bool neededRepairPending = true;
     internal Action<string>? Checkpoint { get; set; }
     private long nextScanTicks, scanRetryTicks, nextStagingTicks;
+    private long publicationScanSinceTicks;
+    private int publicationScanPending;
     private int scanRequested = 1, scanAttempt, stagingRetryAttempt, running, disposed;
 
     public Puller(string rootPath, FolderIndex index, FolderKeys keys, byte[] ownDevice,
@@ -67,8 +80,9 @@ public sealed class Puller : IDisposable
         ArgumentNullException.ThrowIfNull(index); ArgumentNullException.ThrowIfNull(fetch);
         this.index = index; this.rootPath = rootPath; this.fetch = fetch; own = ownDevice?.ToArray() ?? throw new ArgumentNullException(nameof(ownDevice));
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson()); clock = timeProvider ?? TimeProvider.System; this.journal = journal;
-        needed = new(index, keys, own, this.settings, journal: journal);
-        scanner = new(rootPath, index, keys, own, ignore: ignore, timeProvider: clock, settings: this.settings, journal: journal)
+        IgnoreMatcher effectiveIgnore = ignore ?? new(this.settings.IgnoreRules);
+        needed = new(index, keys, own, this.settings, ignore: effectiveIgnore, journal: journal);
+        scanner = new(rootPath, index, keys, own, ignore: effectiveIgnore, timeProvider: clock, settings: this.settings, journal: journal)
             { StageDirectorySnapshots = directorySnapshots };
         if (directorySnapshots) publications = new(rootPath, index, keys, own, this.settings, clock, journal);
         metadata = new(rootPath, index, keys, own, clock, fetch, journal);
@@ -82,6 +96,25 @@ public sealed class Puller : IDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this); wake.Writer.TryWrite(true);
     }
     public void RequestScan() { Volatile.Write(ref scanRequested, 1); NotifyWorkAvailable(); }
+    internal void RequestWatcherScan(WatchBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.FullScan || batch.RelativePaths.Count == 0 || Volatile.Read(ref publicationScanPending) == 0)
+        { RequestScan(); return; }
+        foreach (string path in batch.RelativePaths)
+        {
+            string key;
+            try { key = PathRules.Key(path); }
+            catch (ArgumentException) { RequestScan(); return; }
+            if (!recentRemoteWrites.ContainsKey(key)) { RequestScan(); return; }
+        }
+        // The current pull batch owns these native writes. A same-path local
+        // edit is still caught by guarded application and the five-minute
+        // publication scan; unrelated paths request a scan immediately.
+        journal?.TryWrite(new("puller.own_write_watch_coalesced", "watch")
+            { Level = DiagnosticLevel.Debug, ItemsDeferred = batch.RelativePaths.Count });
+        NotifyWorkAvailable();
+    }
 
     internal void RecordBlockRoute(string eventName, int attempts, int bytes, Guid? sessionId = null, Exception? error = null)
         => journal?.TryWrite(new(eventName, "block-transfer")
@@ -169,19 +202,50 @@ public sealed class Puller : IDisposable
         finally { gate.Release(); }
     }
 
+    // Installed hosts expose their scanner to status and watcher registration
+    // before the first transport pass. Drain native intents before exposure;
+    // the first pass repeats the check in case new work arrived meanwhile.
+    internal async Task RecoverBeforeExternalScanAsync(CancellationToken token = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        var gate = PassGates.GetValue(index, _ => new(1, 1));
+        await gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            int recovered = await RecoverPendingAsync(token).ConfigureAwait(false);
+            journal?.TryWrite(new("puller.startup_recovery_complete", "pull")
+                { Level = DiagnosticLevel.Debug, ItemsChanged = recovered });
+        }
+        catch (Exception error)
+        {
+            journal?.TryWrite(new("puller.startup_recovery_failed", "pull")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                    NativeError = NativeError(error) });
+            throw;
+        }
+        finally { gate.Release(); }
+    }
+
+    private async Task<int> RecoverPendingAsync(CancellationToken token)
+    {
+        if (index.Meta.Find("_root-identity")?.Value is { } boundRoot)
+        {
+            int recovered = await staging.RecoverAsync(boundRoot, token).ConfigureAwait(false);
+            return recovered + await files.RecoverAsync(token).ConfigureAwait(false);
+        }
+        if (index.ReadApplyIntents().Any() || index.HasStagingRetirements())
+            throw new InvalidDataException("Unbound index has recovery state.");
+        return 0;
+    }
+
     private async Task<PullPassResult> RunPassCoreAsync(CancellationToken token)
     {
-        int recovered = 0, scans = 0, applied = 0, deferred = 0, failed = 0;
+        int recovered = 0, scans = 0, scansCompleted = 0, scanEntries = 0, scanProblems = 0, applied = 0, deferred = 0, failed = 0;
         bool mustScan = false;
         if (!initialized)
         {
-            if (index.Meta.Find("_root-identity")?.Value is { } boundRoot)
-            {
-                recovered += await staging.RecoverAsync(boundRoot, token).ConfigureAwait(false);
-                recovered += await files.RecoverAsync(token).ConfigureAwait(false);
-            }
-            else if (index.ReadApplyIntents().Any() || index.HasStagingRetirements()) throw new InvalidDataException("Unbound index has recovery state.");
-            await ScanAsync(rebuild: true, token).ConfigureAwait(false); scans++;
+            recovered += await RecoverPendingAsync(token).ConfigureAwait(false);
+            await RecordScanAsync(rebuild: true).ConfigureAwait(false);
             rootId = index.Meta.Find("_root-identity")?.Value?.ToArray();
             if (rootId is not { Length: 24 }) throw new InvalidDataException("Startup scan did not bind the index.");
             initialized = true;
@@ -199,10 +263,19 @@ public sealed class Puller : IDisposable
             }
             long now = Now;
             if ((Volatile.Read(ref scanRequested) != 0 || now >= nextScanTicks) && now >= scanRetryTicks)
-            { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+            { await RecordScanAsync(rebuild: false).ConfigureAwait(false); }
         }
         if (await files.PrepareCaseCopiesAsync(fetch, token).ConfigureAwait(false))
-        { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        { await RecordScanAsync(rebuild: false).ConfigureAwait(false); }
+        if (publicationScanPending != 0 && !neededRepairPending)
+        {
+            // New remote work can replace the live backlog between passes.
+            // Publish the installed files before a newly eligible directory
+            // transition or deletion enters the native mutation path.
+            var upcoming = index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority, 1000);
+            if (upcoming.Count == 0 || upcoming.Any(row => row.Work!.Stage != 1))
+            { await RecordScanAsync(rebuild: false).ConfigureAwait(false); }
+        }
         if (publications is not null)
         {
             var published = await publications.RunAsync(token: token).ConfigureAwait(false);
@@ -233,56 +306,124 @@ public sealed class Puller : IDisposable
                 { SessionId = Guid.NewGuid(), Level = DiagnosticLevel.Debug, ItemsChanged = retired });
             await index.CompactCompletedCaseSourcesAsync(rootId!, Now, limit: 64, cancellationToken: token).ConfigureAwait(false);
         }
-        IReadOnlyList<NeededRow> work = neededRepairPending ? [] : index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority);
-        foreach (var row in work)
+        int visited = 0;
+        bool installedDirectory;
+        bool workAllowed = !neededRepairPending;
+        bool deleting = false;
+        do
         {
-            token.ThrowIfCancellationRequested();
-            try
+            // A newly installed parent makes its queued children eligible.
+            // Refill only after such a change, within the normal 1,000-work
+            // pass budget, so a file-first index does not create retry churn.
+            IReadOnlyList<NeededRow> work = !workAllowed ? [] :
+                index.ReadScheduledPullWork(rootId!, own, Now, settings.Priority, 1000 - visited);
+            if (work.Count == 0) break;
+            installedDirectory = false;
+            foreach (var row in work)
             {
-                FileApplyOutcome outcome; bool requiresScan;
-                bool opensDirectory = row.Work!.Stage is 0 or 2 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
-                if (row.Work!.Stage is 0 or 3)
+                // A parent can unlock more live children than were visible at
+                // the start of the pass. Finish live work before tombstones,
+                // preserving the stage order across refreshed batches.
+                if ((row.Work!.Stage >= 2) != deleting) continue;
+                visited++;
+                token.ThrowIfCancellationRequested();
+                try
                 {
-                    var result = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
-                    outcome = result.Outcome; requiresScan = result.RequiresScan;
-                    if (outcome == FileApplyOutcome.Deferred && !requiresScan)
+                    FileApplyOutcome outcome; bool requiresScan;
+                    bool opensDirectory = row.Work!.Stage is 0 or 2 && index.LocalFiles.Find(row.PathKey) is { Type: 0, Deleted: false, Record: not null };
+                    if (row.Work!.Stage is 0 or 3)
                     {
-                        var transition = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
-                        outcome = transition.Outcome; requiresScan = transition.RequiresScan;
+                        var result = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
+                        outcome = result.Outcome; requiresScan = result.RequiresScan;
+                        if (outcome == FileApplyOutcome.Deferred && !requiresScan)
+                        {
+                            var transition = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
+                            outcome = transition.Outcome; requiresScan = transition.RequiresScan;
+                        }
+                    }
+                    else
+                    {
+                        var result = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
+                        outcome = result.Outcome; requiresScan = result.RequiresScan;
+                        if (outcome == FileApplyOutcome.Deferred && !requiresScan)
+                        {
+                            var transition = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
+                            outcome = transition.Outcome; requiresScan = transition.RequiresScan;
+                        }
+                    }
+                    mustScan |= requiresScan;
+                    if (outcome is FileApplyOutcome.Applied or FileApplyOutcome.Unchanged)
+                    {
+                        if (outcome == FileApplyOutcome.Applied)
+                        {
+                            applied++;
+                            if (publications is not null)
+                            {
+                                // The installed signed file row is already durable. Defer only
+                                // its parent snapshot walk while more live files are flowing;
+                                // native races, preserved copies and deletions still scan now.
+                                if (row.Work.Stage == 1 && !requiresScan && !opensDirectory)
+                                {
+                                    publicationScanSinceTicks = publicationScanPending == 0 ? Now : publicationScanSinceTicks;
+                                    publicationScanPending++;
+                                    recentRemoteWrites.TryAdd(row.PathKey, 0);
+                                    string parent = ApplyState.Parent(row.PathKey);
+                                    while (parent.Length != 0)
+                                    {
+                                        recentRemoteWrites.TryAdd(parent, 0);
+                                        parent = ApplyState.Parent(parent);
+                                    }
+                                }
+                                else mustScan = true;
+                            }
+                            if (opensDirectory) { neededRepairPending = true; mustScan = true; }
+                            if (row.Work.Stage == 0 && index.LocalFiles.Find(row.PathKey) is { Type: 1, Deleted: false, FileId: not null })
+                                installedDirectory = true;
+                        }
+                        else await needed.RecomputeAsync([row.PathKey], token).ConfigureAwait(false);
+                        await index.ClearPullRetryAsync(row.PathKey, row.Work.Fingerprint, token).ConfigureAwait(false);
+                    }
+                    else { deferred++; await RetryAsync(row, null, token).ConfigureAwait(false); }
+                }
+                catch (Exception error) when (Retryable(error))
+                {
+                    failed++; await RetryAsync(row, error, token).ConfigureAwait(false);
+                    if (index.ReadApplyIntents().Any())
+                    {
+                        // Stage recovery releases a locked target's intent before another
+                        // independent path. Prepared recovery may itself require folder retry.
+                        Volatile.Write(ref scanRequested, 1); mustScan = true;
+                        recovered += await files.RecoverAsync(token).ConfigureAwait(false);
                     }
                 }
-                else
-                {
-                    var result = await files.ApplyScheduledAsync(row.PathKey, fetch, BatchFetch, token).ConfigureAwait(false);
-                    outcome = result.Outcome; requiresScan = result.RequiresScan;
-                    if (outcome == FileApplyOutcome.Deferred && !requiresScan)
-                    {
-                        var transition = await directories.ApplyScheduledAsync(row.PathKey, token).ConfigureAwait(false);
-                        outcome = transition.Outcome; requiresScan = transition.RequiresScan;
-                    }
-                }
-                mustScan |= requiresScan;
-                if (outcome is FileApplyOutcome.Applied or FileApplyOutcome.Unchanged)
-                {
-                    if (outcome == FileApplyOutcome.Applied) { applied++; mustScan |= publications is not null; if (opensDirectory) { neededRepairPending = true; mustScan = true; } }
-                    else await needed.RecomputeAsync([row.PathKey], token).ConfigureAwait(false);
-                    await index.ClearPullRetryAsync(row.PathKey, row.Work.Fingerprint, token).ConfigureAwait(false);
-                }
-                else { deferred++; await RetryAsync(row, null, token).ConfigureAwait(false); }
             }
-            catch (Exception error) when (Retryable(error))
-            {
-                failed++; await RetryAsync(row, error, token).ConfigureAwait(false);
-                if (index.ReadApplyIntents().Any())
-                {
-                    // Stage recovery releases a locked target's intent before another
-                    // independent path. Prepared recovery may itself require folder retry.
-                    Volatile.Write(ref scanRequested, 1); mustScan = true;
-                    recovered += await files.RecoverAsync(token).ConfigureAwait(false);
-                }
-            }
+            if (deleting) break;
+            if (!installedDirectory) deleting = true;
         }
-        if (mustScan) { await ScanAsync(rebuild: false, token).ConfigureAwait(false); scans++; }
+        while (visited < 1000);
+        // Flush the delayed parent snapshots at a bounded count/time, on an
+        // idle pass, or before any destructive scheduled work. The scanner can
+        // also run independently on a watcher/explicit request above.
+        long scanNow = Now;
+        int nextStage = 2;
+        if (publicationScanPending != 0 && visited == 1000 && !mustScan)
+        {
+            var nextBatch = index.ReadScheduledPullWork(rootId!, own, scanNow, settings.Priority, 1);
+            if (nextBatch.Count != 0) nextStage = nextBatch[0].Work!.Stage;
+        }
+        if (publicationScanPending != 0 && (publicationScanPending >= PublicationScanBatchSize
+            || scanNow - publicationScanSinceTicks >= PublicationScanMaximumSeconds * TimeSpan.TicksPerSecond
+            || visited < 1000 || nextStage != 1)) mustScan = true;
+        if (mustScan)
+        {
+            await RecordScanAsync(rebuild: false).ConfigureAwait(false);
+        }
+        else if (publicationScanPending != 0)
+            journal?.TryWrite(new("puller.publication_scan_deferred", "pull")
+            { Level = DiagnosticLevel.Debug, ItemsDeferred = publicationScanPending,
+                RetryInMilliseconds = (int)Math.Clamp((publicationScanSinceTicks
+                    + PublicationScanMaximumSeconds * TimeSpan.TicksPerSecond - scanNow)
+                    / TimeSpan.TicksPerMillisecond, 0, PublicationScanMaximumSeconds * 1000) });
         if (Now >= nextStagingTicks && !neededRepairPending && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0 && !index.ReadApplyIntents().Any())
         {
             bool moreStaging = await staging.RunAsync(rootId!, token).ConfigureAwait(false);
@@ -295,7 +436,20 @@ public sealed class Puller : IDisposable
             else { nextStagingTicks = AddSeconds(Now, 3600); stagingRetryAttempt = 0; }
         }
         long finished = Now; long? next = NextWorkTicks(finished);
-        return new(work.Count, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next);
+        return new(visited, applied, deferred, failed, recovered, scans, next <= finished || nextStagingTicks <= finished && scanRetryTicks == 0 && Volatile.Read(ref scanRequested) == 0, next)
+        { ScansCompleted = scansCompleted, ScannedEntries = scanEntries, ScanProblems = scanProblems };
+
+        async Task RecordScanAsync(bool rebuild)
+        {
+            ScanResult? result = await ScanAsync(rebuild, token).ConfigureAwait(false);
+            scans++;
+            if (result is not null)
+            {
+                scansCompleted++;
+                scanEntries = checked(scanEntries + result.Enumerated);
+                scanProblems = checked(scanProblems + result.ProblemCount);
+            }
+        }
     }
 
     private async Task RetryAsync(NeededRow row, Exception? error, CancellationToken token)
@@ -306,7 +460,7 @@ public sealed class Puller : IDisposable
             RetryInMilliseconds = retry is null ? 0 : (int)Math.Clamp((retry.NextTicks - retry.FailedTicks) / TimeSpan.TicksPerMillisecond, 0, 600000), ItemsDeferred = 1 });
     }
 
-    private async Task ScanAsync(bool rebuild, CancellationToken token)
+    private async Task<ScanResult?> ScanAsync(bool rebuild, CancellationToken token)
     {
         Interlocked.Exchange(ref scanRequested, 0);
         bool repairAll = rebuild || neededRepairPending;
@@ -322,16 +476,27 @@ public sealed class Puller : IDisposable
             else if (result.ChangedPaths.Count != 0) await needed.RecomputeAsync(result.ChangedPaths.Where(PathRules.IsValid), token).ConfigureAwait(false);
             neededRepairPending = false;
             long now = Now; nextScanTicks = AddSeconds(now, settings.RescanIntervalSeconds);
-            bool incomplete = result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed");
+            bool incomplete = result.Problems.Any(p => p.Code is "read-failed" or "changed-during-read" or "enumeration-failed" or "published-content-verification-failed" or "problem-overflow");
             if (incomplete)
             {
                 scanRetryTicks = AddSeconds(now, RescanScheduler.BackoffSeconds(scanAttempt)); scanAttempt = Math.Min(6, scanAttempt + 1);
                 Volatile.Write(ref scanRequested, 1);
             }
             else { scanAttempt = 0; scanRetryTicks = 0; if (result.RequiresFollowupScan) Volatile.Write(ref scanRequested, 1); }
+            if (!incomplete && !neededRepairPending)
+            {
+                if (publicationScanPending != 0)
+                    journal?.TryWrite(new("puller.publication_scan_flushed", "pull")
+                    { Level = DiagnosticLevel.Debug, ItemsChanged = publicationScanPending,
+                        ElapsedMilliseconds = Math.Max(0, (Now - publicationScanSinceTicks) / (double)TimeSpan.TicksPerMillisecond) });
+                publicationScanPending = 0;
+                publicationScanSinceTicks = 0;
+                recentRemoteWrites.Clear();
+            }
+            return result;
         }
-        catch (CasePreservationCapacityException) when (scanned) { CaseBackpressure(); }
-        catch (DirectoryMetadataCapacityException) when (scanned) { MetadataBackpressure(); }
+        catch (CasePreservationCapacityException) when (scanned) { CaseBackpressure(); return null; }
+        catch (DirectoryMetadataCapacityException) when (scanned) { MetadataBackpressure(); return null; }
         catch { Volatile.Write(ref scanRequested, 1); throw; }
     }
 
@@ -403,7 +568,7 @@ public sealed class Puller : IDisposable
         return result is null ? metadataDue : metadataDue is null ? result : Math.Min(result.Value, metadataDue.Value);
     }
     private static long AddSeconds(long now, int seconds) => now + Math.Min(DateTime.MaxValue.Ticks - now, seconds * TimeSpan.TicksPerSecond);
-    private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException
+    private static bool Retryable(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or CryptographicException or AuthenticationException
         || error is SqliteException { SqliteErrorCode: 5 or 6 or 10 or 13 or 14 };
     private static int? NativeError(Exception? error) => error switch { Win32Exception native => native.NativeErrorCode, SqliteException database => database.SqliteExtendedErrorCode, _ => null };
     private void Failure(string name, Guid session, Exception error) => journal?.TryWrite(new(name, "pull")

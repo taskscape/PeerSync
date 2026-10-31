@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using PeerSync.Core.Diagnostics;
 using Shouldly;
@@ -90,10 +91,27 @@ public sealed class DiagnosticJournalTests : IDisposable
     }
 
     [Fact]
+    public void NumericMemorySamplesRoundTripWithoutAPathOrPayload()
+    {
+        using (var log = new DiagnosticJournal(directory, "scanner", debugEnabled: true))
+            log.Write(new("scan.memory_hashed", "scan")
+            {
+                Level = DiagnosticLevel.Debug, WorkingSetBytes = 375_000_000,
+                PrivateBytes = 340_000_000, ManagedHeapBytes = 299_000_000,
+            });
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "debug.jsonl")));
+        json.RootElement.GetProperty("workingSetBytes").GetInt64().ShouldBe(375_000_000);
+        json.RootElement.GetProperty("privateBytes").GetInt64().ShouldBe(340_000_000);
+        json.RootElement.GetProperty("managedHeapBytes").GetInt64().ShouldBe(299_000_000);
+        json.RootElement.TryGetProperty("path", out _).ShouldBeFalse();
+        json.RootElement.TryGetProperty("payload", out _).ShouldBeFalse();
+    }
+
+    [Fact]
     public void RotatesAndExpiresOldFiles()
     {
         Directory.CreateDirectory(directory);
-        string expired = Path.Combine(directory, "debug.6.jsonl");
+        string expired = Path.Combine(directory, "debug.64.jsonl");
         File.WriteAllText(expired, "expired");
         File.SetLastWriteTimeUtc(expired, DateTime.UtcNow.AddDays(-2));
         using var log = new DiagnosticJournal(directory, "test", true, 4096, 3);
@@ -102,6 +120,51 @@ public sealed class DiagnosticJournalTests : IDisposable
         var files = Directory.GetFiles(directory);
         files.Length.ShouldBe(3);
         foreach (string file in files) new FileInfo(file).Length.ShouldBeLessThanOrEqualTo(4096);
+    }
+
+    [Fact]
+    public void IdleAddressLogExpiresWithoutAnotherWriteAndUnknownFilesSurvive()
+    {
+        Directory.CreateDirectory(directory);
+        string foreign = Path.Combine(directory, "debug-owner.jsonl");
+        File.WriteAllText(foreign, "other application data");
+        File.SetLastWriteTimeUtc(foreign, DateTime.UtcNow.AddDays(-2));
+        var clock = new ManualClock();
+        using var log = new DiagnosticJournal(directory, "test", timeProvider: clock);
+        string active = Path.Combine(directory, "debug.jsonl");
+        log.Write(new("probe.reached", "probe") { RemoteAddress = IPAddress.Parse("192.0.2.31") });
+        File.Exists(active).ShouldBeTrue();
+
+        clock.Advance(TimeSpan.FromHours(23)); clock.Fire();
+        File.Exists(active).ShouldBeTrue();
+        clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1)); clock.Fire();
+        File.Exists(active).ShouldBeFalse();
+        File.ReadAllText(foreign).ShouldBe("other application data");
+
+        log.Write(new("probe.recovered", "probe"));
+        string current = File.ReadAllText(active);
+        current.ShouldContain("probe.recovered");
+        current.ShouldNotContain("192.0.2.31");
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private DateTimeOffset now = DateTimeOffset.UtcNow;
+        private readonly List<ManualTimer> timers = [];
+        public override DateTimeOffset GetUtcNow() => now;
+        internal void Advance(TimeSpan duration) => now += duration;
+        internal void Fire() { foreach (var timer in timers.ToArray()) timer.Fire(); }
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        { var timer = new ManualTimer(callback, state); timers.Add(timer); return timer; }
+    }
+
+    private sealed class ManualTimer(TimerCallback callback, object? state) : ITimer
+    {
+        private bool disposed;
+        public bool Change(TimeSpan dueTime, TimeSpan period) => !disposed;
+        internal void Fire() { if (!disposed) callback(state); }
+        public void Dispose() => disposed = true;
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }
 
     [Fact]

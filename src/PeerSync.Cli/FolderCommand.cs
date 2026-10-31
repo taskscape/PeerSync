@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Security.Principal;
 using Grpc.Core;
 using PeerSync.Control.Contracts;
+using PeerSync.Core.Keys;
 using Wire = PeerSync.Control.Contracts.V1;
 
 namespace PeerSync.Cli;
@@ -50,6 +52,7 @@ public static class FolderCommand
                 }
                 case "add":
                 {
+                    if (!await GrantFolderAccessAsync(values[0], error).ConfigureAwait(false)) return 1;
                     Wire.FolderInfo folder = await client.AddFolderAsync(values[0], cancellationToken).ConfigureAwait(false);
                     Wire.GetFolderKeysResponse keys = await client.GetFolderKeysAsync(folder.FolderId, cancellationToken).ConfigureAwait(false);
                     await output.WriteLineAsync(json ? JsonSerializer.Serialize(new
@@ -59,6 +62,13 @@ public static class FolderCommand
                 }
                 case "join":
                 {
+                    try { using var parsed = KeyText.Decode(values[0]); }
+                    catch (Exception exception) when (exception is FormatException or ArgumentException)
+                    {
+                        await error.WriteLineAsync("Invalid folder key.").ConfigureAwait(false);
+                        return 1;
+                    }
+                    if (!await GrantFolderAccessAsync(values[1], error).ConfigureAwait(false)) return 1;
                     Wire.FolderInfo folder = await client.JoinFolderAsync(values[0], values[1], cancellationToken).ConfigureAwait(false);
                     await output.WriteLineAsync(json ? JsonSerializer.Serialize(FolderDto(folder), JsonOptions)
                         : $"Joined {folder.Path} ({folder.FolderId}, {folder.Access})").ConfigureAwait(false);
@@ -80,7 +90,7 @@ public static class FolderCommand
                     {
                         await output.WriteLineAsync($"Peers for {peers.FolderId}:").ConfigureAwait(false);
                         foreach (Wire.PeerInfo peer in peers.Peers)
-                            await output.WriteLineAsync($"{peer.DeviceId}  {peer.Approval} pinned={peer.Pinned}  {peer.Name}").ConfigureAwait(false);
+                            await output.WriteLineAsync($"{peer.DeviceId}  {peer.Approval} pinned={peer.Pinned} transport={peer.Transport}  {peer.Name}").ConfigureAwait(false);
                     }
                     break;
                 }
@@ -107,7 +117,9 @@ public static class FolderCommand
         }
         catch (RpcException exception)
         {
-            await error.WriteLineAsync($"Service request failed: {exception.StatusCode}").ConfigureAwait(false);
+            string detail = exception.Status.Detail;
+            await error.WriteLineAsync($"Service request failed: {exception.StatusCode}"
+                + (string.IsNullOrWhiteSpace(detail) ? "" : $". {detail}")).ConfigureAwait(false);
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
@@ -118,9 +130,21 @@ public static class FolderCommand
         }
     }
 
+    private static async Task<bool> GrantFolderAccessAsync(string path, TextWriter error)
+    {
+        try { FolderAccessGrant.Grant(path); return true; }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or
+            System.Security.SecurityException or IdentityNotMappedException)
+        {
+            await error.WriteLineAsync($"Could not grant PeerSync service access to the selected folder: {exception.GetType().Name}")
+                .ConfigureAwait(false);
+            return false;
+        }
+    }
+
     private static object FolderDto(Wire.FolderInfo folder) => new
     { folderId = folder.FolderId, path = folder.Path, access = folder.Access, paused = folder.Paused };
     private static object PeerDto(Wire.PeerInfo peer) => new
     { deviceId = peer.DeviceId, name = peer.Name, approval = peer.Approval, pinned = peer.Pinned,
-        lastSeenUtcTicks = peer.HasLastSeenUtcTicks ? peer.LastSeenUtcTicks : (long?)null };
+        transport = peer.Transport, lastSeenUtcTicks = peer.HasLastSeenUtcTicks ? peer.LastSeenUtcTicks : (long?)null };
 }

@@ -127,6 +127,11 @@ internal sealed class WindowsInitPlatform : IInitPlatform
         CreateSecureDirectory(Path.Combine(root, "config"), serviceSid, FileSystemRights.Modify);
         CreateSecureDirectory(Path.Combine(root, "state"), serviceSid, FileSystemRights.Modify);
         CreateSecureDirectory(Path.Combine(root, "logs"), serviceSid, FileSystemRights.Modify, readersSid);
+        // The service may stage untrusted downloads, but cannot change the
+        // administrator's publisher pin or update enablement policy.
+        CreateSecureDirectory(Path.Combine(root, "updates"), serviceSid, FileSystemRights.Modify);
+        CreateSecureDirectory(Path.Combine(root, "update-policy"), serviceSid, FileSystemRights.ReadAndExecute);
+        CreateSecureDirectory(Path.Combine(root, "update-trusted"), serviceSid, null);
     }
 
     public string EnsureDeviceCertificate(SecurityIdentifier serviceSid, string? knownThumbprint)
@@ -191,7 +196,7 @@ internal sealed class WindowsInitPlatform : IInitPlatform
         return bytes;
     }
 
-    private static void CreateSecureDirectory(string path, SecurityIdentifier serviceSid, FileSystemRights serviceRights, SecurityIdentifier? readersSid = null)
+    private static void CreateSecureDirectory(string path, SecurityIdentifier serviceSid, FileSystemRights? serviceRights, SecurityIdentifier? readersSid = null)
     {
         const InheritanceFlags inherit = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
         var security = new DirectorySecurity();
@@ -199,7 +204,8 @@ internal sealed class WindowsInitPlatform : IInitPlatform
         security.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
         security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
         security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule(serviceSid, serviceRights, inherit, PropagationFlags.None, AccessControlType.Allow));
+        if (serviceRights is { } rights)
+            security.AddAccessRule(new FileSystemAccessRule(serviceSid, rights, inherit, PropagationFlags.None, AccessControlType.Allow));
         if (readersSid is not null)
             security.AddAccessRule(new FileSystemAccessRule(readersSid, FileSystemRights.ReadAndExecute, inherit, PropagationFlags.None, AccessControlType.Allow));
         var directory = Directory.CreateDirectory(path);

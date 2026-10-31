@@ -1,7 +1,8 @@
+using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
-using System.Threading.Channels;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -22,11 +23,12 @@ internal sealed class TrackerClient : IAsyncDisposable
     private readonly Func<ServerMessage, CancellationToken, ValueTask> receive;
     private readonly DiagnosticJournal? diagnostics;
     private readonly X509Certificate2? loopbackServerCertificate;
-    private readonly Channel<ClientMessage> outgoing = Channel.CreateBounded<ClientMessage>(
-        new BoundedChannelOptions(128) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
+    private readonly TrackerOutgoingQueue outgoing = new();
     private readonly CancellationTokenSource stopping = new();
     private Task? worker;
     private int connected;
+    // The response reader sets this; failure and disconnect read it after all session tasks end.
+    private Guid? observedSessionId;
 
     internal TrackerClient(Uri server, X509Certificate2 certificate, Func<Announce> announcement,
         Func<ServerMessage, CancellationToken, ValueTask> receive, DiagnosticJournal? diagnostics = null,
@@ -49,49 +51,56 @@ internal sealed class TrackerClient : IAsyncDisposable
     internal bool IsConnected => Volatile.Read(ref connected) != 0;
     internal Uri Server => server;
     internal void Start() => worker ??= Task.Run(RunAsync);
-    // A reconnect starts with a fresh snapshot. Do not replay stale folder sets
-    // that were queued while the tracker was offline.
-    internal void Refresh()
-    {
-        if (IsConnected)
-        {
-            Announce next = announcement();
-            if (!outgoing.Writer.TryWrite(new ClientMessage { Announce = next }))
-                diagnostics?.TryWrite(new("tracker.announcement_queue_full", "rendezvous")
-                { Level = DiagnosticLevel.Warning, ItemsVisited = next.FolderIds.Count });
-        }
-    }
+    // Refresh remains pending until the writer sends the newest snapshot, even
+    // when its bounded critical-request queue is full or the link is offline.
+    internal void Refresh() => outgoing.Refresh();
 
     internal bool RequestRelay(ReadOnlySpan<byte> peerDeviceId, ReadOnlySpan<byte> folderId)
     {
         if (!IsConnected || peerDeviceId.Length != 32 || folderId.Length != 32) return false;
-        return outgoing.Writer.TryWrite(new ClientMessage { RelayRequest = new RelayRequest
+        bool queued = outgoing.TryEnqueue(new ClientMessage { RelayRequest = new RelayRequest
         { DeviceId = ByteString.CopyFrom(peerDeviceId), FolderId = ByteString.CopyFrom(folderId) } });
+        if (!queued) QueueFull("relay_request");
+        return queued;
     }
 
     internal bool RequestPunch(ReadOnlySpan<byte> peerDeviceId, ReadOnlySpan<byte> folderId)
     {
         if (!IsConnected || peerDeviceId.Length != 32 || folderId.Length != 32) return false;
-        return outgoing.Writer.TryWrite(new ClientMessage { PunchRequest = new PunchRequest
+        bool queued = outgoing.TryEnqueue(new ClientMessage { PunchRequest = new PunchRequest
         { DeviceId = ByteString.CopyFrom(peerDeviceId), FolderId = ByteString.CopyFrom(folderId) } });
+        if (!queued) QueueFull("punch_request");
+        return queued;
     }
+
+    private void QueueFull(string kind) => diagnostics?.TryWrite(new("tracker.outgoing_full", "rendezvous")
+    { Level = DiagnosticLevel.Warning, ErrorCode = kind, ItemsDeferred = 1 });
 
     private async Task RunAsync()
     {
         int failures = 0;
         while (!stopping.IsCancellationRequested)
         {
+            var elapsed = Stopwatch.StartNew();
             try
             {
                 await RunSessionAsync(stopping.Token).ConfigureAwait(false);
                 failures = 0;
             }
-            catch (OperationCanceledException) when (stopping.IsCancellationRequested) { break; }
+            catch (Exception) when (stopping.IsCancellationRequested) { break; }
             catch (Exception error)
             {
+                // A long authenticated stream is a recovered connection, not
+                // another consecutive startup failure. Otherwise a transient
+                // reset every few minutes eventually incurs the full backoff.
+                if (observedSessionId is not null && elapsed.Elapsed >= TimeSpan.FromMinutes(1))
+                    failures = 0;
                 diagnostics?.TryWrite(new("tracker.session_failed", "rendezvous")
                 { Level = DiagnosticLevel.Warning, Transport = DiagnosticTransport.Http2,
-                    ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
+                    SessionId = observedSessionId,
+                    ErrorCode = error is RpcException rpc ? $"rpc_{rpc.StatusCode}" : error.GetType().Name,
+                    Exception = error, HResult = error.HResult, NativeError = NativeSocketError(error),
+                    ElapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds });
             }
             Volatile.Write(ref connected, 0);
             if (stopping.IsCancellationRequested) break;
@@ -102,7 +111,16 @@ internal sealed class TrackerClient : IAsyncDisposable
 
     private async Task RunSessionAsync(CancellationToken cancellationToken)
     {
-        using var handler = new SocketsHttpHandler();
+        observedSessionId = null;
+        using var handler = new SocketsHttpHandler
+        {
+            // The tracker stream is otherwise quiet for five minutes between
+            // announcements. Keep the HTTP/2 connection active across shorter
+            // NAT and firewall idle windows, and detect a dead path promptly.
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+        };
         handler.SslOptions.EnabledSslProtocols = SslProtocols.Tls13;
         handler.SslOptions.ClientCertificates = new X509CertificateCollection { certificate };
         LoopbackCertificatePin.Apply(handler, server, loopbackServerCertificate);
@@ -113,46 +131,58 @@ internal sealed class TrackerClient : IAsyncDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // The preceding stream's writer is finished before reconnect starts.
         // Its queued requests refer to an old presence snapshot or relay offer.
-        while (outgoing.Reader.TryRead(out _)) { }
-        Announce initial = announcement();
-        await call.RequestStream.WriteAsync(new ClientMessage { Announce = initial }, linked.Token)
+        outgoing.Reset();
+        Announce firstAnnouncement = announcement();
+        await call.RequestStream.WriteAsync(new ClientMessage { Announce = firstAnnouncement }, linked.Token)
             .ConfigureAwait(false);
-        diagnostics?.TryWrite(new("tracker.announcement_sent", "rendezvous")
-        { ItemsVisited = initial.FolderIds.Count, ItemsChanged = initial.LocalEndpoints.Count });
+        LogAnnounce("tracker.announced_initial", firstAnnouncement);
+        LogAnnounce("tracker.announcement_sent", firstAnnouncement);
         Volatile.Write(ref connected, 1);
         diagnostics?.TryWrite(new("tracker.session_connected", "rendezvous")
         { Transport = DiagnosticTransport.Http2 });
-        Task writer = WriteLoopAsync(call.RequestStream, linked.Token);
+        Task writer = outgoing.WriteLoopAsync(call.RequestStream, announcement, linked.Token,
+            sent => { LogAnnounce("tracker.announced_refresh", sent); LogAnnounce("tracker.announcement_sent", sent); },
+            LogSentRequest);
         Task ticker = AnnounceTickerAsync(linked.Token);
+        Task reader = ReadLoopAsync(call.ResponseStream, linked.Token);
         try
         {
-            while (await call.ResponseStream.MoveNext(linked.Token).ConfigureAwait(false))
-                await receive(call.ResponseStream.Current, linked.Token).ConfigureAwait(false);
+            // A failed outbound writer must end this session even if the server
+            // keeps its inbound stream open. The next session starts with a
+            // fresh announcement and discards its stale relay offers.
+            Task finished = await Task.WhenAny(reader, writer, ticker).ConfigureAwait(false);
+            await finished.ConfigureAwait(false);
         }
         finally
         {
             Volatile.Write(ref connected, 0);
             await linked.CancelAsync().ConfigureAwait(false);
-            try { await Task.WhenAll(writer, ticker).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
-            diagnostics?.TryWrite(new("tracker.session_disconnected", "rendezvous")
-            { Transport = DiagnosticTransport.Http2 });
+            try
+            {
+                try { await Task.WhenAll(reader, writer, ticker).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+            }
+            finally
+            {
+                diagnostics?.TryWrite(new("tracker.session_disconnected", "rendezvous")
+                { Transport = DiagnosticTransport.Http2, SessionId = observedSessionId });
+            }
         }
     }
 
-    private async Task WriteLoopAsync(IClientStreamWriter<ClientMessage> requests, CancellationToken cancellationToken)
+    private async Task ReadLoopAsync(IAsyncStreamReader<ServerMessage> responses, CancellationToken cancellationToken)
     {
-        await foreach (ClientMessage message in outgoing.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        while (await responses.MoveNext(cancellationToken).ConfigureAwait(false))
         {
-            await requests.WriteAsync(message, cancellationToken).ConfigureAwait(false);
-            if (message.RelayRequest is { } relayRequest && relayRequest.DeviceId.Length == 32
-                && relayRequest.FolderId.Length == 32)
-                diagnostics?.TryWrite(new("tracker.relay_request_sent", "rendezvous")
-                { PeerFingerprint = DiagnosticFingerprint.FromId(relayRequest.DeviceId.Span),
-                    FolderFingerprint = DiagnosticFingerprint.FromId(relayRequest.FolderId.Span) });
-            else if (message.Announce is { } announce)
-                diagnostics?.TryWrite(new("tracker.announcement_sent", "rendezvous")
-                { ItemsVisited = announce.FolderIds.Count, ItemsChanged = announce.LocalEndpoints.Count });
+            ServerMessage message = responses.Current;
+            if (observedSessionId is null && message.ObservedAddress is { } observed
+                && observed.SessionId.Length == 16)
+            {
+                observedSessionId = new Guid(observed.SessionId.Span);
+                diagnostics?.TryWrite(new("tracker.session_identified", "rendezvous")
+                { Transport = DiagnosticTransport.Http2, SessionId = observedSessionId });
+            }
+            await receive(message, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -163,11 +193,33 @@ internal sealed class TrackerClient : IAsyncDisposable
             Refresh();
     }
 
+    private void LogAnnounce(string eventName, Announce sent) =>
+        diagnostics?.TryWrite(new(eventName, "rendezvous")
+        { Transport = DiagnosticTransport.Http2, ItemsVisited = sent.FolderIds.Count,
+            ItemsChanged = sent.LocalEndpoints.Count });
+
+    private void LogSentRequest(ClientMessage message)
+    {
+        if (message.RelayRequest is { } relayRequest && relayRequest.DeviceId.Length == 32
+            && relayRequest.FolderId.Length == 32)
+            diagnostics?.TryWrite(new("tracker.relay_request_sent", "rendezvous")
+            { PeerFingerprint = DiagnosticFingerprint.FromId(relayRequest.DeviceId.Span),
+                FolderFingerprint = DiagnosticFingerprint.FromId(relayRequest.FolderId.Span) });
+    }
+
+    private static int? NativeSocketError(Exception error)
+    {
+        for (Exception? current = error is RpcException rpc ? rpc.Status.DebugException ?? error : error;
+             current is not null; current = current.InnerException)
+            if (current is SocketException socket) return socket.NativeErrorCode;
+        return null;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (stopping.IsCancellationRequested) return;
         await stopping.CancelAsync().ConfigureAwait(false);
-        outgoing.Writer.TryComplete();
+        outgoing.Complete();
         if (worker is not null)
             try { await worker.ConfigureAwait(false); } catch (OperationCanceledException) { }
         stopping.Dispose();

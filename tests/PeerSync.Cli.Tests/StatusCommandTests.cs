@@ -56,6 +56,7 @@ public sealed class StatusCommandTests
 
         string output = StatusCommand.ToHuman(snapshot);
         output.ShouldContain("Production sync: unavailable");
+        output.ShouldContain("Peer clock sessions shown: 1");
         output.ShouldContain("clock differs by +11.00 min");
     }
 }

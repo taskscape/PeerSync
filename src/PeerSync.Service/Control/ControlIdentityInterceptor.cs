@@ -8,21 +8,24 @@ namespace PeerSync.Service.Control;
 
 /// <summary>Authenticates the impersonated pipe caller before dispatching any control RPC,
 /// including methods added to the protobuf contract in later releases.</summary>
-internal sealed class ControlIdentityInterceptor(ControlCallerPolicy callers, DiagnosticJournal? diagnostics = null) : Interceptor
+internal sealed class ControlIdentityInterceptor(ControlCallerPolicy callers, ControlStatusRuntime runtime,
+    DiagnosticJournal? diagnostics = null) : Interceptor
 {
-    public override Task<TResponse> UnaryServerHandler<TRequest, TResponse>(TRequest request,
+    public override async Task<TResponse> UnaryServerHandler<TRequest, TResponse>(TRequest request,
         ServerCallContext context, UnaryServerMethod<TRequest, TResponse> continuation)
     {
         RequireCaller(context);
-        return continuation(request, context);
+        await runtime.WaitForInstalledStartupAsync(context.CancellationToken).ConfigureAwait(false);
+        return await continuation(request, context).ConfigureAwait(false);
     }
 
-    public override Task ServerStreamingServerHandler<TRequest, TResponse>(TRequest request,
+    public override async Task ServerStreamingServerHandler<TRequest, TResponse>(TRequest request,
         IServerStreamWriter<TResponse> responseStream, ServerCallContext context,
         ServerStreamingServerMethod<TRequest, TResponse> continuation)
     {
         RequireCaller(context);
-        return continuation(request, responseStream, context);
+        await runtime.WaitForInstalledStartupAsync(context.CancellationToken).ConfigureAwait(false);
+        await continuation(request, responseStream, context).ConfigureAwait(false);
     }
 
     private void RequireCaller(ServerCallContext context)

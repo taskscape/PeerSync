@@ -143,6 +143,16 @@ public sealed partial class FolderIndex
             command.Parameters.AddWithValue("$key", PathRules.Key(row.Path)); command.ExecuteNonQuery(); return FindDirectoryPublication(connection, transaction, PathRules.Key(row.Path))!;
         }, cancellationToken);
     }
+    // A verified child receipt can satisfy a waiting ordinary or reconstruction
+    // parent-root proof. Wake that exact parent immediately rather than retaining
+    // a ten-minute exponential retry after the dependency has changed.
+    private static void WakeWaitingParentPublication(SqliteConnection connection, SqliteTransaction transaction, string childKey)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "UPDATE directory_publications SET attempts=0,failed_ticks=NULL,next_ticks=NULL "
+            + "WHERE path_key=$parent AND next_ticks IS NOT NULL;";
+        command.Parameters.AddWithValue("$parent", CaptureParent(childKey)); command.ExecuteNonQuery();
+    }
     private static DirectoryPublication? FindDirectoryPublication(SqliteConnection connection, SqliteTransaction? transaction, string key)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;

@@ -22,8 +22,8 @@ public sealed class LanDiscovery : IAsyncDisposable
     private readonly TimeProvider timeProvider;
     private readonly CancellationTokenSource stop = new();
     private readonly object gate = new();
-    private readonly HashSet<IPAddress> joinedV4 = [];
-    private readonly HashSet<long> joinedV6 = [];
+    private readonly HashSet<int> joinedV4 = [];
+    private readonly HashSet<int> joinedV6 = [];
     private readonly Dictionary<string, DateTimeOffset> reportedPeers = new(StringComparer.Ordinal);
     private readonly List<Socket> receivers = [];
     private Task? receiveV4;
@@ -107,37 +107,51 @@ public sealed class LanDiscovery : IAsyncDisposable
 
     private void OnNetworkAddressChanged(object? sender, EventArgs args) => RefreshMemberships();
 
-    private void RefreshMemberships()
+    internal void RefreshMemberships()
     {
         lock (gate)
         {
             if (!started || Volatile.Read(ref disposed) != 0) return;
             try
             {
+                var desiredV4 = new HashSet<int>();
+                var desiredV6 = new HashSet<int>();
+                Socket? v4Socket = receivers.FirstOrDefault(s => s.AddressFamily == AddressFamily.InterNetwork);
+                Socket? v6Socket = receivers.FirstOrDefault(s => s.AddressFamily == AddressFamily.InterNetworkV6);
                 foreach (NetworkInterface nic in GetUsableInterfaces())
                 {
-                    IPv4InterfaceProperties? v4 = SafeIPv4(nic);
-                    Socket? v4Socket = receivers.FirstOrDefault(s => s.AddressFamily == AddressFamily.InterNetwork);
-                    if (nic.SupportsMulticast && v4 is not null && v4Socket is not null)
+                    if (!nic.SupportsMulticast) continue;
+                    try
                     {
-                        foreach (UnicastIPAddressInformation address in nic.GetIPProperties().UnicastAddresses)
-                        {
-                            if (address.Address.AddressFamily != AddressFamily.InterNetwork || address.Address.Equals(IPAddress.Any)) continue;
-                            if (joinedV4.Add(address.Address))
-                            {
-                                try { v4Socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(IPv4Group, address.Address)); }
-                                catch (SocketException) { joinedV4.Remove(address.Address); }
-                            }
-                        }
+                        IPInterfaceProperties properties = nic.GetIPProperties();
+                        if (v4Socket is not null && properties.UnicastAddresses.Any(address =>
+                            address.Address.AddressFamily == AddressFamily.InterNetwork && !address.Address.Equals(IPAddress.Any))
+                            && SafeIPv4(nic) is { } v4)
+                            desiredV4.Add(v4.Index);
+                        if (v6Socket is not null && properties.UnicastAddresses.Any(address =>
+                            address.Address.AddressFamily == AddressFamily.InterNetworkV6)
+                            && SafeIPv6(nic) is { } v6)
+                            desiredV6.Add(v6.Index);
                     }
-                    IPv6InterfaceProperties? v6 = SafeIPv6(nic);
-                    Socket? v6Socket = receivers.FirstOrDefault(s => s.AddressFamily == AddressFamily.InterNetworkV6);
-                    if (v6 is not null && v6Socket is not null && joinedV6.Add(v6.Index))
+                    catch (NetworkInformationException error)
                     {
-                        try { v6Socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.AddMembership, new IPv6MulticastOption(IPv6Group, v6.Index)); }
-                        catch (SocketException) { joinedV6.Remove(v6.Index); }
+                        diagnostics?.TryWrite(new("discovery.lan_membership_refresh_failed", "lan_discovery")
+                        { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
                     }
                 }
+
+                if (v4Socket is not null)
+                    ReconcileMemberships(joinedV4, desiredV4, index =>
+                        v4Socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.DropMembership,
+                            new MulticastOption(IPv4Group, index)), index =>
+                        v4Socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership,
+                            new MulticastOption(IPv4Group, index)), "ipv4");
+                if (v6Socket is not null)
+                    ReconcileMemberships(joinedV6, desiredV6, index =>
+                        v6Socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.DropMembership,
+                            new IPv6MulticastOption(IPv6Group, index)), index =>
+                        v6Socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.AddMembership,
+                            new IPv6MulticastOption(IPv6Group, index)), "ipv6");
             }
             catch (NetworkInformationException error)
             {
@@ -145,6 +159,32 @@ public sealed class LanDiscovery : IAsyncDisposable
                 { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
             }
         }
+    }
+
+    internal void ReconcileMemberships(HashSet<int> joined, HashSet<int> desired,
+        Action<int> drop, Action<int> add, string family)
+    {
+        int changed = 0;
+        // Address-change notifications can preserve an interface index even after Windows
+        // discarded its socket membership. Rejoin every current interface, not only new IDs.
+        foreach (int index in joined.ToArray())
+        {
+            try { drop(index); }
+            catch (SocketException) { } // Windows may already have removed a departed interface.
+            joined.Remove(index);
+            changed++;
+        }
+        foreach (int index in desired)
+        {
+            try { add(index); joined.Add(index); changed++; }
+            catch (SocketException error)
+            {
+                diagnostics?.TryWrite(new("discovery.lan_membership_join_failed", family)
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.SocketErrorCode.ToString(), HResult = error.HResult });
+            }
+        }
+        diagnostics?.TryWrite(new("discovery.lan_memberships", family)
+        { Level = DiagnosticLevel.Debug, ItemsVisited = desired.Count, ItemsChanged = changed });
     }
 
     private async Task AnnounceLoopAsync(CancellationToken cancellationToken)

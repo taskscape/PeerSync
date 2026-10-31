@@ -21,9 +21,18 @@ netsh http show urlacl | Select-String ':99/'
 Obtain a Server Authentication TLS certificate for `sync.taskscape.com` in
 `Cert:\LocalMachine\My`, with a private key. For a public deployment, configure
 win-acme with DNS or HTTP validation and Windows certificate-store installation.
+On an IIS server, win-acme otherwise defaults to `LocalMachine\WebHosting`;
+prefer setting this renewal's certificate-store destination to `My` (the
+`--certificatestore My` option in unattended setup). Setup also checks for a
+newer, usable machine-key certificate in `WebHosting` and copies its Windows
+certificate context into `My` before preflight. It does not export the private
+key or import a public-only `.cer`. The post-renewal hook repeats this fallback
+for future win-acme renewals. The service itself still loads from
+`LocalMachine\My`.
 Set its post-renewal command to
 `C:\ProgramData\PeerSync.Rendezvous\After-RendezvousRenewal.ps1`; the script
-regrants the private-key ACL and restarts `PeerSyncRendezvous`. A self-signed
+copies a newer usable `WebHosting` certificate when present, regrants the
+private-key ACL and restarts `PeerSyncRendezvous`. A self-signed
 server certificate is suitable only for an isolated test where each client
 explicitly trusts it. It is separate from the P-256 device certificates and
 the code-signing certificate.
@@ -83,6 +92,24 @@ certificate. After installation, stop `PeerSyncRendezvous`, restore your saved
 `appsettings.json` to its installation directory, and start the service again.
 This interrupts discovery and relay sessions while the service is unavailable.
 
+Setup also excludes `PeerSync.Rendezvous.exe` from automatic machine-wide
+Windows Error Reporting, preserving a pre-existing administrator exclusion
+and removing only a setup-owned entry at uninstall. Run the packaged read-only
+audit after installation or upgrade:
+
+```powershell
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File 'C:\Program Files\PeerSync Rendezvous\Audit-CrashPolicy.ps1' `
+    -Component Rendezvous
+```
+
+Require `allAutomaticReportsExcluded: true`. Review the global and
+per-executable `LocalDumps` flags before public deployment; those
+administrator-configured dumps operate independently of the automatic-report
+exclusion. Protect any retained dump as privileged secret material. The
+[approved dump boundary](proposals/P5-crash-dump-boundary.md) also applies to
+this server process.
+
 ### Verify the installed service
 
 ```powershell
@@ -91,6 +118,59 @@ Get-NetTCPConnection -State Listen -LocalPort 99
 Get-NetUDPEndpoint -LocalPort 99
 Get-NetFirewallRule -DisplayName 'PeerSync Rendezvous*'
 ```
+
+For one machine-readable server preflight, run the script packaged
+with Setup from an elevated Windows PowerShell session:
+
+```powershell
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive `
+    -ExecutionPolicy Bypass -File 'C:\Program Files\PeerSync Rendezvous\Test-RendezvousDeployment.ps1'
+```
+
+It returns one JSON object and exits 0 only when its local checks pass. The
+`issues` array distinguishes a stopped service, absent or foreign TCP/UDP
+listener, missing or unusable matching server-authentication certificate, absent inbound
+allow rule, DNS lookup failure, and a loopback health/TLS failure. The
+certificate check signs and verifies a challenge with a machine private key
+accessible to the caller. It cannot alone prove that the service identity can
+use that key; the listener and health checks supply runtime evidence. The script reads the
+installed `appsettings.json` and does not inspect service-process environment
+overrides. It omits certificate thumbprints, private keys, paths and resolved
+IP addresses from its JSON. Its health request emits one ordinary diagnostic
+event, but it does not change service configuration. A passing result proves
+only the server's local configuration and loopback TLS path. Keep the
+outside-network `psp probe`
+below as the TCP/UDP 99 acceptance test; neither a local allow rule nor a
+local UDP socket proves provider or upstream firewall admission.
+
+The installed `Collect-DeploymentEvidence.ps1 -Role Rendezvous` collects this
+preflight, binary signing and crash-policy state, and a sanitized diagnostic
+bundle into one new local directory. The [diagnostics guide](diagnostics.md)
+gives the command and the limits of that evidence.
+
+Read `issues` in this order. For `settings-unavailable` or
+`public-url-mismatch`, inspect the installed `appsettings.json` and any
+service-level `PEERSYNC_` overrides. For `server-certificate-unavailable`,
+install or renew the Server Authentication certificate for the configured
+host in `LocalMachine\My`. For `server-certificate-key-unusable`, the certificate
+metadata matches but its machine private key cannot sign or its public key
+cannot verify the signature. Check the win-acme renewal's `My` or `WebHosting`
+entry and key availability; copying a public `.cer` cannot restore a missing
+private key. The installed import helper copies the existing machine-key
+association only when that key proves usable.
+If the service remains stopped with a usable certificate, inspect its
+Application Event Log entries and rerun the packaged certificate-grant helper.
+For `service-not-running`, inspect those events and
+the service account before restarting the service. A
+`tcp-listener-missing-or-foreign` or `udp-listener-missing-or-foreign` result
+means port 99 is unbound or held by another process; inspect the reported
+service PID and the corresponding `Get-Net*` endpoint command above.
+`tcp-allow-rule-missing` and `udp-allow-rule-missing` identify local rule
+configuration only. `local-health-or-tls-failed` includes `curlExitCode`;
+after the service owns TCP 99, check certificate trust, name and the local
+`/healthz` response. `dns-check-unavailable` means the public name did not
+resolve from the server. Any `*-check-unavailable` result means that check
+could not run and must not be treated as a pass.
 
 Both Windows Firewall and the server provider must permit TCP and UDP 99.
 `/healthz` reports HTTP service health. From a **different network**, run the
@@ -102,7 +182,13 @@ psp probe sync.taskscape.com:99
 
 The JSON must report `tcp.reachable` and `udp.reachable` true, with the
 server-observed address. Exit code 0 requires both. If TCP works and UDP fails,
-check provider UDP filtering and QUIC support. A local probe proves only the
+check provider UDP filtering and QUIC support. Both requests carry one
+`sessionId`; find it as `sessionId` on the server's `rendezvous.probed` events,
+which also identify HTTP/2 versus HTTP/3. `correlated: true` confirms the server
+echoed that ID. A failed leg includes a bounded `category`, exception type and,
+when available, socket, QUIC, HTTP request and native error codes. No server
+event for a leg means it did not reach the HTTP handler; it does not alone
+identify the blocking firewall or network hop. A local probe proves only the
 server's own listeners, not external reachability.
 
 ## Configure two PCs

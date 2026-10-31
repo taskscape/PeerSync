@@ -33,8 +33,9 @@ try {
         & "$PSScriptRoot/Test-ControlPipeReadiness.ps1"
         # Only projects with real tests are counted; future-phase skeletons are excluded.
         foreach ($name in @('Core','Crypto','Protocol','Net','Engine','Storage','Control.Contracts','Service','App','Rendezvous')) {
-            # Required Server 2022 and Server 2025 jobs each run the complete Engine
-            # suite. Packaging CI can omit its third copy; local default stays full.
+            # Server 2022 and local default run the complete Engine suite.
+            # Server 2025 omits only the approved duplicate capacity method;
+            # packaging CI omits its third Engine copy.
             if ($name -eq 'Engine' -and $SkipEngineTests) { continue }
             & dotnet test --project "tests/PeerSync.$name.Tests/PeerSync.$name.Tests.csproj" -c Release --no-build --report-trx --results-directory artifacts/tests
             if ($LASTEXITCODE -ne 0) { throw "Tests failed: $name" }

@@ -51,10 +51,20 @@ and UDP 99 firewall rules, and preserves `appsettings.json` on upgrade. Run
 `After-RendezvousRenewal.ps1` as the win-acme post-renewal action: it reapplies
 that ACL and restarts the service so Kestrel loads the new certificate.
 
-On the server, first check `Get-Service PeerSyncRendezvous`,
+On the server, first run the packaged
+`Test-RendezvousDeployment.ps1` from the installation directory; its JSON
+`issues` separate local service, listener, certificate, rule, DNS and TLS
+health failures. Then check `Get-Service PeerSyncRendezvous`,
 `Get-NetTCPConnection -LocalPort 99`, and `Get-NetUDPEndpoint -LocalPort 99`.
 From a second PC, run `psp probe sync.taskscape.com:99`; its JSON result must
 show `tcp.reachable` and `udp.reachable` true and the server-observed address.
+Save the JSON `sessionId` and match it to the server's `rendezvous.probed`
+events for the HTTP/2 and HTTP/3 legs. `correlated: true` means the server
+echoed the probe ID; older servers can respond without that field. A failed
+leg reports a short category and available exception, socket, QUIC, HTTP
+request and native codes, without exception messages. A timeout or missing
+server event narrows the failed leg but does not prove which network hop
+blocked it. The probe ID is diagnostic correlation, not device authentication.
 An HTTP/2 success with HTTP/3 failure points to UDP 99, QUIC or provider
 filtering. Neither a local probe nor a virtual LAN probe proves provider
 reachability from another network. Check the service certificate subject and
@@ -66,7 +76,18 @@ The server writes structured events to
 `C:\ProgramData\PeerSync.Rendezvous\logs` with debug events enabled by default.
 It records startup, HTTP/2 or HTTP/3 probes, authentication rejection,
 presence updates, punch introductions, relay joins/leaves, rate limits and
-session close. Application Event Log entries from `PeerSyncRendezvous` contain
+session close. A framework-level HTTP 429 increments the rate-limit counter
+and writes a sampled `rendezvous.http_rate_limited` warning at most once per
+five seconds per server process, with the request protocol and observed endpoint;
+the default bundle removes the endpoint. An authenticated tracker rejection or initial-announcement
+deadline writes `rendezvous.session_failed` under the ID sent in the stream's
+first observed-address response. Relay token/join rejection writes
+`rendezvous.relay_join_rejected` with a fixed code and without the token;
+relay forwarding quota failures retain their joined session ID. A probe ID
+belongs only to the two unauthenticated health legs and is separate from any
+later tracker or relay session ID. An offer revoked before both relay participants
+join reports `Aborted`; an unanswered join deadline reports `DeadlineExceeded`.
+Application Event Log entries from `PeerSyncRendezvous` contain
 warning/error event names, operation, session ID and error code. They omit IPs,
 FolderIds, keys, paths and payloads. The configured OTLP endpoint exports
 aggregate counters for tracker/relay sessions, relay bytes, rejected auth,
@@ -90,6 +111,52 @@ On both PCs run `psp diagnostics --logs <service-log-directory> --output
 UTC timestamps and session IDs: `tracker.session_connected`,
 `tracker.peer_list_received`, `tracker.relay_offer_received`,
 `rendezvous.relay_joined`, `service.peer_connected`, and sync-pass events.
+
+For one bounded collection on each installed machine, run these in elevated
+Windows PowerShell. Each invocation creates a new directory, prints the path
+to `deployment-evidence.json`, and writes that sanitized summary plus a ZIP.
+The client command probes the central server using HTTP/2 and HTTP/3; omit
+`-ProbeHost` when testing an offline machine. The server command includes its
+installed local deployment preflight. Nonzero exit leaves the summary and any
+successfully collected bundle in place with issue codes; it does not change
+service settings.
+
+```powershell
+& "$env:ProgramFiles\PeerSync\tools\Collect-DeploymentEvidence.ps1" `
+  -Role Client -ProbeHost sync.taskscape.com:99
+& "$env:ProgramFiles\PeerSync Rendezvous\Collect-DeploymentEvidence.ps1" `
+  -Role Rendezvous
+```
+
+Pass `-OutputDirectory C:\Temp\PeerSync-field-machine1` to choose a new,
+nonexistent directory. The summary keeps the probe correlation ID and
+per-protocol result but omits the observed address, peer identities, folder
+keys and raw settings. It records installed binary signature and hash, SCM
+state and account, client listener ownership when configured, crash-policy
+audit and a SHA-256 hash for its default sanitized ZIP. A new client with no
+registered folder may not have started its listener yet.
+It does not assert that a folder synced or that an outside provider admits
+port 99; retain a file-hash comparison and an outside-network probe for those
+gates.
+
+`tracker.outgoing_full` means the bounded tracker stream did not accept a
+relay or punch request; its `errorCode` names only the request kind. The
+connection attempt fails promptly and the maintainer can retry. Folder and
+address changes are coalesced into the latest announcement once the writer
+can send again. A failed writer ends its tracker session and reconnects.
+`tracker.announced_initial` and `tracker.announced_refresh` are emitted only
+after the corresponding gRPC write completes. Their `itemsVisited` field is
+the announced folder count, not a folder identity. For a tracker disconnect,
+`tracker.session_failed` reports the gRPC status as `rpc_<status>`, session
+duration in `elapsedMs`, and a nested native socket error when one exists.
+The server's observed-address reply supplies the `sessionId` logged as
+`tracker.session_identified`; later client failure and disconnect events use
+that same ID. Match it with `rendezvous.session_opened`,
+`rendezvous.announced`, failure and close events in the server bundle. Server
+failures include elapsed time and a nested native socket error when available;
+closure includes elapsed time. An intentional client stop logs a disconnect
+without a false failure. A client-side reset still cannot, by itself, identify
+whether the server or an intermediary closed the connection.
 The default bundles omit network addresses; add `--include-network-addresses`
 only when routing details are needed and review the ZIP before sharing it.
 Diagnostics expire IP-bearing journal files within 24 hours; the collector
@@ -119,10 +186,26 @@ structured event fields. Files roll by UTC day, keep 30 days, and stay out of
 `psp diagnostics` bundles. Review a text log before sharing it. Messages and
 stacks can contain paths and addresses. Folder keys and private keys are redacted.
 
-The diagnostic journal defaults to seven files of at most 14 MB each. Files
-containing network addresses expire at 24 hours on the next write. Collection
-also filters events to the last 24 hours. Debug disk writes are synchronous;
+The diagnostic journal defaults to seven files of at most 14 MB each. Its
+15-minute timer removes journal files 24 hours after their oldest file timestamp,
+even when the service is idle; a write also checks for expired files. Removal
+can discard newer events in the same file. Collection independently filters
+events to the last 24 hours. Debug disk writes are synchronous;
 only emit progress at bounded intervals rather than for every transferred chunk.
+
+With debug logging enabled, each scanner pass also emits
+`scan.memory_enumerated`, `scan.memory_hashed` and `scan.memory_committed`.
+Each event carries the same scan session ID, elapsed time, visited-item count,
+and numeric `workingSetBytes`, `privateBytes` and `managedHeapBytes`. These are
+point-in-time process samples, not a process-wide peak or proof that the
+300 MB scale target holds throughout a scan. The sanitized diagnostic bundle
+keeps these numbers and still excludes paths and content.
+
+`scan.observation_discarded` records cleanup of an abandoned private native
+walk after its exclusive owner lock is released. `scan.observation_cleanup_deferred`
+warns that owned stage files could not be removed; neither event includes a
+path or staged metadata. Such files are not a published index and are never
+used as deletion evidence on restart.
 
 Run `psp diagnostics --logs <log-directory> --output <new-zip>` on both
 machines immediately after reproducing. The command retains only an explicit
@@ -130,12 +213,40 @@ allowlist of structured fields, filters events to the last 24 hours, excludes
 network addresses and ports by default, and includes environment metadata. It excludes
 settings, databases, certificates, keys, arbitrary logs, crash dumps, unknown
 JSON fields, FolderIds and file contents. Review the bundle before sharing it.
+When a busy host produces more than the 100,000-event bundle ceiling, the
+collector keeps the newest events and reserves up to 20,000 places for recent
+warnings/errors. It writes one chronological sanitized `debug-000.jsonl` and
+reports both fields in `environment.json` and prints the omitted count in the
+command output. An omitted count means the archive is a sample; collect closer to the
+failure or inspect the raw local journal before drawing a negative conclusion.
 Add `--include-network-addresses` only when routing details are needed. The
 collector prints included, expired and invalid event counts and refuses to
 create an archive with no recent valid events. If it reports no events, use
 the exact `LOGS` directory printed by the service or probe, including any
 process-ID child directory. Collect after the failed run, not before it.
 Check both PCs' clocks if every event is filtered as expired.
+
+For a joined physical PC whose operator is not working in a terminal,
+`build/field/Collect-PeerSync-Diagnostics.cmd` runs the installed `psp
+diagnostics` command from its own folder. Copy it into the joined test folder
+and double-click it there; the sanitized `PeerSync-diagnostics-*.zip` is
+created beside it and can sync to the other PC. The helper does not request
+elevation, change configuration, include network addresses, or install an
+update. Its window stays open to show a collection error. Review the ZIP
+before sharing it outside the test group. A local double-click-equivalent
+smoke of the `.cmd` returned exit 0 and created a sanitized ZIP under
+`artifacts/field/diagnostic-collector-batch-smoke-20261024/`.
+
+If the joined folder is not syncing, run the already installed CLI from any
+PowerShell directory and transfer the printed ZIP by another private channel:
+
+```powershell
+$out=Join-Path $env:TEMP ('PeerSync-diagnostics-{0:yyyyMMdd-HHmmss}.zip' -f (Get-Date)); & "$env:ProgramFiles\PeerSync\cli\psp.exe" diagnostics --output $out
+```
+
+This path does not rely on the collector `.cmd` arriving through PeerSync.
+The bundle remains sanitized by default. The version installed on the machine
+must include the bounded-sample collector for a high-volume journal.
 
 `build/Collect-Diagnostics.ps1` remains a legacy development-probe collector.
 It copies source event lines and does not apply the CLI's strict field
@@ -219,22 +330,31 @@ service checks caller identity on every RPC.
 Run `psp status` on the affected device to check the local service pipe,
 production-sync availability and current peer clock states. `psp status --json`
 returns the same snapshot for scripts; a failed owner/PID check or unavailable
-service exits nonzero with a short error category.
+service exits nonzero with a short error category. Its `peers` array contains
+clock **sessions**, so one device/folder can have separate connected rows for
+its initiated index stream and request handler. This alone does not mean two
+transport connections won duplicate resolution. Use `psp peers <folder>
+--json` for the folder's device roster. A status row's `sessionId` is the
+local index-session identifier; the selected transport's ID appears in
+`service.folder_peer_ready` and either `connection.candidate_selected` or
+`connection.incoming_selected` events.
 
 | Event | What it tells you |
 | --- | --- |
 | `service.quic_listener_ready`, `service.tcp_listener_ready` | QUIC or TCP listener bound the configured device port. Both should be present and use the same number. If one is absent, inspect `service.start_failed` and the immediately preceding event. |
 | `service.lan_discovery_unavailable`, `discovery.lan_socket_unavailable`, `discovery.lan_send_failed` | Local multicast/broadcast discovery could not start or send. Compare firewall and active interface state on both devices; explicit predefined hosts bypass LAN discovery. |
+| `discovery.lan_memberships`, `discovery.lan_membership_join_failed`, `discovery.lan_membership_refresh_failed` | An address-change refresh reports desired/joined IPv4 or IPv6 interface counts, or a sanitized failure category. These events contain no adapter names or network addresses; inspect local adapter state separately when a path fails. |
 | `service.lan_peer_discovered` | A matching folder-tagged LAN announcement was received. If this appears on only one side, compare the LAN-enabled folder set and interface/firewall rules. |
 | `discovery.host_resolution_failed`, `discovery.host_dial_failed` | A configured host did not resolve or authenticate. Verify `host:port`, DNS and the remote service listeners. |
 | `control.predefined_hosts_updated` | An authorized local caller replaced a folder's configured direct endpoints; `itemsChanged` is the host count, and endpoint values are not logged. |
-| `connection.candidate_started`, `connection.candidate_failed`, `connection.reconnect_failed` | The `operation` identifies LAN/public/punch/relay source and QUIC/TCP transport; failed attempts retain the sanitized error category and HRESULT. The endpoint address and port are recorded locally but omitted from `psp diagnostics` unless `--include-network-addresses` is used. QUIC starts first and TCP follows after the 250 ms stagger, so TCP can win before a slow QUIC timeout. Reconnects back off from one second to five minutes. |
 | `tracker.peer_list_received`, `tracker.peer_seen` | The folder fingerprint and peer counts show whether rendezvous reported another device for this specific folder. `itemsChanged` on the list counts valid nonlocal peers and `itemsDeferred` counts peers with neither a direct endpoint nor an enabled relay. `tracker.peer_seen` pairs a peer fingerprint with the folder so later candidate events can be matched. A zero list on one endpoint while the other announced the folder points to tracker presence or announcement state. |
 | `service.peer_candidate_inventory` | For one peer fingerprint, `itemsVisited` is the total candidate count, `itemsChanged` is the relay candidate count, and `itemsDeferred` is the number of disconnected configured trackers. Zero candidates explains a following reconnect failure without guessing which folder it concerned. |
 | `service.relay_request_queued`, `service.relay_request_rejected`, `service.relay_offer_timeout`, `tracker.relay_offer_received` | A relay request was queued locally, could not be queued, timed out waiting for an offer, or received an offer. Match the peer fingerprint, folder fingerprint where available, and UTC time. |
 | `tracker.relay_request_sent`, `tracker.announcement_sent`, `tracker.announcement_queue_full` | The tracker stream actually wrote a relay request or current announcement, or could not queue an updated announcement. Network recovery refreshes the announcement so the server sees new interface addresses promptly. |
 | `rendezvous.relay_request_rejected`, `rendezvous.relay_offered` | The rendezvous log distinguishes a target absent from that folder from an unavailable relay offer. Match the folder and target peer fingerprints to the requester log. |
 | `rendezvous.folder_announced` | The server accepted an announcement for this folder from the identified device. Compare both devices' fingerprints and the later `rendezvous.session_closed` events to see whether both remained present when the relay was needed. |
+| `connection.candidate_started`, `connection.candidate_authenticated`, `connection.candidate_selected`, `connection.candidate_failed`, `connection.reconnect_failed` | The `operation` identifies LAN/public/punch/relay candidate source and QUIC/TCP transport. Match `candidate_selected` to `service.folder_peer_ready` and both endpoints' transport logs by their transport `sessionId`; this differs from the `psp status` clock-session ID. Candidate events include a peer fingerprint when the expected device is known. `candidate_authenticated` may describe a path later superseded by duplicate resolution. A `public` source label does not alone prove packets crossed an outside network. Failed attempts retain the sanitized error category and HRESULT; a socket failure also records its numeric Windows `nativeError`, including when wrapped by an I/O exception. Started and selected events retain the endpoint address and port in the local raw journal when known; `psp diagnostics` omits both unless `--include-network-addresses` is used. Authenticated events contain no endpoint address. QUIC starts first and TCP follows after the 250 ms stagger, so TCP can win before a slow QUIC timeout. Reconnects back off from one second to five minutes. |
+| `connection.incoming_selected` | An authenticated incoming connection won duplicate resolution. Its `sessionId` and transport identify the selected session; QUIC/TCP remote address and port are recorded only in the local raw journal and in an address-opted-in bundle. Relay sessions carry the Relay transport without a peer endpoint. The address establishes the actual remote socket, but a private address or LAN discovery alone does not prove the physical path; compare the host route and interface. Losing duplicates do not emit this event. `psp peers <folder> --json` also exposes the connected peer's transport without exposing its network address. |
 | `service.peer_endpoint_expired`, `service.peer_endpoint_limit_reached` | Reconnect targets expire after 15 minutes without observation and are capped at 16 per peer. These events report only counts, so roaming and stale-address cleanup can be diagnosed without disclosing the peer identity or endpoint. Repeated observations refresh an endpoint and the strongest known source (LAN before public) is retained. |
 | `transport.tcp_connect_failed`, `transport.tcp_data_attach_failed` | TCP control or data-lane setup failed. `operation` gives the bounded connect/TLS/pin/ticket/admission stage; HRESULT and socket native error are recorded when available. Certificate names and exception text are omitted. |
 | `transport.authenticated`, `transport.handshake_failed`, `transport.stream_failed`, `transport.disconnected` | Authenticated session lifecycle across QUIC and TCP; compare the transport and session ID fields with both endpoints. |
@@ -243,6 +363,8 @@ service exits nonzero with a short error category.
 | `service.folder_sync_pass`, `service.folder_sync_failed` | Repeated resumable index exchange and apply pass. Deferred/failed counts mean work remains; compare the session and timestamp with engine `apply.*`, `index.*` and filesystem events. |
 | `service.peer_session_failed`, `transport.stream_failed` | Session or stream closed after authentication. Check the earlier Hello, folder-auth and clock events before interpreting the transport error. |
 | `service.folder_scheduler_stopped`, `service.peer_accept_failed` | A host loop stopped unexpectedly; the service exits visibly rather than silently dropping scans or accepts. |
+| `service.folder_paused`, `service.folder_resumed`, `service.folder_settings_updated` | An active folder was drained and reopened for a policy change. `itemsDeferred=1` on the settings event means a network policy refresh needs a service restart. A pause without resume after a settings request means the new policy stayed safely paused for retry. |
+| `service.folder_policy_refresh_failed` | The replacement engine opened, but LAN, tracker or predefined-host policy could not be refreshed. Inspect the sanitized error category and restart the service to apply the saved network policy. |
 | `control.folder_added`, `control.folder_joined`, `control.folders_listed`, `control.peers_listed`, `control.index_dumped` | A local control operation completed. Counts and session IDs are recorded; keys and folder paths are omitted. |
 | `control.folder_request_failed` | A local control operation failed. `errorCode` is the exception category; the RPC returns a sanitized status message. |
 | `control.folder_keys_read` | An authorized caller retrieved a key through the audited RPC. The key and folder ID are not logged. |
@@ -271,11 +393,19 @@ restarting or modifying the files.
 | `apply.case-route-failover` | Another known peer supplied verified content. The durable hint can be reused on later attempts. |
 | `directory.metadata_deferred` | Snapshot metadata recovery could not advance. Inspect the exception category and native error; missing metadata is never an empty subtree. |
 | `directory.publication_pending` | A bounded child capture needs more passes; visited/changed counts show progress. |
+| `directory.publication_time_prepare`, `_capture`, `_rebase`, `_parent_roots`, `_publication`, `_commit` | Debug-only milliseconds for one queued directory stage, correlated by its session ID. `itemsVisited` reports captured or proven members where relevant. The event name identifies the stage; no directory path is logged. |
+| `directory.queue_unchanged` | A queued directory matched its current signed snapshot and was released without a new local version. Repeated occurrences during a large source publication can indicate rescans restaging completed siblings. |
+| `directory.signed_leaf_cache_hit` | A local-only leaf with a stale global epoch still matched its exact signed child input. `itemsVisited` is its child count; no directory name or hash is logged. |
 | `directory.rebase_pending` | A received original subtree still needs causal verification. `itemsDeferred` distinguishes waiting from budget continuation. |
 | `directory.parent_roots_pending` | At least one eligible original parent root remains unproven. Metadata recovery or ordinary child receipt may be required. |
 | `directory.parent_roots_complete` | Every eligible root is covered by authenticated current children for this attempt. Final commit still revalidates the witnesses. |
 | `directory.parent_clock_template` | Parent clocks were absorbed before publication. `proven-root-floor` means all eligible roots were proven. |
 | `directory.publication_retry` | `errorCode` starts with the failing stage, such as `parent-roots`, `history` or `commit`, followed by the exception category or `pending`. Inspect native error and retry delay. |
+| `puller.publication_scan_deferred` | A full native scan is being shared across consecutive live-file batches. `itemsDeferred` is the installed file count awaiting a parent-snapshot scan; `retryInMs` is the remaining five-minute ceiling. |
+| `puller.publication_scan_flushed` | A completed scan caught up with those installed files. `itemsChanged` is the coalesced count and `elapsedMs` is its age. A missing flush after a deferred event warrants inspection of later scan/retry events. |
+| `puller.own_write_watch_coalesced` | A watcher batch contains only paths recently written by this folder's remote-file coordinator. The pass still runs, but it shares the pending publication scan; `itemsDeferred` is the number of watcher paths. Unrelated paths and overflow request a scan immediately. |
+| `scheduler.pass_start`, `scheduler.pass_complete` | The installed folder scheduler ran the shared transport coordinator, which owns recovery, native scanning, needed-work repair and publication. Completion reports scanned entries, applied work and deferred/problem counts. Direct scanner-only hosts retain `scheduler.scan_start`. |
+| `puller.startup_recovery_complete`, `puller.startup_recovery_failed` | The installed folder drained pending native apply state before exposing its coordinator-owned scanner. The completion event counts recovered intents; a failure records only exception and native-error categories and keeps the folder unavailable. |
 
 These events intentionally omit file paths, content hashes, keys and signed
 records. Counts and session IDs support comparison without disclosing folder

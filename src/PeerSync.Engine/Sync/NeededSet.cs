@@ -34,7 +34,7 @@ public sealed class NeededSet
         if (ownDevice.Length != 32) throw new ArgumentException("Device identifier must contain 32 bytes.", nameof(ownDevice));
         this.index = index; this.keys = keys; this.ownDevice = ownDevice.ToArray();
         this.settings = FolderSettings.FromJson((settings ?? new()).ToJson());
-        this.ignore = ignore ?? new();
+        this.ignore = ignore ?? new IgnoreMatcher(this.settings.IgnoreRules);
         this.journal = journal;
     }
 
@@ -111,6 +111,8 @@ public sealed class NeededSet
 
     public async Task<int> RecomputeAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
     {
+        // Caller-owned collections can be reused while the reference gate is
+        // queued. Scanner-scale recomputation takes RebuildAsync instead.
         ArgumentNullException.ThrowIfNull(paths); string[] requested = paths.ToArray();
         using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
         return await index.RecomputeNeededAsync(requested, ToNeededRow, cancellationToken).ConfigureAwait(false);
@@ -119,9 +121,7 @@ public sealed class NeededSet
     public async Task<int> RebuildAsync(CancellationToken cancellationToken = default)
     {
         using var operation = await FolderReferenceGate.AcquireAsync(index, cancellationToken).ConfigureAwait(false);
-        var paths = index.LocalFiles.ReadAll().Select(r => r.Path).Where(PathRules.IsValid)
-            .Concat(index.RemoteFiles.ReadAll().Select(r => r.PathKey)).Concat(index.Needed.ReadAll().Select(r => r.PathKey));
-        return await index.RecomputeNeededAsync(paths, ToNeededRow, cancellationToken).ConfigureAwait(false);
+        return await index.RecomputeAllNeededAsync(ToNeededRow, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Use a current transaction snapshot when making a decision that will be committed.</summary>
