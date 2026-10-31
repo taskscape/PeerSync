@@ -1,13 +1,13 @@
 # Azure diagnostic capture for the two-PC Tailscale failure
 
-Status: implemented in source on 2026-10-31. The dedicated West Europe
+Status: implemented and deployed on 2026-10-31. The dedicated West Europe
 `PeerSyncDiagnostics` Application Insights resource and
 `PeerSyncDiagnostics-weu` Log Analytics workspace exist in the
 `PeerSyncDiagnostics` resource group. The workspace retains logs for 30 days
 and has a 0.1 GB/day ingestion cap. The local production PC has been upgraded
-to version 1.0.1.0, and the rendezvous server at `sync.taskscape.com` has been
-upgraded to version 1.0.43.0 from its separate `p5-hardening` code line. Both
-are sending telemetry to Azure. The second PC has not yet been upgraded.
+to version 1.0.1.0, the second PC (`R5-7600X`) to version 1.0.1.0, and the
+rendezvous server at `sync.taskscape.com` to version 1.0.43.0 from its
+separate `p5-hardening` code line. All three are sending telemetry to Azure.
 
 ## Purpose
 
@@ -111,8 +111,8 @@ still cannot explain the failure.
 
 ## Reproduction and interpretation
 
-1. Deploy the same diagnostic build to both PCs and the rendezvous server.
-   Confirm exporter health and that all three emit a startup/version event.
+1. Confirm exporter health and that both client services and the rendezvous
+   server emit a recent startup/version event and heartbeat.
 2. Record the UTC time, folder fingerprint, which PC loses Tailscale, and the
    exact file change used to test transfer. Keep both PeerSync services running.
 3. Capture a five-minute healthy baseline, disconnect Tailscale on one PC,
@@ -179,8 +179,8 @@ should allow several minutes before treating absence as evidence.
   Verify the exporter failure path leaves sync functional and reports local
   queue/export health.
 
-To diagnose the two-PC failure, install the client diagnostic build on the
-second PC, then run the reproduction. The self-contained x64 client package at
+To diagnose the two-PC failure, run the controlled reproduction now that both
+clients and the server are instrumented. The self-contained x64 client package at
 `artifacts/deploy/PeerSync-AzureDiagnostics-2026-10-31` contains an elevated
 `Install-DiagnosticBuild.ps1` upgrade script and its README. Close the client
 desktop app before upgrading it. The script backs up old binaries, preserves
@@ -221,9 +221,18 @@ built from its installed `b7e4b67` revision, preserving its relay behavior.
   `codex/server-azure-diagnostics` worktree at
   `C:\Projects\PeerSync-server-diagnostics` (commit `9d52190`); its release
   build had zero warnings/errors and all 26 rendezvous tests passed.
-- The second PC is still on its existing build. The Tailscale failure's root
-  cause is still unknown until its telemetry and a controlled reproduction
-  are available.
+- The second PC, `R5-7600X` (`100.118.160.63`), was upgraded from the same
+  `2f99521` source revision as the local PC to version 1.0.1.0. Its service is
+  running and its desktop app was reopened in the logged-in user's session.
+  Its previous binaries are in
+  `%ProgramData%\PeerSync\backups\diagnostic-Client-20261031T175340Z`.
+  Azure contains `service.telemetry_ready` at 17:53:42 UTC for origin
+  `553514448BFBAF67`, which matches the peer fingerprint previously seen in
+  this PC's logs. The 17:56:42 UTC heartbeat reported zero dropped events.
+- Azure showed recent heartbeats from both clients and the server at the same
+  time, each reporting zero dropped events. The Tailscale failure's root
+  cause remains unknown until a controlled Tailscale-off reproduction is
+  captured on this three-source timeline.
 
 ## Reference documentation
 
