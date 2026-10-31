@@ -38,6 +38,7 @@ public sealed class DiagnosticJournal : IDisposable
     }
 
     public bool DebugEnabled { get; }
+    public string RunId => runId;
     public long DroppedEvents => Interlocked.Read(ref droppedEvents);
     /// <summary>In-process, best-effort metadata feed for local status surfaces.</summary>
     public event Action<DiagnosticEvent, DateTime>? EntryWritten;
@@ -58,6 +59,8 @@ public sealed class DiagnosticJournal : IDisposable
         ValidateCode(entry.Event);
         ValidateCode(entry.Operation);
         if (entry.ErrorCode is not null) ValidateCode(entry.ErrorCode);
+        ValidateFingerprint(entry.FolderFingerprint);
+        ValidateFingerprint(entry.PeerFingerprint);
         if (entry.RemotePort is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(entry), "A diagnostic remote port must be a valid TCP or UDP port.");
         DateTime occurredUtc = DateTime.UtcNow;
@@ -71,6 +74,8 @@ public sealed class DiagnosticJournal : IDisposable
             eventName = entry.Event,
             operation = entry.Operation,
             sessionId = entry.SessionId,
+            folderFingerprint = entry.FolderFingerprint,
+            peerFingerprint = entry.PeerFingerprint,
             traceId = Activity.Current?.TraceId.ToString(),
             transport = entry.Transport?.ToString(),
             bytes = entry.Bytes,
@@ -116,6 +121,12 @@ public sealed class DiagnosticJournal : IDisposable
             throw new ArgumentException("Diagnostic codes must be short identifiers.", nameof(code));
     }
 
+    private static void ValidateFingerprint(string? fingerprint)
+    {
+        if (fingerprint is not null && (fingerprint.Length != 16 || fingerprint.Any(c => !char.IsAsciiHexDigitUpper(c))))
+            throw new ArgumentException("A diagnostic fingerprint must contain 16 uppercase hexadecimal digits.");
+    }
+
     private void Rotate(string file, int incoming)
     {
         // IP-bearing debug events expire after 24h, including the active file.
@@ -151,6 +162,8 @@ public sealed record DiagnosticEvent(string Event, string Operation)
     public long? ItemsDeferred { get; init; }
     public DiagnosticLevel Level { get; init; } = DiagnosticLevel.Information;
     public Guid? SessionId { get; init; }
+    public string? FolderFingerprint { get; init; }
+    public string? PeerFingerprint { get; init; }
     public DiagnosticTransport? Transport { get; init; }
     public long? Bytes { get; init; }
     public double? ElapsedMilliseconds { get; init; }

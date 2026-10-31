@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using PeerSync.Service.Init;
 using PeerSync.Service.Settings;
 using PeerSync.Service.Control;
+using PeerSync.Core.Settings;
 using Shouldly;
 using Xunit;
 
@@ -12,6 +13,21 @@ namespace PeerSync.Service.Tests;
 public sealed class InitCommandTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "PeerSync.Init.Tests", Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void AzureOptOutAndFullDiagnosisSurviveSettingsPersistenceAndControlUpdate()
+    {
+        var store = new SettingsStore(Path.Combine(root, "config", "settings.json"));
+        var settings = new DeviceSettings
+        { DeviceName = "test", ListenPort = 12345, SendDiagnosticsToAzure = false, FullDiagnostics = true };
+        store.Save(settings);
+        var restored = store.ReadIfPresent();
+        restored.ShouldNotBeNull().SendDiagnosticsToAzure.ShouldBeFalse();
+        restored.FullDiagnostics.ShouldBeTrue();
+        var control = SettingsStore.ParseControlUpdate(ControlSettingsRuntime.Serialize(restored));
+        control.SendDiagnosticsToAzure.ShouldBeFalse();
+        control.FullDiagnostics.ShouldBeTrue();
+    }
 
     [Fact]
     public void InitCreatesDefaultSettingsAndSecondRunIsNoOp()

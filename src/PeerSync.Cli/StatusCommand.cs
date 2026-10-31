@@ -85,7 +85,7 @@ public static class StatusCommand
             clockStatusTruncated = status.ClockStatusTruncated,
             peers = status.Clocks.Select(row => new
             {
-                folderFingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(row.FolderId))[..16],
+                folderFingerprint = PeerSync.Core.Diagnostics.DiagnosticFingerprint.FromId(row.FolderId),
                 deviceId = Convert.ToHexString(row.Session.RemoteDeviceId),
                 sessionId = row.Session.SessionId,
                 connected = row.Session.IsConnected,

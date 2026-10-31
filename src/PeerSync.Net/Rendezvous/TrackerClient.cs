@@ -23,7 +23,7 @@ internal sealed class TrackerClient : IAsyncDisposable
     private readonly DiagnosticJournal? diagnostics;
     private readonly X509Certificate2? loopbackServerCertificate;
     private readonly Channel<ClientMessage> outgoing = Channel.CreateBounded<ClientMessage>(
-        new BoundedChannelOptions(128) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+        new BoundedChannelOptions(128) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
     private readonly CancellationTokenSource stopping = new();
     private Task? worker;
     private int connected;
@@ -54,7 +54,12 @@ internal sealed class TrackerClient : IAsyncDisposable
     internal void Refresh()
     {
         if (IsConnected)
-            outgoing.Writer.TryWrite(new ClientMessage { Announce = announcement() });
+        {
+            Announce next = announcement();
+            if (!outgoing.Writer.TryWrite(new ClientMessage { Announce = next }))
+                diagnostics?.TryWrite(new("tracker.announcement_queue_full", "rendezvous")
+                { Level = DiagnosticLevel.Warning, ItemsVisited = next.FolderIds.Count });
+        }
     }
 
     internal bool RequestRelay(ReadOnlySpan<byte> peerDeviceId, ReadOnlySpan<byte> folderId)
@@ -109,8 +114,11 @@ internal sealed class TrackerClient : IAsyncDisposable
         // The preceding stream's writer is finished before reconnect starts.
         // Its queued requests refer to an old presence snapshot or relay offer.
         while (outgoing.Reader.TryRead(out _)) { }
-        await call.RequestStream.WriteAsync(new ClientMessage { Announce = announcement() }, linked.Token)
+        Announce initial = announcement();
+        await call.RequestStream.WriteAsync(new ClientMessage { Announce = initial }, linked.Token)
             .ConfigureAwait(false);
+        diagnostics?.TryWrite(new("tracker.announcement_sent", "rendezvous")
+        { ItemsVisited = initial.FolderIds.Count, ItemsChanged = initial.LocalEndpoints.Count });
         Volatile.Write(ref connected, 1);
         diagnostics?.TryWrite(new("tracker.session_connected", "rendezvous")
         { Transport = DiagnosticTransport.Http2 });
@@ -135,7 +143,17 @@ internal sealed class TrackerClient : IAsyncDisposable
     private async Task WriteLoopAsync(IClientStreamWriter<ClientMessage> requests, CancellationToken cancellationToken)
     {
         await foreach (ClientMessage message in outgoing.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
             await requests.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+            if (message.RelayRequest is { } relayRequest && relayRequest.DeviceId.Length == 32
+                && relayRequest.FolderId.Length == 32)
+                diagnostics?.TryWrite(new("tracker.relay_request_sent", "rendezvous")
+                { PeerFingerprint = DiagnosticFingerprint.FromId(relayRequest.DeviceId.Span),
+                    FolderFingerprint = DiagnosticFingerprint.FromId(relayRequest.FolderId.Span) });
+            else if (message.Announce is { } announce)
+                diagnostics?.TryWrite(new("tracker.announcement_sent", "rendezvous")
+                { ItemsVisited = announce.FolderIds.Count, ItemsChanged = announce.LocalEndpoints.Count });
+        }
     }
 
     private async Task AnnounceTickerAsync(CancellationToken cancellationToken)

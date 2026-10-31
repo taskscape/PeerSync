@@ -366,6 +366,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     && folder.Keys.FolderId().AsSpan().SequenceEqual(message.PeerList.FolderId.Span));
                 var present = new HashSet<string>(StringComparer.Ordinal);
                 var discovered = new List<(string Key, byte[] DeviceId, bool HasDirectEndpoint)>();
+                string folderFingerprint = DiagnosticFingerprint.FromId(message.PeerList.FolderId.Span);
                 foreach (Peer peer in message.PeerList.Peers.Take(1024))
                 {
                     if (peer.DeviceId.Length != 32 || peer.DeviceId.Span.SequenceEqual(localDeviceId)) continue;
@@ -386,10 +387,22 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 relayPresence.Update(server, message.PeerList.FolderId.Span, present,
                     relayEnabled, timeProvider.GetUtcNow());
                 foreach (var peer in discovered)
+                {
+                    diagnostics?.TryWrite(new("tracker.peer_seen", "rendezvous")
+                    { FolderFingerprint = folderFingerprint,
+                        PeerFingerprint = DiagnosticFingerprint.FromId(peer.DeviceId),
+                        ItemsVisited = peer.HasDirectEndpoint ? 1 : 0,
+                        ItemsChanged = relayEnabled ? 1 : 0 });
                     if (peer.HasDirectEndpoint || relayEnabled)
                         EnsureMaintainer(peer.Key, peer.DeviceId);
+                    else diagnostics?.TryWrite(new("tracker.peer_without_route", "rendezvous")
+                    { Level = DiagnosticLevel.Warning, FolderFingerprint = folderFingerprint,
+                        PeerFingerprint = DiagnosticFingerprint.FromId(peer.DeviceId),
+                        ErrorCode = "no_direct_endpoint_or_relay" });
+                }
                 diagnostics?.TryWrite(new("tracker.peer_list_received", "rendezvous")
-                { ItemsVisited = message.PeerList.Peers.Count });
+                { FolderFingerprint = folderFingerprint, ItemsVisited = message.PeerList.Peers.Count,
+                    ItemsChanged = discovered.Count, ItemsDeferred = discovered.Count(peer => !peer.HasDirectEndpoint && !relayEnabled) });
                 break;
             case ServerMessage.PayloadOneofCase.PunchNow:
                 diagnostics?.TryWrite(new("tracker.punch_introduction_received", "rendezvous")
@@ -398,7 +411,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             case ServerMessage.PayloadOneofCase.RelayOffer:
                 diagnostics?.TryWrite(new("tracker.relay_offer_received", "rendezvous")
                 { SessionId = message.RelayOffer.SessionId.Length == 16
-                    ? new Guid(message.RelayOffer.SessionId.Span) : null });
+                    ? new Guid(message.RelayOffer.SessionId.Span) : null,
+                    PeerFingerprint = message.RelayOffer.PeerDeviceId.Length == 32
+                    ? DiagnosticFingerprint.FromId(message.RelayOffer.PeerDeviceId.Span) : null });
                 break;
         }
         return ValueTask.CompletedTask;
@@ -461,9 +476,31 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
         if (!pendingRelayOffers.TryAdd(key, completion)) throw new IOException("A relay offer is already pending.");
         try
         {
-            if (!tracker.RequestRelay(peerId, folderId)) throw new IOException("Tracker is not connected.");
-            RelayOffer offer = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken)
-                .ConfigureAwait(false);
+            string peerFingerprint = DiagnosticFingerprint.FromId(peerId);
+            string folderFingerprint = DiagnosticFingerprint.FromId(folderId);
+            if (!tracker.RequestRelay(peerId, folderId))
+            {
+                diagnostics?.TryWrite(new("service.relay_request_rejected", "relay")
+                { Level = DiagnosticLevel.Warning, PeerFingerprint = peerFingerprint,
+                    FolderFingerprint = folderFingerprint, ErrorCode = "tracker_unavailable_or_queue_full" });
+                throw new IOException("Tracker is not connected or its outgoing queue is full.");
+            }
+            diagnostics?.TryWrite(new("service.relay_request_queued", "relay")
+            { PeerFingerprint = peerFingerprint, FolderFingerprint = folderFingerprint });
+            RelayOffer offer;
+            try
+            {
+                offer = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException error)
+            {
+                diagnostics?.TryWrite(new("service.relay_offer_timeout", "relay")
+                { Level = DiagnosticLevel.Warning, PeerFingerprint = peerFingerprint,
+                    FolderFingerprint = folderFingerprint, ErrorCode = "offer_timeout",
+                    HResult = error.HResult, Exception = error });
+                throw;
+            }
             RelayTransport transport = await RelayClient.ConnectAsync(server, offer, certificate,
                 IsDevicePinned, cancellationToken).ConfigureAwait(false);
             RelayPeerProtocolSession session = await RelayPeerProtocolSession.StartAsync(transport,
@@ -502,6 +539,10 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                                 token => DialRelayAsync(tracker, server, deviceId, folderId!, token)));
                         }
                     }
+                diagnostics?.TryWrite(new("service.peer_candidate_inventory", "peer_network")
+                { PeerFingerprint = DiagnosticFingerprint.FromId(deviceId), ItemsVisited = candidates.Count,
+                    ItemsChanged = candidates.Count(candidate => candidate.Source == ConnectionSource.Relay),
+                    ItemsDeferred = trackers.Count(tracker => !tracker.IsConnected) });
                 return ValueTask.FromResult<IReadOnlyList<ConnectionCandidate>>(candidates);
             }, stopping.Token);
             maintainers[key] = task;
@@ -594,6 +635,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             // Coalesce address/availability callbacks and let LAN announcements
             // refresh endpoints before the immediate reconnect pass.
             await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, token).ConfigureAwait(false);
+            RefreshTrackerAnnouncements();
             KeyValuePair<Guid, IAsyncDisposable>[] activeSessions = sessions.ToArray();
             foreach (var active in activeSessions)
             {
@@ -806,9 +848,13 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 folderConnections.Add(connection);
                 status.SetPeerSessionActive(managed.SessionId, true);
                 Guid sessionId = connection.SharedSessionId ?? managed.SessionId;
-                workers.Add(SynchronizeFolderAsync(folder, connection, transport, sessionId, sessionStop.Token));
+                string folderFingerprint = DiagnosticFingerprint.FromId(folder.Keys.FolderId());
+                string peerFingerprint = DiagnosticFingerprint.FromId(managed.RemoteDeviceId);
+                workers.Add(SynchronizeFolderAsync(folder, connection, transport, sessionId,
+                    folderFingerprint, peerFingerprint, sessionStop.Token));
                 diagnostics?.TryWrite(new("service.folder_peer_ready", "peer_network")
-                    { SessionId = sessionId, Transport = transport });
+                    { SessionId = sessionId, Transport = transport, FolderFingerprint = folderFingerprint,
+                        PeerFingerprint = peerFingerprint });
             }
             if (folderConnections.Count == 0)
                 diagnostics?.TryWrite(new("service.peer_no_common_approved_folders", "peer_network")
@@ -836,7 +882,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
     }
 
     private async Task SynchronizeFolderAsync(InstalledFolderHost.FolderRuntime folder,
-        PeerFolderConnection peer, DiagnosticTransport transport, Guid sessionId, CancellationToken cancellationToken)
+        PeerFolderConnection peer, DiagnosticTransport transport, Guid sessionId,
+        string folderFingerprint, string peerFingerprint, CancellationToken cancellationToken)
     {
         try
         {
@@ -847,7 +894,8 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                     PeerIndexSyncResult result = await peer.SynchronizeAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                     PullPassResult pull = await folder.Transport.RunPassAsync(cancellationToken).ConfigureAwait(false);
                     diagnostics?.TryWrite(new("service.folder_sync_pass", "peer_network")
-                        { SessionId = sessionId, Transport = transport, ItemsVisited = result.Pages, ItemsChanged = pull.Applied,
+                        { SessionId = sessionId, Transport = transport, FolderFingerprint = folderFingerprint,
+                            PeerFingerprint = peerFingerprint, ItemsVisited = result.Pages, ItemsChanged = pull.Applied,
                             ItemsDeferred = pull.Deferred + pull.Failed });
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -855,6 +903,7 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 {
                     diagnostics?.TryWrite(new("service.folder_sync_failed", "peer_network")
                         { SessionId = sessionId, Transport = transport, Level = DiagnosticLevel.Warning,
+                            FolderFingerprint = folderFingerprint, PeerFingerprint = peerFingerprint,
                             ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
                 }
                 await Task.Delay(SyncInterval, cancellationToken).ConfigureAwait(false);

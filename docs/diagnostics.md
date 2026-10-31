@@ -37,6 +37,12 @@ beta or v1 release. The P0 probes below are separate test executables.
 
 ## Rendezvous server and two-PC diagnosis
 
+For a shared Azure timeline across both PCs and the rendezvous server, see
+[Azure remote diagnostics](azure-remote-diagnostics.md). The client and server
+send sanitized structured events by default in the new diagnostic build.
+The client Preferences dialog and the rendezvous `appsettings.json` each
+provide an independent Azure off switch and a full-diagnostics switch.
+
 Install the rendezvous service only after a current Server Authentication
 certificate for `sync.taskscape.com` with its private key exists in
 `Cert:\LocalMachine\My`. The installer checks that certificate before changing
@@ -139,6 +145,17 @@ unexpected fields.
 Compare timestamps and session IDs. A transport failure before folder auth is
 different from a rejected folder proof, approval wait, missing block, or failed
 filesystem apply. Keep the original error code when reporting a failure.
+For a route that fails before authentication, compare `folderFingerprint` and
+`peerFingerprint` across both endpoint bundles and the rendezvous bundle.
+These are the first 16 hex digits of SHA-256 of the public folder/device ID;
+they match `psp status --json`'s folder fingerprint. They are correlation
+values, not share keys or complete IDs. Capture the three bundles during the
+same failed interval and sort their JSONL records by `timestampUtc`.
+After copying the two endpoint ZIPs and optionally the rendezvous ZIP to one
+machine, `build/Compare-PeerSyncDiagnostics.ps1 -Bundle pc-a.zip,pc-b.zip`
+prints one UTC timeline from their sanitized JSONL events. Add a third ZIP
+for rendezvous, or `-FolderFingerprint <16-hex-value>` to narrow it to one
+folder. Pipe the objects to `Format-Table -AutoSize` or `Export-Csv` as needed.
 Service startup records certificate loading, folder-engine readiness/failure,
 listener readiness and host shutdown. Resume/network changes queue a follow-up
 recovery pass when another signal arrives mid-pass, and queue a follow-up scan
@@ -212,6 +229,12 @@ service exits nonzero with a short error category.
 | `discovery.host_resolution_failed`, `discovery.host_dial_failed` | A configured host did not resolve or authenticate. Verify `host:port`, DNS and the remote service listeners. |
 | `control.predefined_hosts_updated` | An authorized local caller replaced a folder's configured direct endpoints; `itemsChanged` is the host count, and endpoint values are not logged. |
 | `connection.candidate_started`, `connection.candidate_failed`, `connection.reconnect_failed` | The `operation` identifies LAN/public/punch/relay source and QUIC/TCP transport; failed attempts retain the sanitized error category and HRESULT. The endpoint address and port are recorded locally but omitted from `psp diagnostics` unless `--include-network-addresses` is used. QUIC starts first and TCP follows after the 250 ms stagger, so TCP can win before a slow QUIC timeout. Reconnects back off from one second to five minutes. |
+| `tracker.peer_list_received`, `tracker.peer_seen` | The folder fingerprint and peer counts show whether rendezvous reported another device for this specific folder. `itemsChanged` on the list counts valid nonlocal peers and `itemsDeferred` counts peers with neither a direct endpoint nor an enabled relay. `tracker.peer_seen` pairs a peer fingerprint with the folder so later candidate events can be matched. A zero list on one endpoint while the other announced the folder points to tracker presence or announcement state. |
+| `service.peer_candidate_inventory` | For one peer fingerprint, `itemsVisited` is the total candidate count, `itemsChanged` is the relay candidate count, and `itemsDeferred` is the number of disconnected configured trackers. Zero candidates explains a following reconnect failure without guessing which folder it concerned. |
+| `service.relay_request_queued`, `service.relay_request_rejected`, `service.relay_offer_timeout`, `tracker.relay_offer_received` | A relay request was queued locally, could not be queued, timed out waiting for an offer, or received an offer. Match the peer fingerprint, folder fingerprint where available, and UTC time. |
+| `tracker.relay_request_sent`, `tracker.announcement_sent`, `tracker.announcement_queue_full` | The tracker stream actually wrote a relay request or current announcement, or could not queue an updated announcement. Network recovery refreshes the announcement so the server sees new interface addresses promptly. |
+| `rendezvous.relay_request_rejected`, `rendezvous.relay_offered` | The rendezvous log distinguishes a target absent from that folder from an unavailable relay offer. Match the folder and target peer fingerprints to the requester log. |
+| `rendezvous.folder_announced` | The server accepted an announcement for this folder from the identified device. Compare both devices' fingerprints and the later `rendezvous.session_closed` events to see whether both remained present when the relay was needed. |
 | `service.peer_endpoint_expired`, `service.peer_endpoint_limit_reached` | Reconnect targets expire after 15 minutes without observation and are capped at 16 per peer. These events report only counts, so roaming and stale-address cleanup can be diagnosed without disclosing the peer identity or endpoint. Repeated observations refresh an endpoint and the strongest known source (LAN before public) is retained. |
 | `transport.tcp_connect_failed`, `transport.tcp_data_attach_failed` | TCP control or data-lane setup failed. `operation` gives the bounded connect/TLS/pin/ticket/admission stage; HRESULT and socket native error are recorded when available. Certificate names and exception text are omitted. |
 | `transport.authenticated`, `transport.handshake_failed`, `transport.stream_failed`, `transport.disconnected` | Authenticated session lifecycle across QUIC and TCP; compare the transport and session ID fields with both endpoints. |

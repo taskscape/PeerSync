@@ -4,6 +4,7 @@
     <PackageReference Include="Grpc.AspNetCore" />
     <ProjectReference Include="../PeerSync.Control.Contracts/PeerSync.Control.Contracts.csproj" />
     <ProjectReference Include="../PeerSync.Engine/PeerSync.Engine.csproj" />
+    <ProjectReference Include="../PeerSync.Telemetry/PeerSync.Telemetry.csproj" />
     <InternalsVisibleTo Include="PeerSync.Service.Tests" />
     <InternalsVisibleTo Include="PeerSync.App.Tests" />
     <InternalsVisibleTo Include="PeerSync.InstalledProbe" />

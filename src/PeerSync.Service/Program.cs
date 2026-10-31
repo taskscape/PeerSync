@@ -1,9 +1,12 @@
 using System.Security.Principal;
+using System.Security.Cryptography;
 using PeerSync.Core.Diagnostics;
+using PeerSync.Net.Security;
 using PeerSync.Service.Control;
 using PeerSync.Service.Hosting;
 using PeerSync.Service.Init;
 using PeerSync.Service.Settings;
+using PeerSync.Telemetry;
 
 if (args.Length > 0 && string.Equals(args[0], "--init", StringComparison.OrdinalIgnoreCase))
     return InitCommand.Run(args);
@@ -13,6 +16,7 @@ if (args.Length > 0 && string.Equals(args[0], "--remove-data", StringComparison.
 string logs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "logs", "service");
 DiagnosticJournal? journal = null;
 DiagnosticRunJournal? run = null;
+AzureDiagnosticSink? azureSink = null;
 try
 {
     run = DiagnosticRunJournal.Open(logs, "service", debugEnabled: true); journal = run.Journal;
@@ -38,6 +42,26 @@ try
     }
     journal.TryWrite(new(settingsRecovered ? "service.settings_recovered" : "service.settings_loaded", "startup")
     { Level = settingsRecovered ? DiagnosticLevel.Warning : DiagnosticLevel.Information });
+    if (settings.SendDiagnosticsToAzure)
+    {
+        try
+        {
+            using var certificate = InstalledFolderHost.LoadDeviceCertificate(settings.DeviceCertificateThumbprint);
+            byte[] deviceId = PeerTls.DeviceId(certificate);
+            string origin = DiagnosticFingerprint.FromId(deviceId);
+            CryptographicOperations.ZeroMemory(deviceId);
+            azureSink = new AzureDiagnosticSink(journal, "service", origin, settings.FullDiagnostics,
+                Path.Combine(logs, "azure-cache"));
+            journal.TryWrite(new("service.telemetry_ready", "telemetry"));
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            journal.TryWrite(new("azure.capture_start_failed", "telemetry")
+            { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult,
+                Exception = error });
+        }
+    }
+    else journal.TryWrite(new("azure.capture_disabled", "telemetry"));
     Console.WriteLine("LOGS " + run.DirectoryPath);
     var runtime = new ControlStatusRuntime(journal);
     string statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PeerSync", "state", "peersync.db");
@@ -76,4 +100,8 @@ catch (Exception error)
     journal?.TryWrite(new("service.start_failed", "startup") { Level = DiagnosticLevel.Error, ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
     Console.Error.WriteLine("PeerSync service failed: " + error.GetType().Name); return 1;
 }
-finally { run?.Dispose(); }
+finally
+{
+    if (azureSink is not null) await azureSink.DisposeAsync();
+    run?.Dispose();
+}

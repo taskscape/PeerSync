@@ -154,6 +154,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         ValidateRemoteId(expectedRemoteDeviceId.Span);
         int failures = 0;
         string peerKey = Convert.ToHexString(expectedRemoteDeviceId.Span);
+        string peerFingerprint = DiagnosticFingerprint.FromId(expectedRemoteDeviceId.Span);
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -175,7 +176,9 @@ public sealed class ConnectionManager : IAsyncDisposable
             catch (Exception error)
             {
                 diagnostics?.TryWrite(new("connection.reconnect_failed", "connection_manager")
-                { Level = DiagnosticLevel.Warning, ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
+                { Level = DiagnosticLevel.Warning, PeerFingerprint = peerFingerprint,
+                    ErrorCode = SafeError(error), Exception = error, HResult = error.HResult,
+                    RetryInMilliseconds = (int)BackoffForFailure(failures).TotalMilliseconds });
             }
 
             TimeSpan backoff = BackoffForFailure(failures);
@@ -204,6 +207,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             diagnostics?.TryWrite(new("connection.candidate_started", CandidateOperation(candidate))
                 { Level = DiagnosticLevel.Debug, Transport = candidate.Transport,
+                    PeerFingerprint = expectedRemoteDeviceId is null ? null : DiagnosticFingerprint.FromId(expectedRemoteDeviceId),
                     RemoteAddress = candidate.RemoteAddress, RemotePort = candidate.RemotePort });
             ManagedPeerConnection session = await candidate.ConnectAsync(cancellationToken).ConfigureAwait(false);
             if (expectedRemoteDeviceId is not null
@@ -222,6 +226,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             diagnostics?.TryWrite(new("connection.candidate_failed", CandidateOperation(candidate))
                 { Level = DiagnosticLevel.Warning, Transport = candidate.Transport,
+                    PeerFingerprint = expectedRemoteDeviceId is null ? null : DiagnosticFingerprint.FromId(expectedRemoteDeviceId),
                     RemoteAddress = candidate.RemoteAddress, RemotePort = candidate.RemotePort,
                     ErrorCode = SafeError(error), Exception = error, HResult = error.HResult });
             return null;

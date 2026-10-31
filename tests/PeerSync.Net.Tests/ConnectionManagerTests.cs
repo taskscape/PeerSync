@@ -260,11 +260,15 @@ public sealed class ConnectionManagerTests
             first.RootElement.GetProperty("eventName").GetString().ShouldBe("connection.candidate_started");
             first.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.lan.quic");
             first.RootElement.GetProperty("transport").GetString().ShouldBe("Quic");
+            first.RootElement.GetProperty("peerFingerprint").GetString()
+                .ShouldBe(DiagnosticFingerprint.FromId(remote));
             first.RootElement.GetProperty("remoteAddress").GetString().ShouldBe("203.0.113.42");
             first.RootElement.GetProperty("remotePort").GetInt32().ShouldBe(47821);
             using JsonDocument failed = JsonDocument.Parse(records.Single(line => line.Contains("candidate_failed", StringComparison.Ordinal)));
             failed.RootElement.GetProperty("operation").GetString().ShouldBe("candidate.lan.quic");
             failed.RootElement.GetProperty("errorCode").GetString().ShouldBe("IOException");
+            failed.RootElement.GetProperty("peerFingerprint").GetString()
+                .ShouldBe(DiagnosticFingerprint.FromId(remote));
             records.ShouldContain(line => line.Contains("candidate.public.tcp", StringComparison.Ordinal)
                 && line.Contains("\"transport\":\"Tcp\"", StringComparison.Ordinal));
         }

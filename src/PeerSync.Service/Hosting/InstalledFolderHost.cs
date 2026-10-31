@@ -212,7 +212,7 @@ internal sealed class InstalledFolderHost : IAsyncDisposable
         finally { CryptographicOperations.ZeroMemory(ownDevice); }
     }
 
-    private static X509Certificate2 LoadDeviceCertificate(string thumbprint)
+    internal static X509Certificate2 LoadDeviceCertificate(string thumbprint)
     {
         using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
         store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);

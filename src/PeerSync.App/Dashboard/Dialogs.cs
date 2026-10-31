@@ -100,12 +100,16 @@ internal sealed class PreferencesWindow : Window
     private readonly CheckBox lan = new() { Content = "Discover peers on the LAN" };
     private readonly CheckBox mapping = new() { Content = "Try automatic port mapping" };
     private readonly CheckBox relay = new() { Content = "Allow relay fallback" };
+    private readonly CheckBox azureDiagnostics = new()
+    { Content = "Send diagnostic events to Azure" };
+    private readonly CheckBox fullDiagnostics = new()
+    { Content = "Full diagnostics (all events and remote IPs)" };
     internal DeviceSettings Value { get; private set; }
 
     internal PreferencesWindow(DeviceSettings current)
     {
         this.current = current; Value = current;
-        Title = "PeerSync preferences"; Width = 560; Height = 540;
+        Title = "PeerSync preferences"; Width = 560; Height = 610;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var panel = new StackPanel { Margin = new Thickness(20) };
         Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -116,7 +120,16 @@ internal sealed class PreferencesWindow : Window
         Field("Download limit in bytes/s (0 = unlimited)", downloadLimit, current.DownloadLimitBytesPerSec.ToString(CultureInfo.InvariantCulture));
         lan.IsChecked = current.LanDiscovery; mapping.IsChecked = current.UsePortMapping;
         relay.IsChecked = current.UseRelay;
+        azureDiagnostics.IsChecked = current.SendDiagnosticsToAzure;
+        fullDiagnostics.IsChecked = current.FullDiagnostics;
         panel.Children.Add(lan); panel.Children.Add(mapping); panel.Children.Add(relay);
+        panel.Children.Add(azureDiagnostics); panel.Children.Add(fullDiagnostics);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Azure receives diagnostic event names, counts, error codes, device/folder fingerprints, and address classes. Full diagnostics also sends remote IP addresses and ports. File contents, paths, and exception text stay local. Azure can see the upload's source IP. Restart the service after changing these options.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(18, 4, 0, 0),
+        });
         var save = new Button { Content = "Save preferences", IsDefault = true,
             Margin = new Thickness(0, 15, 0, 0), HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
             Padding = new Thickness(14, 6, 14, 6) };
@@ -142,6 +155,8 @@ internal sealed class PreferencesWindow : Window
             UploadLimitBytesPerSec = upload, DownloadLimitBytesPerSec = download,
             LanDiscovery = lan.IsChecked == true, UsePortMapping = mapping.IsChecked == true,
             UseRelay = relay.IsChecked == true,
+            SendDiagnosticsToAzure = azureDiagnostics.IsChecked == true,
+            FullDiagnostics = fullDiagnostics.IsChecked == true,
         };
         var results = new List<ValidationResult>();
         if (!Validator.TryValidateObject(updated, new ValidationContext(updated), results, true)

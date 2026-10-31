@@ -31,7 +31,8 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
         RendezvousMetrics.TrackerSessions.Add(1);
         RendezvousMetrics.ActiveTrackerSessions.Add(1);
         diagnostics.TryWrite(new("rendezvous.session_opened", "tracker")
-        { SessionId = session.SessionId, Transport = Transport(context), RemoteAddress = observed.Address,
+        { SessionId = session.SessionId, PeerFingerprint = DiagnosticFingerprint.FromId(deviceId),
+            Transport = Transport(context), RemoteAddress = observed.Address,
             RemotePort = observed.Port });
         session.Outgoing.Writer.TryWrite(new ServerMessage
         {
@@ -86,7 +87,13 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                         catch (ArgumentException error)
                         { throw new RpcException(new Status(StatusCode.InvalidArgument, error.Message)); }
                         diagnostics.TryWrite(new("rendezvous.announced", "tracker")
-                        { SessionId = session.SessionId, ItemsVisited = request.Announce.FolderIds.Count });
+                        { SessionId = session.SessionId, PeerFingerprint = DiagnosticFingerprint.FromId(deviceId),
+                            ItemsVisited = request.Announce.FolderIds.Count });
+                        foreach (ByteString folderId in request.Announce.FolderIds)
+                            diagnostics.TryWrite(new("rendezvous.folder_announced", "tracker")
+                            { SessionId = session.SessionId,
+                                FolderFingerprint = DiagnosticFingerprint.FromId(folderId.Span),
+                                PeerFingerprint = DiagnosticFingerprint.FromId(deviceId) });
                         break;
                     case ClientMessage.PayloadOneofCase.PunchRequest:
                         if (!presence.RequestPunch(session, request.PunchRequest.DeviceId.Span,
@@ -96,12 +103,31 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
                         { SessionId = session.SessionId });
                         break;
                     case ClientMessage.PayloadOneofCase.RelayRequest:
+                        string? relayFolder = request.RelayRequest.FolderId.Length == 32
+                            ? DiagnosticFingerprint.FromId(request.RelayRequest.FolderId.Span) : null;
+                        string? relayPeer = request.RelayRequest.DeviceId.Length == 32
+                            ? DiagnosticFingerprint.FromId(request.RelayRequest.DeviceId.Span) : null;
                         if (!presence.TryGetShared(session, request.RelayRequest.DeviceId.Span,
                             request.RelayRequest.FolderId.Span, out PresenceSession? target)
-                            || target is null || !relays.TryOffer(session, target))
+                            || target is null)
+                        {
+                            diagnostics.TryWrite(new("rendezvous.relay_request_rejected", "tracker")
+                            { Level = DiagnosticLevel.Warning, SessionId = session.SessionId,
+                                FolderFingerprint = relayFolder, PeerFingerprint = relayPeer,
+                                ErrorCode = "target_not_present_for_folder" });
                             throw new RpcException(new Status(StatusCode.PermissionDenied, "Target is unavailable for relay."));
+                        }
+                        if (!relays.TryOffer(session, target))
+                        {
+                            diagnostics.TryWrite(new("rendezvous.relay_request_rejected", "tracker")
+                            { Level = DiagnosticLevel.Warning, SessionId = session.SessionId,
+                                FolderFingerprint = relayFolder, PeerFingerprint = relayPeer,
+                                ErrorCode = "relay_offer_unavailable" });
+                            throw new RpcException(new Status(StatusCode.PermissionDenied, "Target is unavailable for relay."));
+                        }
                         diagnostics.TryWrite(new("rendezvous.relay_offered", "tracker")
-                        { SessionId = session.SessionId });
+                        { SessionId = session.SessionId, FolderFingerprint = relayFolder,
+                            PeerFingerprint = relayPeer });
                         break;
                     default:
                         throw new RpcException(new Status(StatusCode.InvalidArgument, "Unknown tracker message."));
@@ -117,7 +143,8 @@ internal sealed class TrackerService(PresenceRegistry presence, Relay.RelayRegis
             try { await writer.ConfigureAwait(false); }
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
             session.Lifetime.Dispose();
-            diagnostics.TryWrite(new("rendezvous.session_closed", "tracker") { SessionId = session.SessionId });
+            diagnostics.TryWrite(new("rendezvous.session_closed", "tracker")
+            { SessionId = session.SessionId, PeerFingerprint = DiagnosticFingerprint.FromId(deviceId) });
         }
     }
 

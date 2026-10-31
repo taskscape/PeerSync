@@ -19,6 +19,8 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
             journal.Write(new("transport.request_complete", "quic_block")
             {
                 SessionId = Guid.Parse("479407df-d4d0-4cae-9e9b-454add07b31a"),
+                FolderFingerprint = DiagnosticFingerprint.FromId(Enumerable.Repeat((byte)7, 32).ToArray()),
+                PeerFingerprint = DiagnosticFingerprint.FromId(Enumerable.Repeat((byte)8, 32).ToArray()),
                 Transport = DiagnosticTransport.Quic, Bytes = 4096, ElapsedMilliseconds = 125.5,
                 RemoteAddress = IPAddress.Parse("203.0.113.8"), RemotePort = 47821,
             });
@@ -34,6 +36,8 @@ public sealed class DiagnosticBundleCollectorTests : IDisposable
         using var reader = new StreamReader(archive.GetEntry("debug-000.jsonl")!.Open());
         string bundleLog = reader.ReadToEnd();
         bundleLog.ShouldContain("transport.request_complete"); bundleLog.ShouldContain("479407df-d4d0-4cae-9e9b-454add07b31a");
+        bundleLog.ShouldContain(DiagnosticFingerprint.FromId(Enumerable.Repeat((byte)7, 32).ToArray()));
+        bundleLog.ShouldContain(DiagnosticFingerprint.FromId(Enumerable.Repeat((byte)8, 32).ToArray()));
         bundleLog.ShouldNotContain("203.0.113.8"); bundleLog.ShouldNotContain("47821"); bundleLog.ShouldNotContain("folder-secret");
         bundleLog.ShouldNotContain("private.txt"); bundleLog.ShouldNotContain("private-body");
         using var environment = JsonDocument.Parse(new StreamReader(archive.GetEntry("environment.json")!.Open()).ReadToEnd());

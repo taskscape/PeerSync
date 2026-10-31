@@ -11,6 +11,8 @@ public sealed record DeviceSettings
     public bool LanDiscovery { get; init; } = true;
     public string[] RendezvousServers { get; init; } = ["https://sync.taskscape.com:99"];
     public bool UseRelay { get; init; } = true;
+    public bool SendDiagnosticsToAzure { get; init; } = true;
+    public bool FullDiagnostics { get; init; }
     [Range(0, int.MaxValue)] public int UploadLimitBytesPerSec { get; init; }
     [Range(0, int.MaxValue)] public int DownloadLimitBytesPerSec { get; init; }
     public bool LimitLanTraffic { get; init; }

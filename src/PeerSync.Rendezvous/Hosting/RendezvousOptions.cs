@@ -6,6 +6,8 @@ public sealed record RendezvousOptions
     public string CertificateSubject { get; init; } = "sync.taskscape.com";
     public string PublicUrl { get; init; } = "https://sync.taskscape.com:99";
     public bool DebugLogging { get; init; } = true;
+    public bool SendDiagnosticsToAzure { get; init; } = true;
+    public bool FullDiagnostics { get; init; }
     public string? LogDirectory { get; init; }
     public int RelayPerDeviceBytesPerSecond { get; init; } = 2_000_000;
     public int RelayTotalBytesPerSecond { get; init; } = 8_000_000;

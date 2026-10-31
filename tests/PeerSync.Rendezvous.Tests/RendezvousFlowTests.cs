@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using System.Threading.Channels;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Builder;
@@ -10,6 +11,7 @@ using PeerSync.Net.Rendezvous;
 using PeerSync.Net.Security;
 using PeerSync.Net.Quic;
 using PeerSync.Crypto;
+using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Sync;
 using PeerSync.Protocol.Handshake;
 using PeerSync.Protocol.Wire;
@@ -35,6 +37,7 @@ public sealed class RendezvousFlowTests
         int port = RendezvousTestPort.Allocate();
         var origin = new Uri($"https://127.0.0.1:{port}");
         string logs = Path.GetFullPath(Path.Combine("artifacts", "tests", "rendezvous-flow"));
+        using var aliceJournal = new DiagnosticJournal(Path.Combine(logs, "alice-client"), "net");
         await using WebApplication app = RendezvousHost.Build(
             ["--Rendezvous:Port=" + port, "--Rendezvous:PublicUrl=" + origin,
                 "--Rendezvous:LogDirectory=" + logs], server, IPAddress.Loopback);
@@ -45,7 +48,7 @@ public sealed class RendezvousFlowTests
         var aliceMessages = Channel.CreateUnbounded<ServerMessage>();
         var bobMessages = Channel.CreateUnbounded<ServerMessage>();
         var charlieMessages = Channel.CreateUnbounded<ServerMessage>();
-        await using var aliceTracker = Client(origin, server, alice, shared, aliceMessages);
+        await using var aliceTracker = Client(origin, server, alice, shared, aliceMessages, aliceJournal);
         await using var bobTracker = Client(origin, server, bob, shared, bobMessages);
         await using var charlieTracker = Client(origin, server, charlie, separate, charlieMessages);
         aliceTracker.Start(); bobTracker.Start(); charlieTracker.Start();
@@ -58,6 +61,25 @@ public sealed class RendezvousFlowTests
         ServerMessage isolated = await ReadUntilAsync(charlieMessages.Reader,
             message => message.PeerList is not null, timeout.Token);
         isolated.PeerList.Peers.ShouldBeEmpty();
+        string folderFingerprint = DiagnosticFingerprint.FromId(shared);
+        SpinWait.SpinUntil(() =>
+        {
+            string[] serverEvents = Directory.GetFiles(logs, "debug.jsonl", SearchOption.AllDirectories)
+                .Where(path => !path.Contains("alice-client", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(File.ReadAllLines).ToArray();
+            return new[] { aliceId, bobId }.All(id => serverEvents.Any(line =>
+            {
+                using JsonDocument record = JsonDocument.Parse(line);
+                JsonElement root = record.RootElement;
+                return root.GetProperty("eventName").GetString() == "rendezvous.folder_announced"
+                    && root.GetProperty("folderFingerprint").GetString() == folderFingerprint
+                    && root.GetProperty("peerFingerprint").GetString() == DiagnosticFingerprint.FromId(id);
+            }));
+        }, TimeSpan.FromSeconds(5)).ShouldBeTrue();
+        aliceTracker.Refresh();
+        SpinWait.SpinUntil(() => File.ReadAllLines(Path.Combine(logs, "alice-client", "debug.jsonl"))
+            .Count(line => line.Contains("\"eventName\":\"tracker.announcement_sent\"", StringComparison.Ordinal)) >= 2,
+            TimeSpan.FromSeconds(5)).ShouldBeTrue();
 
         aliceTracker.RequestRelay(bobId, shared).ShouldBeTrue();
         RelayOffer aliceOffer = (await ReadUntilAsync(aliceMessages.Reader,
@@ -67,6 +89,11 @@ public sealed class RendezvousFlowTests
         aliceOffer.Initiator.ShouldBeTrue();
         bobOffer.Initiator.ShouldBeFalse();
         aliceOffer.Token.ShouldBe(bobOffer.Token);
+        string aliceLog = File.ReadAllText(Path.Combine(logs, "alice-client", "debug.jsonl"));
+        aliceLog.ShouldContain("tracker.announcement_sent");
+        aliceLog.ShouldContain("tracker.relay_request_sent");
+        aliceLog.ShouldContain(DiagnosticFingerprint.FromId(shared));
+        aliceLog.ShouldContain(DiagnosticFingerprint.FromId(bobId));
 
         using var connectionAttempt = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
         Task<RelayTransport> dial = RelayClient.ConnectAsync(origin, aliceOffer, alice,
@@ -121,13 +148,13 @@ public sealed class RendezvousFlowTests
     }
 
     private static TrackerClient Client(Uri origin, X509Certificate2 server, X509Certificate2 identity, byte[] folderId,
-        Channel<ServerMessage> messages)
+        Channel<ServerMessage> messages, DiagnosticJournal? diagnostics = null)
     {
         var announce = new Announce { ListenPort = 47821 };
         announce.FolderIds.Add(ByteString.CopyFrom(folderId));
         return new TrackerClient(origin, identity, () => announce.Clone(),
             (message, _) => { messages.Writer.TryWrite(message.Clone()); return ValueTask.CompletedTask; },
-            loopbackServerCertificate: server);
+            diagnostics: diagnostics, loopbackServerCertificate: server);
     }
 
     private static async Task<ServerMessage> ReadUntilAsync(ChannelReader<ServerMessage> messages,

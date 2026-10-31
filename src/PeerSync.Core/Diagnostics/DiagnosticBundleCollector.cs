@@ -169,6 +169,7 @@ public static class DiagnosticBundleCollector
             CopyCode(root, writer, "component"); CopyGuid(root, writer, "runId"); CopyNonnegativeInt(root, writer, "processId");
             writer.WriteString("level", level); CopyCode(root, writer, "eventName"); CopyCode(root, writer, "operation");
             CopyGuid(root, writer, "sessionId"); CopyHex(root, writer, "traceId", 32);
+            CopyHex(root, writer, "folderFingerprint", 16); CopyHex(root, writer, "peerFingerprint", 16);
             CopyEnum(root, writer, "transport", "Quic", "Tcp", "Http2", "Http3", "NamedPipe", "Relay");
             CopyNonnegativeLong(root, writer, "bytes"); CopyFiniteDouble(root, writer, "elapsedMs");
             CopyFiniteDouble(root, writer, "clockSkewSeconds"); CopyCode(root, writer, "errorCode");
