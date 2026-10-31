@@ -173,7 +173,16 @@ public sealed partial class FileApplier
             }
             return new(leases);
         }
-        catch { foreach (var lease in leases.AsEnumerable().Reverse()) lease.Dispose(); throw; }
+        catch (Exception error)
+        {
+            foreach (var lease in leases.AsEnumerable().Reverse()) lease.Dispose();
+            // An accounted ancestor can disappear between member passes. Its
+            // old identity cannot become usable by retrying the same path;
+            // reselect the case root while preserving the prior partial tree.
+            if (error is Win32Exception { NativeErrorCode: 2 or 3 })
+                throw new DirectoryCaseChanged("Directory case ancestor is missing.", error);
+            throw;
+        }
     }
     private async Task ParkDirectoryMemberAsync(DirectoryCaseMemberState state, ApplyIntent intent, VersionView original, SafeFileHandle handle, CancellationToken token)
     {

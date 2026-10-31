@@ -15,6 +15,39 @@ namespace PeerSync.Engine.Tests;
 
 public sealed partial class DirectorySnapshotCaptureTests
 {
+    [Fact]
+    public async Task MissingAccountedDirectoryMemberParentReselectsRootAndPreservesThePartialTree()
+    {
+        Directory.CreateDirectory(Path.Combine(Root, "topic", "nested"));
+        File.WriteAllText(Path.Combine(Root, "topic", "nested", "a"), "authenticated nested bytes");
+        await using var index = await FolderIndex.OpenAsync(Database, Token); await AdmitDirectoryCase(index);
+        var applier = new FileApplier(Root, index, keys, device) { DirectoryCaseMemberWorkLimit = 1 };
+        await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token); // Root.
+        await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token); // Accounted nested directory.
+        var prior = index.ReadPendingCasePreservations().Single();
+        index.ReadDirectoryCaseMember(prior.Source.SourceId, prior.InstalledFileId!, "topic/nested")!.InstalledFileId.ShouldNotBeNull();
+        string oldRoot = Path.Combine(Root, prior.DestinationPath!);
+        File.WriteAllText(Path.Combine(oldRoot, "user"), "surviving user bytes");
+        Directory.Delete(Path.Combine(oldRoot, "nested"));
+
+        await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
+        index.ReadPendingCasePreservations().Single().InstalledFileId.ShouldBeNull();
+        index.ReadCasePreservationRetry(prior.Source.SourceId).ShouldBeNull();
+        index.ReadApplyIntents().ShouldBeEmpty();
+        for (int pass = 0; pass < 6; pass++)
+        {
+            await applier.PrepareCaseCopiesAsync(FetchRootMetadata, Token);
+            var row = index.ReadPendingCasePreservations().Single();
+            if (row.InstalledFileId is not null && index.ReadDirectoryCaseProgress(row.Source.SourceId, row.InstalledFileId).Exhausted) break;
+        }
+        var next = index.ReadPendingCasePreservations().Single();
+        next.DestinationPath.ShouldBe(ConflictNames.CaseSourcePath("topic", prior.Source.SourceId, 2));
+        next.InstalledFileId.ShouldNotBe(prior.InstalledFileId);
+        index.ReadDirectoryCaseProgress(next.Source.SourceId, next.InstalledFileId!).Exhausted.ShouldBeTrue();
+        File.ReadAllText(Path.Combine(Root, next.DestinationPath!, "nested", "a")).ShouldBe("authenticated nested bytes");
+        File.ReadAllText(Path.Combine(oldRoot, "user")).ShouldBe("surviving user bytes");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
