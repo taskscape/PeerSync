@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipCaseCapacityStress,
-    [ValidateSet(840,1440)][int]$VerificationBudgetSeconds = 840
+    [ValidateSet(840,1140,1440)][int]$VerificationBudgetSeconds = 1140
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent

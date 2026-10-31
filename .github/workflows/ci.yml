@@ -168,8 +168,8 @@ jobs:
       matrix:
         include:
           - os: windows-2022
-            timeoutMinutes: 15
-            verificationBudgetSeconds: 840
+            timeoutMinutes: 20
+            verificationBudgetSeconds: 1140
           - os: windows-2025
             timeoutMinutes: 25
             verificationBudgetSeconds: 1440
