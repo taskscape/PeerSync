@@ -118,7 +118,12 @@ public sealed partial class DiagnosticRunRetentionTests : IDisposable
             string parent = Path.GetDirectoryName(Path.GetFullPath(childRoot))!;
             if (Path.GetDirectoryName(parent) != Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)
                 || !Path.GetFileName(parent).StartsWith("PeerSync-LogRuns-", StringComparison.Ordinal)) throw new IOException("Unexpected child fixture.");
-            using var run = DiagnosticRunJournal.Open(childRoot, "test"); File.WriteAllText(Path.Combine(parent, "child.ready"), run.DirectoryPath);
+            using var run = DiagnosticRunJournal.Open(childRoot, "test");
+            // Publish only after the writer closes, so readiness also means
+            // the parent can open and read the complete directory path.
+            string ready = Path.Combine(parent, "child.ready");
+            File.WriteAllText(ready + ".tmp", run.DirectoryPath);
+            File.Move(ready + ".tmp", ready);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Token); timeout.CancelAfter(TimeSpan.FromSeconds(15));
             while (!File.Exists(Path.Combine(parent, "child.release"))) await Task.Delay(10, timeout.Token);
             run.Journal.Write(new("child.still_active", "test")); return;
