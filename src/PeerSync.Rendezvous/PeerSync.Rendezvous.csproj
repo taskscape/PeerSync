@@ -7,5 +7,6 @@
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <ProjectReference Include="../PeerSync.Net/PeerSync.Net.csproj" />
     <ProjectReference Include="../PeerSync.Rendezvous.Contracts/PeerSync.Rendezvous.Contracts.csproj" />
+    <ProjectReference Include="../PeerSync.Telemetry/PeerSync.Telemetry.csproj" />
   </ItemGroup>
 </Project>

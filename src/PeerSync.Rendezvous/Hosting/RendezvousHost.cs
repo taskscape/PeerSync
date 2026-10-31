@@ -11,6 +11,7 @@ using PeerSync.Core.Diagnostics;
 using PeerSync.Net.Security;
 using PeerSync.Rendezvous.Relay;
 using PeerSync.Rendezvous.Tracker;
+using PeerSync.Telemetry;
 
 namespace PeerSync.Rendezvous.Hosting;
 
@@ -25,7 +26,28 @@ internal static class RendezvousHost
     internal static async Task RunAsync(string[] args)
     {
         await using WebApplication app = Build(args);
-        await app.RunAsync().ConfigureAwait(false);
+        AzureDiagnosticSink? azureSink = null;
+        var options = app.Services.GetRequiredService<RendezvousOptions>();
+        var journal = app.Services.GetRequiredService<DiagnosticJournal>();
+        if (options.SendDiagnosticsToAzure)
+        {
+            try
+            {
+                string logs = options.LogDirectory ?? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    "PeerSync.Rendezvous", "logs");
+                azureSink = new AzureDiagnosticSink(journal, "rendezvous", "server",
+                    options.FullDiagnostics, Path.Combine(logs, "azure-cache"));
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                journal.TryWrite(new("azure.capture_start_failed", "telemetry")
+                { Level = DiagnosticLevel.Warning, ErrorCode = error.GetType().Name, HResult = error.HResult });
+            }
+        }
+        else journal.TryWrite(new("azure.capture_disabled", "telemetry"));
+        try { await app.RunAsync().ConfigureAwait(false); }
+        finally { if (azureSink is not null) await azureSink.DisposeAsync().ConfigureAwait(false); }
     }
 
     internal static WebApplication Build(string[] args, X509Certificate2? testCertificate = null,

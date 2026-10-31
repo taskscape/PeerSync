@@ -22,6 +22,7 @@
     <Project Path="src/PeerSync.Rendezvous.Contracts/PeerSync.Rendezvous.Contracts.csproj" />
     <Project Path="src/PeerSync.Service/PeerSync.Service.csproj" />
     <Project Path="src/PeerSync.Storage/PeerSync.Storage.csproj" />
+    <Project Path="src/PeerSync.Telemetry/PeerSync.Telemetry.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/PeerSync.App.Tests/PeerSync.App.Tests.csproj" />
