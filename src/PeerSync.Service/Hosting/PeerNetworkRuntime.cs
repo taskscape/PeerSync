@@ -246,14 +246,14 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
                 QuicPeerSession session;
                 try { session = await listener!.AcceptAsync(cancellationToken).ConfigureAwait(false); }
                 catch (Exception error) when (!cancellationToken.IsCancellationRequested &&
-                    (error is AuthenticationException or OperationCanceledException or InvalidDataException
+                    (error is AuthenticationException or OperationCanceledException or InvalidDataException or TimeoutException
                      || error is IOException and not QuicException
                      || error is QuicException { QuicError: QuicError.StreamAborted or QuicError.ConnectionAborted
                          or QuicError.ConnectionIdle or QuicError.ConnectionTimeout }))
                 {
                     // AcceptAsync has already disposed the accepted connection. A
-                    // peer can reset its control stream during Hello; reject that
-                    // connection without faulting the long-lived listener.
+                    // peer can reset Hello or never open its authenticated folder
+                    // stream. Reject only that connection and keep listening.
                     diagnostics?.TryWrite(new("service.incoming_peer_rejected", "peer_network")
                         { Level = DiagnosticLevel.Debug, Transport = DiagnosticTransport.Quic,
                             ErrorCode = error.GetType().Name, Exception = error, HResult = error.HResult });
@@ -271,6 +271,9 @@ internal sealed class PeerNetworkRuntime : IAsyncDisposable
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        // The folder-stream wait wraps cancellation in TimeoutException, even
+        // when network recovery or shutdown cancelled the listener's token.
+        catch (TimeoutException) when (cancellationToken.IsCancellationRequested) { }
         catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested) { }
         catch (QuicException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception error)

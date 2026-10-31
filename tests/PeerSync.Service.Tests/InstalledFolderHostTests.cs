@@ -14,10 +14,14 @@ using PeerSync.Engine.Scanning;
 using PeerSync.Crypto.Chunking;
 using PeerSync.Protocol.Records;
 using PeerSync.Protocol.Signing;
+using PeerSync.Protocol.Handshake;
+using PeerSync.Protocol.Wire;
 using PeerSync.Service.Control;
 using PeerSync.Service.Hosting;
 using PeerSync.Net.Connections;
+using PeerSync.Net;
 using PeerSync.Net.Security;
+using PeerSync.Net.Quic;
 using PeerSync.Storage.FolderDb;
 using PeerSync.Storage.StateDb;
 using Shouldly;
@@ -28,6 +32,98 @@ namespace PeerSync.Service.Tests;
 [Collection("InstalledFolderHostNativeQuic")]
 public sealed class InstalledFolderHostTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FolderHandshakeTimeoutRejectsOnlyThePeerAndKeepsTheInstalledListenerAlive(bool stopDuringHandshake)
+    {
+        if (!System.Net.Quic.QuicListener.IsSupported) return;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        string root = Path.Combine(Path.GetTempPath(), "PeerSync-ServiceFolderTimeout-" + Guid.NewGuid().ToString("N"));
+        string data = Path.Combine(root, "data"), share = Path.Combine(root, "share"), state = Path.Combine(data, "peersync.db");
+        Directory.CreateDirectory(data); Directory.CreateDirectory(share);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            string actor = identity.User!.Value;
+            using var serverCertificate = CreateDeviceCertificate();
+            using var clientCertificate = CreateDeviceCertificate();
+            byte[] serverId = PeerTls.DeviceId(serverCertificate), clientId = PeerTls.DeviceId(clientCertificate);
+            using var keys = FolderKeys.CreateNew();
+            await PrepareNodeAsync(state, data, share, actor, keys, clientId, timeout.Token);
+            var status = new ControlStatusRuntime();
+            using var journal = new DiagnosticJournal(Path.Combine(root, "logs"), "service_test", debugEnabled: true);
+            var observed = new TaskCompletionSource<DiagnosticEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+            journal.EntryWritten += (entry, _) =>
+            {
+                if (entry.Event is "service.incoming_peer_rejected" or "service.peer_accept_failed") observed.TrySetResult(entry);
+            };
+            await using var host = await InstalledFolderHost.StartForTestAsync(state, serverId, actor, status, journal, timeout.Token);
+            int port = ReservePeerPort();
+            await using var network = await PeerNetworkRuntime.StartAsync(serverCertificate, serverId,
+                () => [host.ResolveFolder(Convert.ToHexString(keys.FolderId()))],
+                new DeviceSettings { ListenPort = port, LanDiscovery = false }, status, (_, _) => { }, journal, timeout.Token);
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            QuicPeerOptions ClientOptions(bool stall) => new()
+            {
+                Certificate = clientCertificate, IsDevicePinned = peer => peer.AsSpan().SequenceEqual(serverId),
+                CreateHello = () => new Hello { ProtocolVersion = 1, UtcTicks = DateTime.UtcNow.Ticks },
+                Folders = [new PeerFolderRegistration(keys, _ => AuthDecision.Allowed,
+                    _ => new HandshakeTestHandler(clientId, stall ? entered : null, stall ? release.Task : Task.CompletedTask))],
+                RequestTimeout = TimeSpan.FromSeconds(50),
+            };
+            var endpoint = new IPEndPoint(IPAddress.Loopback, port);
+            Task<QuicPeerSession> stalled = QuicPeerSession.ConnectAsync(endpoint, ClientOptions(stall: true),
+                cancellationToken: timeout.Token).AsTask();
+            try
+            {
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), timeout.Token);
+                if (stopDuringHandshake)
+                {
+                    await network.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), timeout.Token);
+                    network.Completion.IsCompletedSuccessfully.ShouldBeTrue();
+                    observed.Task.IsCompleted.ShouldBeFalse("a cancelled handshake must not fault or reject the stopping listener");
+                    return;
+                }
+                DiagnosticEvent rejection = await observed.Task.WaitAsync(TimeSpan.FromSeconds(40), timeout.Token);
+                rejection.Event.ShouldBe("service.incoming_peer_rejected");
+                rejection.ErrorCode.ShouldBe(nameof(TimeoutException));
+            }
+            finally
+            {
+                release.TrySetResult();
+                await Should.ThrowAsync<System.Net.Quic.QuicException>(async () => { await using var unexpected = await stalled; });
+            }
+            await using (var healthy = await QuicPeerSession.ConnectAsync(endpoint, ClientOptions(stall: false),
+                cancellationToken: timeout.Token))
+            {
+                healthy.AuthenticatedFolders.Count.ShouldBe(1);
+                (await healthy.AuthenticatedFolders[0].Transport!.ReadIndexTargetAsync(timeout.Token)).ShouldBeGreaterThanOrEqualTo(0);
+            }
+            await network.DisposeAsync();
+        }
+        finally { release.TrySetResult(); await DeleteTemporaryRootAsync(root); }
+    }
+
+    private sealed class HandshakeTestHandler(byte[] device, TaskCompletionSource? entered, Task release) : IPeerRequestHandler
+    {
+        public async ValueTask<Hello> ExchangeHelloAsync(Hello hello, CancellationToken cancellationToken)
+        {
+            entered?.TrySetResult();
+            await release.WaitAsync(cancellationToken);
+            return new Hello { ProtocolVersion = 1, DeviceId = ByteString.CopyFrom(device),
+                UtcTicks = DateTime.UtcNow.Ticks, Response = true, RequestId = hello.RequestId };
+        }
+        public ValueTask<long> ReadIndexTargetAsync(CancellationToken cancellationToken) => ValueTask.FromResult(0L);
+        public ValueTask<PeerIndexPage> ReadIndexAsync(long afterSequence, int limit, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new PeerIndexPage(afterSequence, afterSequence, []));
+        public ValueTask<ReadOnlyMemory<byte>> ReadBlockAsync(ReadOnlyMemory<byte> hash, int length, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     [Fact]
     public void ConfiguredSelfSignedDeviceCertificateLoadsByPinWithoutChainTrust()
     {
