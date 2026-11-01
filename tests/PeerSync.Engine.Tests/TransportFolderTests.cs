@@ -247,7 +247,7 @@ public sealed class TransportFolderTests : IDisposable
         byte[] finalHash = chunks[^1].Hash.ToByteArray();
         var slowStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var slowCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int fastRequests = 0;
+        int fastFinalRequests = 0;
         var network = new InMemoryNetwork();
         var endpoint = network.Register(receiver.Id, receiver.Engine.CreateHandler);
         network.Register(slow.Id, id =>
@@ -260,7 +260,7 @@ public sealed class TransportFolderTests : IDisposable
                     if (hash.Span.SequenceEqual(finalHash))
                     {
                         slowStarted.TrySetResult();
-                        try { await Task.Delay(TimeSpan.FromSeconds(20), token); }
+                        try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
                         catch (OperationCanceledException) when (token.IsCancellationRequested)
                         { slowCanceled.TrySetResult(); throw; }
                     }
@@ -275,8 +275,13 @@ public sealed class TransportFolderTests : IDisposable
             {
                 Block = async (hash, length, token) =>
                 {
-                    Interlocked.Increment(ref fastRequests);
-                    await Task.Delay(TimeSpan.FromMilliseconds(25), token);
+                    if (hash.Span.SequenceEqual(finalHash))
+                    {
+                        // Ensure both peers are serving the tail before allowing the
+                        // winner to respond, independent of machine scheduling speed.
+                        await slowStarted.Task.WaitAsync(token);
+                        Interlocked.Increment(ref fastFinalRequests);
+                    }
                     return await inner.ReadBlockAsync(hash, length, token);
                 }
             };
@@ -286,14 +291,29 @@ public sealed class TransportFolderTests : IDisposable
         await slowPeer.SynchronizeAsync(cancellationToken: Token);
         await fastPeer.SynchronizeAsync(cancellationToken: Token);
 
-        Task<PullPassResult> pass = receiver.Engine.RunPassAsync(Token);
-        await slowStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), Token);
-        PullPassResult result = await pass.WaitAsync(TimeSpan.FromSeconds(5), Token);
-        await slowCanceled.Task.WaitAsync(TimeSpan.FromSeconds(2), Token);
+        // Bound a hung test without treating disk flush latency as a throughput
+        // requirement. The blocked loser must be canceled for the pass to finish.
+        using var passLifetime = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        passLifetime.CancelAfter(TimeSpan.FromSeconds(60));
+        Task<PullPassResult> pass = receiver.Engine.RunPassAsync(passLifetime.Token);
+        try
+        {
+            await slowStarted.Task.WaitAsync(passLifetime.Token);
+            PullPassResult result = await pass;
+            await slowCanceled.Task.WaitAsync(passLifetime.Token);
 
-        result.Applied.ShouldBe(1); result.Failed.ShouldBe(0);
-        fastRequests.ShouldBeGreaterThan(0);
-        File.ReadAllBytes(Path.Combine(receiver.Root, "endgame.bin")).ShouldBe(data);
+            result.Applied.ShouldBe(1); result.Failed.ShouldBe(0);
+            fastFinalRequests.ShouldBe(1);
+            File.ReadAllBytes(Path.Combine(receiver.Root, "endgame.bin")).ShouldBe(data);
+        }
+        finally
+        {
+            // A failed assertion or watchdog must not leave the pass using the
+            // index or capture files while the fixture disposes and deletes them.
+            await passLifetime.CancelAsync();
+            try { await pass; }
+            catch (OperationCanceledException) when (passLifetime.IsCancellationRequested) { }
+        }
     }
 
     [Fact]
