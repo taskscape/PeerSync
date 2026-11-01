@@ -33,10 +33,7 @@ public sealed class ArchiveVisualTreeTests
         window.Show();
         try
         {
-            var outer = ((DockPanel)window.Content).Children.OfType<TabControl>().Single();
-            var foldersPage = (Grid)((TabItem)outer.Items[0]).Content;
-            var inner = foldersPage.Children.OfType<TabControl>().Single();
-            inner.SelectedItem = inner.Items.OfType<TabItem>().Single(tab => Equals(tab.Header, "Archive"));
+            window.NavigateToFolder(folderId, tab: 1, refresh: false);
             window.UpdateLayout();
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
 
@@ -50,7 +47,7 @@ public sealed class ArchiveVisualTreeTests
             text.ShouldContain(model.ArchiveVersions.Single().SizeDisplay);
             text.ShouldContain(item => item.Contains("more versions exist", StringComparison.Ordinal));
             var buttons = Descendants<Button>(window).Where(item => item.IsVisible).Select(item => item.Content?.ToString()).ToArray();
-            buttons.ShouldContain("Restore"); buttons.ShouldContain("Restore as copy");
+            buttons.ShouldContain("Replace current file…"); buttons.ShouldContain("Restore as copy…");
         }
         finally { window.Exit(); }
     });

@@ -52,10 +52,7 @@ internal static class InstalledArchiveUiProbe
             window = new MainWindow(model, journal, startInTray: false)
             { ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -20000, Top = -20000 };
             window.Show();
-            var outer = ((DockPanel)window.Content).Children.OfType<TabControl>().Single();
-            var foldersPage = (Grid)((TabItem)outer.Items[0]).Content;
-            var inner = foldersPage.Children.OfType<TabControl>().Single();
-            inner.SelectedItem = inner.Items.OfType<TabItem>().Single(tab => Equals(tab.Header, "Archive"));
+            window.NavigateToFolder(folder.FolderId, tab: 1);
             await UntilAsync(() => Task.FromResult(model.ArchiveVersions.Any(item => item.Path == "notes.txt")));
             Require(model.ArchiveVersions.First(item => item.Path == "notes.txt").SizeDisplay == "6 B",
                 "The archived six-byte file did not render its exact size.");
@@ -82,8 +79,8 @@ internal static class InstalledArchiveUiProbe
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using (var output = File.Create(Path.Combine(evidence, "installed-archive-tab.png"))) encoder.Save(output);
             var buttons = Descendants<Button>(window).Where(item => item.IsVisible).ToArray();
-            Button restore = buttons.Single(item => Equals(item.Content, "Restore"));
-            Button restoreCopy = buttons.Single(item => Equals(item.Content, "Restore as copy"));
+            Button restore = buttons.Single(item => Equals(item.Content, "Replace current file…"));
+            Button restoreCopy = buttons.Single(item => Equals(item.Content, "Restore as copy…"));
 
             restore.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await UntilAsync(async () => await File.ReadAllTextAsync(original) == "before");

@@ -24,7 +24,8 @@ internal sealed class TextPromptWindow : Window
 
     internal TextPromptWindow(string title, string label, Func<string, bool>? validate = null)
     {
-        Title = title; Width = 520; Height = 190; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        DashboardStyle.Apply(this);
+        Title = title; Width = 580; Height = 230; WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
         var panel = new StackPanel { Margin = new Thickness(18) }; Content = panel;
         panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 8) });
@@ -49,10 +50,13 @@ internal sealed class ShareWindow : Window
     internal ShareWindow(FolderKeys keys)
     {
         this.keys = keys;
-        Title = "Share PeerSync folder"; Width = 510; Height = 475;
+        DashboardStyle.Apply(this);
+        Title = "Share PeerSync folder"; Width = 660; Height = 640; MinWidth = 580; MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        var panel = new StackPanel { Margin = new Thickness(18) }; Content = panel;
-        panel.Children.Add(new TextBlock { Text = "Share a key only with someone you trust.", TextWrapping = TextWrapping.Wrap });
+        var panel = new StackPanel { Margin = new Thickness(28) };
+        Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        panel.Children.Add(DashboardStyle.Text("Share folder", 28, true));
+        panel.Children.Add(new TextBlock { Text = "Choose a key type. Share a key only with someone you trust.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 12) });
         var bar = new WrapPanel { Margin = new Thickness(0, 12, 0, 8) }; panel.Children.Add(bar);
         if (keys.CanRead)
         {
@@ -76,7 +80,9 @@ internal sealed class ShareWindow : Window
         var copy = new Button { Content = "Copy visible key" };
         copy.Click += (_, _) => { if (key.Text.Length > 0) Clipboard.SetText(key.Text); };
         bar.Children.Add(copy);
+        DashboardStyle.Identify(key, "ShareKey", "Folder key");
         panel.Children.Add(key); panel.Children.Add(qr);
+        panel.Children.Add(DashboardStyle.Text("Read & write keys allow editing and deleting files. Only key types available to this folder are shown.", 13));
         ShowKey(keys.CanRead ? keys.ExportReadOnlyText() : keys.ExportEncryptedText());
     }
 
@@ -94,74 +100,20 @@ internal sealed class ShareWindow : Window
 
 internal sealed class PreferencesWindow : Window
 {
-    private readonly DeviceSettings current;
-    private readonly TextBox deviceName = new(), listenPort = new(), rendezvous = new();
-    private readonly TextBox uploadLimit = new(), downloadLimit = new();
-    private readonly CheckBox lan = new() { Content = "Discover peers on the LAN" };
-    private readonly CheckBox mapping = new() { Content = "Try automatic port mapping" };
-    private readonly CheckBox relay = new() { Content = "Allow relay fallback" };
-    private readonly CheckBox azureDiagnostics = new()
-    { Content = "Send diagnostic events to Azure" };
-    private readonly CheckBox fullDiagnostics = new()
-    { Content = "Full diagnostics (all events and remote IPs)" };
     internal DeviceSettings Value { get; private set; }
-
     internal PreferencesWindow(DeviceSettings current)
     {
-        this.current = current; Value = current;
-        Title = "PeerSync preferences"; Width = 560; Height = 610;
+        Value = current; Title = "PeerSync preferences"; Width = 1080; Height = 800; MinWidth = 620; MinHeight = 500;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        var panel = new StackPanel { Margin = new Thickness(20) };
-        Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Field("Device name", deviceName, current.DeviceName);
-        Field("Listening port", listenPort, current.ListenPort.ToString(CultureInfo.InvariantCulture));
-        Field("Rendezvous server URLs (one per line)", rendezvous, string.Join(Environment.NewLine, current.RendezvousServers));
-        Field("Upload limit in bytes/s (0 = unlimited)", uploadLimit, current.UploadLimitBytesPerSec.ToString(CultureInfo.InvariantCulture));
-        Field("Download limit in bytes/s (0 = unlimited)", downloadLimit, current.DownloadLimitBytesPerSec.ToString(CultureInfo.InvariantCulture));
-        lan.IsChecked = current.LanDiscovery; mapping.IsChecked = current.UsePortMapping;
-        relay.IsChecked = current.UseRelay;
-        azureDiagnostics.IsChecked = current.SendDiagnosticsToAzure;
-        fullDiagnostics.IsChecked = current.FullDiagnostics;
-        panel.Children.Add(lan); panel.Children.Add(mapping); panel.Children.Add(relay);
-        panel.Children.Add(azureDiagnostics); panel.Children.Add(fullDiagnostics);
-        panel.Children.Add(new TextBlock
+        DashboardStyle.Apply(this);
+        var editor = new PreferencesEditor(current, message => MessageBox.Show(this, message, "PeerSync", MessageBoxButton.OK, MessageBoxImage.Information))
+        { Margin = new Thickness(28) };
+        Content = editor;
+        editor.SaveRequested += (_, _) =>
         {
-            Text = "Azure receives diagnostic event names, counts, error codes, device/folder fingerprints, and address classes. Full diagnostics also sends remote IP addresses and ports. File contents, paths, and exception text stay local. Azure can see the upload's source IP. Restart the service after changing these options.",
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(18, 4, 0, 0),
-        });
-        var save = new Button { Content = "Save preferences", IsDefault = true,
-            Margin = new Thickness(0, 15, 0, 0), HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
-            Padding = new Thickness(14, 6, 14, 6) };
-        save.Click += (_, _) => Save(); panel.Children.Add(save);
-        void Field(string label, TextBox box, string value)
-        {
-            panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 10, 0, 3) });
-            box.Text = value; panel.Children.Add(box);
-        }
-    }
-
-    private void Save()
-    {
-        if (!int.TryParse(listenPort.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int port)
-            || !int.TryParse(uploadLimit.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int upload)
-            || !int.TryParse(downloadLimit.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int download))
-        { MessageBox.Show(this, "Port and transfer limits must be whole numbers."); return; }
-        var updated = current with
-        {
-            DeviceName = deviceName.Text.Trim(), ListenPort = port,
-            RendezvousServers = rendezvous.Text.Split(['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            UploadLimitBytesPerSec = upload, DownloadLimitBytesPerSec = download,
-            LanDiscovery = lan.IsChecked == true, UsePortMapping = mapping.IsChecked == true,
-            UseRelay = relay.IsChecked == true,
-            SendDiagnosticsToAzure = azureDiagnostics.IsChecked == true,
-            FullDiagnostics = fullDiagnostics.IsChecked == true,
+            if (!editor.TryGetValue(out var value)) return;
+            Value = value; DialogResult = true; Close();
         };
-        var results = new List<ValidationResult>();
-        if (!Validator.TryValidateObject(updated, new ValidationContext(updated), results, true)
-            || updated.DeviceName.Length == 0 || updated.RendezvousServers.Length > 16)
-        { MessageBox.Show(this, "Please check the preference values."); return; }
-        Value = updated; DialogResult = true; Close();
+        editor.CancelRequested += (_, _) => { DialogResult = false; Close(); };
     }
 }

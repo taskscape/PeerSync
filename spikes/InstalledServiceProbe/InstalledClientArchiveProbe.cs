@@ -87,8 +87,11 @@ internal static class InstalledClientArchiveProbe
                 return Task.FromResult(folderItem is not null);
             }).ConfigureAwait(false);
             Select(folderItem!);
+            AutomationElement details = FindById(folderItem!, "FolderDetails")
+                ?? throw new IOException("The folder details action is missing.");
+            ((InvokePattern)details.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
             AutomationElement archiveTab = main.FindAll(TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.NameProperty, "Archive"))
+                    new PropertyCondition(AutomationElement.NameProperty, "Versions"))
                 .Cast<AutomationElement>().Single(item => item.Current.ControlType == ControlType.TabItem);
             Select(archiveTab);
 
@@ -101,7 +104,7 @@ internal static class InstalledClientArchiveProbe
                 return Task.FromResult(row is not null);
             }).ConfigureAwait(false);
             Select(row!);
-            InvokeButton(main, "Restore");
+            InvokeButton(main, "Replace current file…");
             await UntilAsync(async () => File.Exists(original)
                 && await File.ReadAllTextAsync(original).ConfigureAwait(false) == "before").ConfigureAwait(false);
             Stage("original-restored");
@@ -112,7 +115,7 @@ internal static class InstalledClientArchiveProbe
                 return Task.FromResult(row is not null);
             }).ConfigureAwait(false);
             Select(row!);
-            InvokeButton(main, "Restore as copy");
+            InvokeButton(main, "Restore as copy…");
             AutomationElement? prompt = null;
             await UntilAsync(() =>
             {

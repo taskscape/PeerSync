@@ -1,35 +1,29 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Security.Principal;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Media;
 using Grpc.Core;
 using Microsoft.Win32;
 using PeerSync.Control.Contracts;
 using PeerSync.Core.Diagnostics;
 using PeerSync.Core.Settings;
 using PeerSync.Crypto;
-using QRCoder;
 using Forms = System.Windows.Forms;
 using Button = System.Windows.Controls.Button;
 using CheckBox = System.Windows.Controls.CheckBox;
 using ListBox = System.Windows.Controls.ListBox;
 using MessageBox = System.Windows.MessageBox;
-using Orientation = System.Windows.Controls.Orientation;
 using TextBox = System.Windows.Controls.TextBox;
-using TabControl = System.Windows.Controls.TabControl;
 using DataGrid = System.Windows.Controls.DataGrid;
 using Binding = System.Windows.Data.Binding;
 
 namespace PeerSync.App.Dashboard;
 
-internal sealed class MainWindow : Window, IDisposable
+internal sealed partial class MainWindow : Window, IDisposable
 {
     private static readonly JsonSerializerOptions DeviceJson = new()
     { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -39,8 +33,8 @@ internal sealed class MainWindow : Window, IDisposable
     private readonly ICollectionView peerView;
     private readonly ICollectionView overwriteView;
     private readonly ListBox folders = new();
-    private readonly ListBox pending = new();
-    private readonly ListBox overwrites = new();
+    private readonly DataGrid pending = new();
+    private readonly DataGrid overwrites = new();
     private readonly DataGrid archives = new();
     private readonly TextBox ignoreRules = new() { AcceptsReturn = true, Height = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly TextBox predefinedHosts = new() { AcceptsReturn = true, Height = 72, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -58,26 +52,15 @@ internal sealed class MainWindow : Window, IDisposable
         peerView.Filter = item => item is PeerItem peer && peer.FolderId == model.SelectedFolderId;
         overwriteView = CollectionViewSource.GetDefaultView(model.Overwrites);
         overwriteView.Filter = item => item is OverwriteItem overwrite && overwrite.FolderId == model.SelectedFolderId;
-        Title = "PeerSync"; Width = 980; Height = 700; MinWidth = 740; MinHeight = 500;
+        Title = "PeerSync"; Width = 1180; Height = 820; MinWidth = 740; MinHeight = 560;
         DataContext = model;
-        var root = new DockPanel { Margin = new Thickness(18) }; Content = root;
-        var header = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
-        DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
-        header.Children.Add(new TextBlock { Text = "PeerSync", FontSize = 27, FontWeight = FontWeights.SemiBold });
-        header.Children.Add(BoundText(nameof(model.Banner), "ServiceBanner", 15));
-        header.Children.Add(BoundText(nameof(model.Activity), "ActivitySummary", 13));
-        header.Children.Add(BoundText(nameof(model.TransferRates), "TransferRates", 12));
-        authorize.Click += async (_, _) => await ExecuteAsync(() => ElevatedActions.AuthorizeCurrentUserAsync());
-        authorize.Visibility = Visibility.Collapsed; header.Children.Add(authorize);
-        startService.Click += async (_, _) => await ExecuteAsync(() => ElevatedActions.StartServiceAsync());
-        startService.Visibility = Visibility.Collapsed; header.Children.Add(startService);
-
-        var navigation = new TabControl(); root.Children.Add(navigation);
-        navigation.Items.Add(new TabItem { Header = "Folders", Content = BuildFoldersPage() });
-        navigation.Items.Add(new TabItem { Header = "Pending devices", Content = BuildPendingPage() });
-        navigation.Items.Add(new TabItem { Header = "Preferences", Content = BuildPreferencesPage() });
+        DashboardStyle.Apply(this);
+        BuildShell();
         model.PropertyChanged += ModelChanged;
         model.Notification += Notify;
+        model.PendingDevices.CollectionChanged += OverviewCollectionChanged;
+        model.Overwrites.CollectionChanged += OverviewCollectionChanged;
+        model.Folders.CollectionChanged += OverviewCollectionChanged;
 
         tray = new Forms.NotifyIcon { Icon = System.Drawing.SystemIcons.Warning,
             Text = "PeerSync — connecting", Visible = true };
@@ -92,129 +75,15 @@ internal sealed class MainWindow : Window, IDisposable
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowAndActivate);
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) Hide(); };
         Closing += OnClosing;
-        Closed += (_, _) => { model.PropertyChanged -= ModelChanged; model.Notification -= Notify; Dispose(); menu.Dispose(); };
+        Closed += (_, _) =>
+        {
+            model.PropertyChanged -= ModelChanged; model.Notification -= Notify;
+            model.PendingDevices.CollectionChanged -= OverviewCollectionChanged;
+            model.Overwrites.CollectionChanged -= OverviewCollectionChanged;
+            model.Folders.CollectionChanged -= OverviewCollectionChanged;
+            Dispose(); menu.Dispose();
+        };
         if (startInTray) { ShowInTaskbar = false; WindowState = WindowState.Minimized; }
-    }
-
-    private Grid BuildFoldersPage()
-    {
-        var layout = new Grid(); layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var left = new DockPanel { Margin = new Thickness(0, 8, 14, 0) };
-        Grid.SetColumn(left, 0); layout.Children.Add(left);
-        var controls = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
-        DockPanel.SetDock(controls, Dock.Top); left.Children.Add(controls);
-        controls.Children.Add(ActionButton("Add", AddFolderAsync));
-        controls.Children.Add(ActionButton("Join", JoinFolderAsync));
-        controls.Children.Add(ActionButton("Share", ShareFolderAsync));
-        controls.Children.Add(ActionButton("Pause / Resume", TogglePauseAsync));
-        controls.Children.Add(ActionButton("Remove", RemoveFolderAsync));
-        folders.ItemsSource = model.Folders; folders.SelectionChanged += (_, _) =>
-        {
-            if (folders.SelectedItem is FolderItem item)
-            {
-                model.SelectedFolderId = item.Id;
-                peerView.Refresh(); overwriteView.Refresh();
-                _ = ExecuteAsync(LoadFolderSettingsAsync);
-                _ = ExecuteAsync(LoadArchiveAsync);
-            }
-        };
-        AutomationProperties.SetAutomationId(folders, "FoldersList");
-        left.Children.Add(folders);
-
-        var right = new TabControl { Margin = new Thickness(0, 8, 0, 0) };
-        Grid.SetColumn(right, 1); layout.Children.Add(right);
-        right.Items.Add(new TabItem { Header = "Peers", Content = PeerList() });
-        right.Items.Add(new TabItem { Header = "Activity", Content = BoundText(nameof(model.FolderActivity), "FolderActivity", 14) });
-        right.Items.Add(new TabItem { Header = "Overwritten", Content = BuildOverwritePage() });
-        var archiveTab = new TabItem { Header = "Archive", Content = BuildArchivePage() };
-        right.Items.Add(archiveTab);
-        right.Items.Add(new TabItem { Header = "Settings", Content = BuildFolderSettingsPage() });
-        right.SelectionChanged += (_, change) =>
-        {
-            if (ReferenceEquals(change.Source, right) && ReferenceEquals(right.SelectedItem, archiveTab))
-                _ = ExecuteAsync(LoadArchiveAsync);
-        };
-        return layout;
-    }
-
-    private DataGrid PeerList()
-    {
-        var grid = new DataGrid { IsReadOnly = true, AutoGenerateColumns = false, ItemsSource = peerView,
-            CanUserAddRows = false, CanUserDeleteRows = false };
-        grid.Columns.Add(new DataGridTextColumn { Header = "Name", Binding = new Binding(nameof(PeerItem.Name)), Width = new(1, DataGridLengthUnitType.Star) });
-        grid.Columns.Add(new DataGridTextColumn { Header = "Device fingerprint", Binding = new Binding(nameof(PeerItem.Fingerprint)), Width = 165 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "Approval", Binding = new Binding(nameof(PeerItem.Approval)), Width = 100 });
-        grid.Columns.Add(new DataGridTextColumn { Header = "Route", Binding = new Binding(nameof(PeerItem.Route)), Width = 110 });
-        return grid;
-    }
-
-    private DockPanel BuildOverwritePage()
-    {
-        var panel = new DockPanel();
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
-        DockPanel.SetDock(bar, Dock.Top); panel.Children.Add(bar);
-        bar.Children.Add(ActionButton("Restore my version", () => RestoreSelectedAsync(copy: false)));
-        bar.Children.Add(ActionButton("Restore as copy", () => RestoreSelectedAsync(copy: true)));
-        overwrites.ItemsSource = overwriteView; AutomationProperties.SetAutomationId(overwrites, "OverwrittenVersions");
-        panel.Children.Add(overwrites); return panel;
-    }
-
-    private DockPanel BuildArchivePage()
-    {
-        var panel = new DockPanel();
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
-        DockPanel.SetDock(bar, Dock.Top); panel.Children.Add(bar);
-        bar.Children.Add(ActionButton("Refresh", LoadArchiveAsync));
-        bar.Children.Add(ActionButton("Restore", () => RestoreArchiveSelectedAsync(copy: false)));
-        bar.Children.Add(ActionButton("Restore as copy", () => RestoreArchiveSelectedAsync(copy: true)));
-        var status = BoundText(nameof(model.ArchiveStatus), "ArchiveStatus", 12);
-        DockPanel.SetDock(status, Dock.Bottom); panel.Children.Add(status);
-        archives.IsReadOnly = true; archives.AutoGenerateColumns = false;
-        archives.CanUserAddRows = false; archives.CanUserDeleteRows = false;
-        archives.ItemsSource = model.ArchiveVersions;
-        archives.Columns.Add(new DataGridTextColumn { Header = "Path", Binding = new Binding(nameof(ArchiveItem.Path)),
-            Width = new(1, DataGridLengthUnitType.Star) });
-        archives.Columns.Add(new DataGridTextColumn { Header = "Archived", Binding = new Binding(nameof(ArchiveItem.ArchivedLocal)), Width = 145 });
-        archives.Columns.Add(new DataGridTextColumn { Header = "Size", Binding = new Binding(nameof(ArchiveItem.SizeDisplay)), Width = 90 });
-        AutomationProperties.SetAutomationId(archives, "ArchivedVersions");
-        panel.Children.Add(archives);
-        return panel;
-    }
-
-    private ScrollViewer BuildFolderSettingsPage()
-    {
-        var panel = new StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(requireApproval); panel.Children.Add(keepBoth);
-        panel.Children.Add(new TextBlock { Text = "Keep archived versions for (days)", Margin = new Thickness(0, 12, 0, 3) });
-        panel.Children.Add(archiveDays);
-        panel.Children.Add(new TextBlock { Text = "Predefined hosts (one host:port per line)", Margin = new Thickness(0, 12, 0, 3) });
-        panel.Children.Add(predefinedHosts);
-        panel.Children.Add(new TextBlock { Text = "Ignore rules (one pattern per line)", Margin = new Thickness(0, 12, 0, 3) });
-        panel.Children.Add(ignoreRules);
-        panel.Children.Add(ActionButton("Save folder settings", SaveFolderSettingsAsync));
-        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    }
-
-    private DockPanel BuildPendingPage()
-    {
-        var panel = new DockPanel { Margin = new Thickness(8) };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-        DockPanel.SetDock(actions, Dock.Top); panel.Children.Add(actions);
-        actions.Children.Add(ActionButton("Approve", () => DecidePendingAsync("approve")));
-        actions.Children.Add(ActionButton("Deny", () => DecidePendingAsync("deny")));
-        actions.Children.Add(ActionButton("Block", () => DecidePendingAsync("block")));
-        pending.ItemsSource = model.PendingDevices; AutomationProperties.SetAutomationId(pending, "PendingDevices");
-        panel.Children.Add(pending); return panel;
-    }
-
-    private StackPanel BuildPreferencesPage()
-    {
-        var panel = new StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new TextBlock { Text = "Device preferences", FontSize = 19, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(new TextBlock { Text = "Change the device name, network settings and transfer limits." });
-        panel.Children.Add(ActionButton("Edit preferences", EditPreferencesAsync));
-        return panel;
     }
 
     private async Task AddFolderAsync()
@@ -388,20 +257,6 @@ internal sealed class MainWindow : Window, IDisposable
                 "Folder settings", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private async Task EditPreferencesAsync()
-    {
-        using var client = ControlStatusClient.CreateForInstalledService();
-        var response = await client.GetSettingsAsync();
-        var current = JsonSerializer.Deserialize<DeviceSettings>(response.Json, DeviceJson)
-            ?? throw new InvalidDataException("Device settings are unavailable.");
-        var dialog = new PreferencesWindow(current) { Owner = this };
-        if (dialog.ShowDialog() != true) return;
-        var saved = await client.UpdateSettingsAsync(JsonSerializer.Serialize(dialog.Value, DeviceJson));
-        if (saved.RestartRequired)
-            MessageBox.Show(this, "Saved. Restart the PeerSync service to apply these preferences.",
-                "Preferences", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
     private string RequireSelectedFolder()
         => folders.SelectedItem is FolderItem item ? item.Id : throw new InvalidOperationException("Select a folder first.");
 
@@ -420,14 +275,16 @@ internal sealed class MainWindow : Window, IDisposable
 
     private Button ActionButton(string label, Func<Task> action)
     {
-        var button = new Button { Content = label, Margin = new Thickness(0, 0, 8, 7), Padding = new Thickness(10, 5, 10, 5) };
-        button.Click += async (_, _) =>
-        {
-            button.IsEnabled = false;
-            try { await ExecuteAsync(action); }
-            finally { button.IsEnabled = true; }
-        };
+        var button = new Button { Content = label };
+        button.Click += async (_, _) => await ExecuteButtonAsync(button, action);
         return button;
+    }
+
+    private async Task ExecuteButtonAsync(Button button, Func<Task> action)
+    {
+        button.IsEnabled = false;
+        try { await ExecuteAsync(action); }
+        finally { button.IsEnabled = true; }
     }
 
     private static TextBlock BoundText(string property, string automationId, int size)
@@ -444,7 +301,10 @@ internal sealed class MainWindow : Window, IDisposable
             if (folders.SelectedItem is not FolderItem current || current.Id != model.SelectedFolderId)
                 folders.SelectedItem = model.Folders.FirstOrDefault(item => item.Id == model.SelectedFolderId);
             peerView.Refresh(); overwriteView.Refresh();
+            UpdateFolderHeading();
         }
+        if (args.PropertyName is nameof(DashboardViewModel.Activity) or nameof(DashboardViewModel.Banner)
+            or nameof(DashboardViewModel.ServiceAvailable)) UpdateOverview();
         if (args.PropertyName is nameof(DashboardViewModel.NeedsAuthorization))
             authorize.Visibility = model.NeedsAuthorization ? Visibility.Visible : Visibility.Collapsed;
         if (args.PropertyName is nameof(DashboardViewModel.ServiceAvailable) or nameof(DashboardViewModel.Banner))

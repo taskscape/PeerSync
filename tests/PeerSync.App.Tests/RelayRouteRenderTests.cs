@@ -58,6 +58,7 @@ public sealed class RelayRouteRenderTests
 
         async Task AssertRouteAsync(MainWindow renderedWindow, string expected, string? imageName)
         {
+            renderedWindow.NavigateToFolder(folderId, refresh: false);
             renderedWindow.UpdateLayout();
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             var grid = Descendants<DataGrid>(renderedWindow).Single();

@@ -58,7 +58,12 @@ internal sealed partial class DashboardViewModel : ObservableObject
             throw new InvalidDataException("The control stream did not provide a full snapshot.");
         string previous = SelectedFolderId;
         bool foldersChanged = ReplaceIfChanged(Folders, update.Folders.Select(folder => new FolderItem(
-            folder.FolderId, folder.Path, folder.Access, folder.Paused ? "Paused" : "Active")).ToArray());
+            folder.FolderId, folder.Path, folder.Access, folder.Paused ? "Paused" : "Active")
+            {
+                ConnectedPeers = update.Peers.Count(row => row.FolderId == folder.FolderId
+                    && row.Peer.Transport is "Quic" or "Tcp" or "Relay"),
+                CompleteSnapshot = !update.Truncated,
+            }).ToArray());
         SelectedFolderId = Folders.Any(folder => folder.Id == previous) ? previous : Folders.FirstOrDefault()?.Id ?? "";
         if (foldersChanged && SelectedFolderId == previous) OnPropertyChanged(nameof(SelectedFolderId));
         ReplaceIfChanged(Peers, update.Peers.Select(row => new PeerItem(
@@ -78,7 +83,8 @@ internal sealed partial class DashboardViewModel : ObservableObject
         foreach (var item in update.PendingDevices)
         {
             pending.Add(new(item.FolderId, item.DeviceId, item.Name,
-                new DateTime(item.RequestedUtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("g", CultureInfo.CurrentCulture)));
+                new DateTime(item.RequestedUtcTicks, DateTimeKind.Utc).ToLocalTime().ToString("g", CultureInfo.CurrentCulture))
+                { FolderPath = update.Folders.FirstOrDefault(folder => folder.FolderId == item.FolderId)?.Path ?? item.FolderId });
             if (hasSnapshot && seenPending.Add(item.FolderId + ":" + item.DeviceId))
                 Notification?.Invoke("A device is waiting for approval in PeerSync.");
             else seenPending.Add(item.FolderId + ":" + item.DeviceId);
@@ -129,7 +135,7 @@ internal sealed partial class DashboardViewModel : ObservableObject
     {
         ArchiveVersions.Clear();
         ArchiveStatus = value.Length == 0 ? "Select a folder to list archived versions."
-            : "Open Archive or choose Refresh to load versions.";
+            : "Open Versions or choose Refresh to load versions.";
         UpdateFolderActivity();
     }
 
@@ -175,6 +181,15 @@ internal sealed partial class DashboardViewModel : ObservableObject
 
 internal sealed record FolderItem(string Id, string Path, string Access, string State)
 {
+    public int ConnectedPeers { get; init; }
+    public bool CompleteSnapshot { get; init; } = true;
+    public string Name => System.IO.Path.GetFileName(Path.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : Path;
+    public string PauseLabel => State == "Paused" ? "Resume" : "Pause";
+    public string StatusText => State == "Paused" ? "Paused" : ConnectedPeers > 0 ? "Connected"
+        : CompleteSnapshot ? "Waiting for a device" : "Status incomplete";
+    public string StatusDetail => State == "Paused" ? "Sync is paused" : !CompleteSnapshot ? "Limited service snapshot"
+        : $"{ConnectedPeers} {(ConnectedPeers == 1 ? "device" : "devices")} connected";
+    public string AccessDisplay => Access switch { "ReadWrite" => "Read & write", "ReadOnly" => "Read only", "EncryptedOnly" => "Encrypted only", _ => Access };
     public override string ToString() => $"{Path}  ·  {State}";
 }
 internal sealed record PeerItem(string FolderId, string DeviceId, string Name, string Approval)
@@ -193,11 +208,13 @@ internal sealed record OverwriteItem(string FolderId, long ArchiveId, string Pat
 internal sealed record ArchiveItem(string FolderId, long ArchiveId, string Path,
     string ArchivedLocal, long Size, bool Overwritten)
 {
+    public string Kind => Overwritten ? "Overwritten" : "Archived";
     public string SizeDisplay => Size < 1024 ? $"{Size} B"
         : Size < 1024 * 1024 ? $"{Size / 1024d:0.0} KiB"
         : $"{Size / 1024d / 1024d:0.0} MiB";
 }
 internal sealed record PendingDeviceItem(string FolderId, string DeviceId, string Name, string RequestedLocal)
 {
+    public string FolderPath { get; init; } = FolderId;
     public string Fingerprint => DeviceId.Length > 16 ? DeviceId[..16] : DeviceId;
 }

@@ -35,10 +35,7 @@ public sealed class ArchiveRenderTests
         window.Show();
         try
         {
-            var outer = ((DockPanel)window.Content).Children.OfType<TabControl>().Single();
-            var foldersPage = (Grid)((TabItem)outer.Items[0]).Content;
-            var inner = foldersPage.Children.OfType<TabControl>().Single();
-            inner.SelectedItem = inner.Items.OfType<TabItem>().Single(tab => Equals(tab.Header, "Archive"));
+            window.NavigateToFolder(folderId, tab: 1, refresh: false);
             if (PresentationSource.FromVisual(window) is HwndSource source)
                 source.CompositionTarget.RenderMode = RenderMode.SoftwareOnly;
             window.UpdateLayout();
@@ -55,7 +52,7 @@ public sealed class ArchiveRenderTests
             visible.ShouldContain(item => item.Contains("more versions exist", StringComparison.Ordinal));
             string[] actions = Descendants<Button>(window).Where(item => item.IsVisible)
                 .Select(item => item.Content?.ToString() ?? "").ToArray();
-            actions.ShouldContain("Restore"); actions.ShouldContain("Restore as copy");
+            actions.ShouldContain("Replace current file…"); actions.ShouldContain("Restore as copy…");
 
             var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth),
                 (int)Math.Ceiling(window.ActualHeight), 96, 96, PixelFormats.Pbgra32);
